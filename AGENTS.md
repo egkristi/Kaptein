@@ -40,9 +40,10 @@ crates/
   frontend-gui/    # egui (+ wasm)
   headless/        # agent mode, CI, fleet-hub
   serve/           # serve backend (axum + tonic)
-  plugins/         # WASM component model host + WIT interfaces
+  plugins/         # WASM component-model host + WIT interfaces + manifest loader
   viewdef/         # view definition schema + engine (YAML/CUE)
-extensions/        # example view definitions & plugins
+  ext-sdk/         # extension authoring SDK: manifest types, WIT worlds, host imports
+extensions/        # example extensions (lenses, plugins, integrations)
 docs/adr/          # architecture decision records
 ```
 
@@ -78,6 +79,12 @@ cargo clippy --workspace --all-targets -- -D warnings
   records operations, not values.
 - **Same keymap** in TUI and GUI: keyboard behavior is defined in the view-model's
   action graph, not duplicated per frontend.
+- **Extensions: data first, code second.** Prefer a view definition (lens) over a WASM
+  plugin; add a shell-out integration only for an existing external binary. Every
+  extension is declared by an `extension.yaml` manifest and lives under `extensions/`.
+- **Extension sandbox by default.** WASM plugins get no network and no filesystem unless
+  declared in the WIT world and the manifest allowlist; enforce fuel metering and a
+  memory cap. Version WIT worlds and bump `api_version` on breaking change.
 
 ## Testing expectations
 
@@ -109,6 +116,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 - Adding UI-only state that duplicates view-model state (keep one source of truth).
 - Introducing a frontend dependency on `kube-core` directly (go through the view-model).
 - Hardcoding per-CRD UIs — use view definitions (data) or WASM plugins (code) instead.
+- Writing a WASM plugin where a view definition (lens) suffices (data first, code second).
+- Granting network/FS or any capability to a plugin by default instead of via the
+  extension manifest allowlist.
 - Adding polling loops or blocking calls inside async tasks.
 - Logging secrets or persisting kubeconfig/exec-credential output.
 

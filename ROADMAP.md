@@ -23,6 +23,8 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
   `PartialObjectMetadata` for list-heavy views
 - `kube-viewmodel` skeleton: column model, sort/filter, action-graph types — *no*
   rendering
+- Extension foundation: define the extension manifest schema (`extension.yaml`) and the
+  versioned WIT worlds in `plugins/` + `ext-sdk/`, before any frontend or plugin code
 - Repo hygiene: `CONTRIBUTING.md`, `SECURITY.md`, and an ADR process (`docs/adr/`),
   starting with ADR-0001 (`egui` over `iced`)
 - CI: `cargo fmt`, `clippy`, `test`, signed release + SBOM pipeline stub
@@ -100,9 +102,14 @@ Milestones:
   - Gateway API + Ingress side by side; DNS/endpoint debugging
   - PV/PVC/StorageClass/Snapshot, CSI status, Velero/VolSync overview
   - CNPG lens: primary/replica topology, lag, switchover/failover, PITR window
-- **M2.6 WASM component model** host + WIT interfaces; plugin sandbox; first example
-  plugins; a versioning + deprecation policy for WIT interfaces so plugins don't break
-  across releases
+- **M2.6 Extension system**
+  - WASM component-model host + versioned WIT interfaces; plugin sandbox (fuel metering,
+    memory cap, default-deny network/FS)
+  - Extension manifest loader + discovery from Git-backed paths; `kaptein extension`
+    lifecycle subcommands (validate, list, enable, disable)
+  - `ext-sdk/` authoring crate (manifest types, WIT worlds, host imports) with a
+    versioning + deprecation policy so plugins don't break across releases
+  - First example extensions: a lens, a WASM plugin, and a shell-out integration
 - Definition of Done: GUI and TUI are feature-identical projections of one view-model —
   proven by contract tests asserting the TUI, GUI, and headless all consume the same
   render intent; a GitOps change can be authored and opened as a PR entirely from the UI.

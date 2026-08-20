@@ -108,13 +108,28 @@ survives.
 Key architectural decisions are recorded as **ADRs** in [`docs/adr/`](docs/adr/) — the
 `egui`-over-`iced` choice is [ADR-0001](docs/adr/0001-egui-over-iced.md).
 
-### Extensibility: WASM Component Model, not plugins
+### Extensibility: three tiers, one manifest
 
-Extension happens through the **WASM component model (WIT)** — not JS plugins
-(Headlamp) or Go plugins that require recompilation. Sandboxed, language-agnostic,
-cross-platform, and it behaves identically in every frontend.
+"Plugins", "modules", and "extensions" are one thing in Kaptein: an **extension** — any
+declared, versioned way to add capability — and it always comes in one of three tiers,
+chosen data-first:
 
-But most "extensions" should not need code at all. See **Workload lenses** below.
+1. **View definitions (lenses)** — declarative YAML/CUE binding a CRD to panels, columns,
+   status inference, actions, and health checks. No code, PR-reviewable, checked into
+   Git. This is the default and covers the "and more" long tail.
+2. **WASM component-model plugins (WIT)** — sandboxed, language-agnostic code for when
+   real logic is required. Behaves identically in every frontend; no JS plugins
+   (Headlamp) or Go plugins that require recompilation.
+3. **Shell-out integrations** — external binaries (Krew plugins, `kustomize`, `helm`,
+   Trivy/Grype, `istioctl`) invoked when present and degraded gracefully when absent.
+
+All three are declared by a shared **extension manifest** (`extension.yaml`) and
+discovered from configurable, Git-backed extension paths — no central marketplace.
+Lifecycle is managed with `kaptein extension {validate,list,enable,disable}`.
+
+**Sandbox by default.** WASM plugins run with fuel metering, a memory cap, **no network
+and no filesystem** unless a capability is declared in the WIT world *and* in the
+manifest allowlist. See [ADR-0004](docs/adr/0004-extension-model.md).
 
 ---
 
@@ -224,13 +239,15 @@ Two things nobody does properly, which Kaptein treats as first-class:
   backup to object store, PITR window, WAL archive status, pending restart on parameter
   changes. *This does not exist today.*
 
-### 10. Workload lenses as data, not code
+### 10. Workload lenses & extensions (data first, code second)
 Declarative **view definitions** (YAML or CUE) that bind a CRD to panels, columns, status
 inference, actions, and health checks. This is how Strimzi, KubeVirt, cert-manager,
 Keycloak, Tekton, Velero, Karpenter, and Knative are supported *without hardcoding
 anything* — and your teams can write their own for internal CRDs and check them into Git.
 
-WASM plugins only when real logic is needed. **This is the only way "and more" scales.**
+When a lens isn't enough, escalate to a **WASM plugin** (tier 2) or a **shell-out
+integration** (tier 3) — see *Extensibility* above. Data first, code second: **this is
+the only way "and more" scales.**
 
 ### 11. Fleet
 - **Fleet query**: one query, all clusters
@@ -298,9 +315,10 @@ crates/
   frontend-gui/    # egui (+ wasm)
   headless/        # agent mode, CI, fleet-hub
   serve/           # serve backend
-  plugins/         # WASM component model host + WIT interfaces
+  plugins/         # WASM component-model host + WIT interfaces + manifest loader
   viewdef/         # view definition schema + engine (YAML/CUE)
-extensions/        # example view definitions & plugins
+  ext-sdk/         # extension authoring SDK: manifest types, WIT worlds, host imports
+extensions/        # example extensions (lenses, plugins, integrations)
 docs/
   adr/             # architecture decision records (see ADR-0001)
   architecture.md  # architecture overview
