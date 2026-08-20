@@ -1,4 +1,4 @@
-# Roadmap
+# Kaptein Roadmap
 
 The phasing follows one rule: **ship something useful alone every phase.** No phase
 depends on a later phase's UI, because every phase lands on the shared view-model.
@@ -67,7 +67,7 @@ differentiator.
 
 Milestones:
 
-- **M2.1 iced/egui GUI** on the *same* view-model, same keymap, wasm backend for
+- **M2.1 egui GUI** on the *same* view-model, same keymap, wasm backend for
   browser UI
 - **M2.2 Workload lenses as data**: view-definition engine (YAML/CUE) binding CRDs to
   panels/columns/status/actions/health-checks; ship lenses for Strimzi, KubeVirt,
@@ -80,6 +80,7 @@ Milestones:
   - Drift detector (live vs. rendered Git state)
   - Helm releases: values diff + rollback
   - Deprecated-API scanning before upgrade
+  - Crossplane XRD/claims + composition trace; OLM subscriptions + upgrade channels
 - **M2.4 Topology & diff**
   - ownerRef/selector/volume/RBAC resource graph, keyboard-navigable
   - Diff between two namespaces / clusters / points in time
@@ -134,7 +135,9 @@ Milestones:
 
 ## Cross-cutting commitments (all phases)
 
-- **One static binary**, no telemetry, no account, airgap-safe.
+- **One static binary**, no telemetry, no account, airgap-safe. External tools that can't
+  be embedded (Krew plugins, `kustomize`, `helm`, Trivy/Grype, `istioctl`) are invoked
+  when present and degrade gracefully when absent.
 - **Read-only default** for unknown contexts.
 - **Informer-based**, never polling.
 - **Same keymap** in TUI and GUI.

@@ -1,16 +1,15 @@
-# k8stui — *the domain layer is the product*
+# Kaptein — *the domain layer is the product*
 
-**k8stui** (working codename *Kaptein*) is a unified Kubernetes workbench: a fast
-terminal UI, a native GUI, and a headless agent — all three thin projections of one
-renderer-agnostic domain layer. It is built for operators, SREs, platform engineers,
-and security teams who live inside `kubectl` all day and are tired of juggling a dozen
-single-purpose tools.
+**Kaptein** is a unified Kubernetes workbench: a fast terminal UI, a native GUI, and a
+headless agent — all three thin projections of one renderer-agnostic domain layer. It
+is built for operators, SREs, platform engineers, and security teams who live inside
+`kubectl` all day and are tired of juggling a dozen single-purpose tools.
 
 > The mistake most Kubernetes tools make is treating the UI as the product. You either
 > get a fast TUI without depth (k9s) or a heavy GUI you can't use over SSH (Lens,
 > Headlamp). The right architecture is that **the domain layer is the product**, and the
-> TUI/GUI are two thin projections of the same view-model. That one decision decides
-> whether a project survives year two.
+> TUI/GUI/headless are three thin projections of the same view-model. That one decision
+> decides whether a project survives year two.
 
 ---
 
@@ -32,8 +31,9 @@ into *its* UI:
 | **Krust** | Rust-native k8s | Young, focused on primitives |
 | **kubecost** | Cost allocation | Cost-only, commercial SaaS gravity |
 
-**k8stui** aims for *all of the above, and more* — with one architecture that keeps the
-TUI and GUI from ever drifting apart, because neither owns any logic.
+**Kaptein** aims for *all of the above, and more* — with one architecture that keeps the
+TUI, GUI, and headless agent from ever drifting apart, because none of them owns any
+logic.
 
 ---
 
@@ -72,29 +72,25 @@ These are the differentiators that hit where daily work actually hurts:
 │  kube-viewmodel  (renderer-agnostic)                                     │
 │  columns, sorting, filtering, status inference, "what am I allowed to    │
 │  do here", action graphs. **All logic lives here.**                       │
-└───────────────┬───────────────────────────────┬─────────────────────────┘
-                │                               │
-┌───────────────▼──────────────┐  ┌──────────────▼───────────────┐
-│  ratatui-frontend            │  │  iced/egui-frontend          │
-│  terminal, SSH, bastion      │  │  native Win/macOS/Linux      │
-│                              │  │  + wasm → browser UI         │
-└───────────────┬──────────────┘  └──────────────┬───────────────┘
-                │                               │
-                └───────────────┬───────────────┘
-                ┌───────────────▼───────────────┐
-                │  headless / serve             │
-                │  agent mode, CI, fleet-hub    │
-                └───────────────────────────────┘
+└───────┬──────────────────────┬──────────────────────┬────────────────────┘
+        │                      │                      │
+┌───────▼───────┐      ┌───────▼───────┐      ┌───────▼───────┐
+│ ratatui-      │      │ egui-         │      │ headless /    │
+│ frontend      │      │ frontend      │      │ serve         │
+│ terminal,     │      │ native +      │      │ agent, CI,    │
+│ SSH, bastion  │      │ wasm browser  │      │ fleet-hub     │
+└───────────────┘      └───────────────┘      └───────────────┘
 ```
 
-**Consequence:** the TUI and GUI *cannot* drift apart, because neither owns logic.
-That is the single decision that determines whether this project survives.
+**Consequence:** the TUI, GUI, and headless agent *cannot* drift apart, because none of
+them owns any logic. That is the single decision that determines whether this project
+survives.
 
 ### Extensibility: WASM Component Model, not plugins
 
 Extension happens through the **WASM component model (WIT)** — not JS plugins
 (Headlamp) or Go plugins that require recompilation. Sandboxed, language-agnostic,
-cross-platform, and it behaves identically in both frontends.
+cross-platform, and it behaves identically in every frontend.
 
 But most "extensions" should not need code at all. See **Workload lenses** below.
 
@@ -108,7 +104,7 @@ Full auth surface:
 - OIDC device flow, client certificates, service account tokens, SPIFFE
 - `--as` impersonation
 
-Two things nobody does properly, which k8stui treats as first-class:
+Two things nobody does properly, which Kaptein treats as first-class:
 
 - **RBAC preflight** — on context switch, run `SelfSubjectRulesReview` and *grey out*
   actions you're not allowed to perform **before** you try them — not a 403 afterwards.
@@ -234,7 +230,10 @@ WASM plugins only when real logic is needed. **This is the only way "and more" s
 
 ## Non-functional requirements
 
-- **One static binary.** No runtime dependencies.
+- **One static binary.** No runtime dependencies. External tools that can't be embedded
+  (Krew plugins, `kustomize`, `helm`, Trivy/Grype, `istioctl`, cloud billing CLIs) are
+  invoked when present and degrade gracefully when absent — the core binary stays
+  self-contained.
 - **No telemetry, no account, works in airgaps.**
 - **Read-only default** for unknown contexts.
 - **Signed releases with SBOM** — practice what we scan for.
@@ -252,7 +251,7 @@ WASM plugins only when real logic is needed. **This is the only way "and more" s
 | Kubernetes client | `kube-rs` |
 | Async runtime | `tokio` |
 | TUI | `ratatui` |
-| GUI | `iced` / `egui` (+ wasm target for browser UI) |
+| GUI | `egui` (+ wasm target for browser UI) |
 | Headless / serve / agent | `axum` + `tonic` (gRPC) |
 | Local persistence | `redb` or `sqlite` |
 | Extensibility | WASM component model (WIT) |
@@ -266,7 +265,7 @@ kube-core/         # kube-rs client, watchers/reflectors, CRD discovery, stores
 kube-viewmodel/    # renderer-agnostic logic: columns, sort/filter, status, action graphs
 crates/
   frontend-tui/    # ratatui
-  frontend-gui/    # iced/egui (+ wasm)
+  frontend-gui/    # egui (+ wasm)
   headless/        # agent mode, CI, fleet-hub
   serve/           # serve backend
   plugins/         # WASM component model host + WIT interfaces
@@ -287,7 +286,7 @@ repository is functional yet — this document and the roadmap define the target
 ```bash
 # not yet available
 cargo build --release
-./target/release/k8stui
+./target/release/kaptein
 ```
 
 ---
