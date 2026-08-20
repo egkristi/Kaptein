@@ -58,6 +58,25 @@ These are the differentiators that hit where daily work actually hurts:
 
 ---
 
+## Non-goals
+
+Kaptein deliberately does **not** reimplement tools that already do one job well — it
+renders, orchestrates, and cross-references them:
+
+- **No secret storage.** Secrets stay in your existing systems (Vault, ESO, SOPS);
+  Kaptein shows the *source*, never the value, and masks by default.
+- **No reimplemented scanners.** Trivy/Grype, Kyverno/Gatekeeper, `istioctl`,
+  `kustomize`, `helm`, and Krew plugins are shelled out to, never vendored.
+- **No hosted service or telemetry.** No account, no cloud dependency, no analytics.
+- **No polling.** State comes from informers/watch streams, never periodic scrapes of the
+  API server.
+- **No hardcoded per-CRD UIs.** Operator-specific lenses are data (view definitions), not
+  code — WASM only when real logic is required.
+
+These exclusions are what keep the surface tractable and the single binary honest.
+
+---
+
 ## Architecture
 
 ```
@@ -85,6 +104,9 @@ These are the differentiators that hit where daily work actually hurts:
 **Consequence:** the TUI, GUI, and headless agent *cannot* drift apart, because none of
 them owns any logic. That is the single decision that determines whether this project
 survives.
+
+Key architectural decisions are recorded as **ADRs** in [`docs/adr/`](docs/adr/) — the
+`egui`-over-`iced` choice is [ADR-0001](docs/adr/0001-egui-over-iced.md).
 
 ### Extensibility: WASM Component Model, not plugins
 
@@ -150,7 +172,10 @@ Two things nobody does properly, which Kaptein treats as first-class:
 - **Blast-radius preview**: before a change, which pods, PDBs, rollouts, and mesh routes
   are hit
 - LLM assistance: opt-in, local endpoint possible, secrets redacted. **Never on by
-  default.**
+  default** — disabled per context until explicitly enabled. Redaction is structural
+  (driven by the CRD schema and well-known secret keys like `env`, `data`, and
+  annotations), not regex-only, and the input to any model is always shown for review
+  before it leaves the machine.
 
 ### 5. Security & compliance (kubescape class)
 - Posture scan against CIS, NSA/CISA, and MITRE ATT&CK — plus NSM's *Grunnprinsipper*
@@ -215,7 +240,8 @@ WASM plugins only when real logic is needed. **This is the only way "and more" s
   connections
 
 ### 12. Time machine
-- Watch stream persisted locally (redb/SQLite, optionally centralized)
+- Watch stream persisted locally (redb/SQLite, optionally centralized) with compaction
+  and a configurable retention TTL so local disk stays bounded
 - Scrub backwards, see a resource as it was, diff two timestamps
 - *"What changed between 14:20 and 14:35"* — events and Git deploy markers on the same
   timeline. **During an incident this alone is worth the whole tool.**
@@ -224,7 +250,8 @@ WASM plugins only when real logic is needed. **This is the only way "and more" s
 - Session recording (asciinema-like for TUI, event-log for GUI) exported to an incident
   timeline in Markdown
 - Shared workspace configs in Git
-- Full local audit log of every write operation
+- Full local audit log of every write operation, in a single stable format that is also
+  the source for incident-timeline exports (one format, two consumers)
 
 ---
 
@@ -238,8 +265,10 @@ WASM plugins only when real logic is needed. **This is the only way "and more" s
 - **Read-only default** for unknown contexts.
 - **Signed releases with SBOM** — practice what we scan for.
 - **Informer-based, not polling.**
-- **Same keymap in both frontends.**
+- **Same keymap** in the TUI and GUI.
 - **i18n** and a screen-reader-friendly GUI.
+- **Kubernetes version support**: target the latest three minors; older API versions
+  handled via the discovery API's served versions.
 
 ---
 
@@ -271,7 +300,12 @@ crates/
   plugins/         # WASM component model host + WIT interfaces
   viewdef/         # view definition schema + engine (YAML/CUE)
 extensions/        # example view definitions & plugins
-docs/              # architecture, contributing, security model
+docs/
+  adr/             # architecture decision records (see ADR-0001)
+  architecture.md  # architecture overview
+  security.md      # threat model
+CONTRIBUTING.md    # contributing guide
+SECURITY.md        # security policy & disclosure
 ```
 
 ---

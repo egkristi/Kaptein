@@ -23,6 +23,8 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
   `PartialObjectMetadata` for list-heavy views
 - `kube-viewmodel` skeleton: column model, sort/filter, action-graph types — *no*
   rendering
+- Repo hygiene: `CONTRIBUTING.md`, `SECURITY.md`, and an ADR process (`docs/adr/`),
+  starting with ADR-0001 (`egui` over `iced`)
 - CI: `cargo fmt`, `clippy`, `test`, signed release + SBOM pipeline stub
 - Definition of Done: `cargo build --workspace` is green; layer deps are one-directional
   (`frontend-*` → `viewmodel` → `core`)
@@ -54,9 +56,9 @@ Milestones:
   - *"Why isn't this pod ready?"* decision tree over events, scheduler reasons, node
     capacity, taints, imagePull, probes, PVC binding
   - Sanity scan v1 (missing limits/requests, no probes, `:latest`, orphaned resources)
-- **M1.5 Observability (v1)**
+  - Events deduplicated onto a timeline (feeds the decision tree)
+- **M1.5 Observability (v1) — *stretch, not required for k9s parity***
   - Metrics-server reading; Prometheus/Thanos/VictoriaMetrics adapter + PromQL console
-  - Events deduplicated onto a timeline
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight, and
   guardrails. Read-only default for unknown contexts.
 
@@ -72,6 +74,8 @@ Milestones:
 - **M2.2 Workload lenses as data**: view-definition engine (YAML/CUE) binding CRDs to
   panels/columns/status/actions/health-checks; ship lenses for Strimzi, KubeVirt,
   cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative
+  - Ship a versioned JSON Schema (and/or CUE schema) for view definitions plus a
+    `kaptein viewdef validate` command so lenses are reviewable in PRs
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile
@@ -89,9 +93,11 @@ Milestones:
   - PV/PVC/StorageClass/Snapshot, CSI status, Velero/VolSync overview
   - CNPG lens: primary/replica topology, lag, switchover/failover, PITR window
 - **M2.6 WASM component model** host + WIT interfaces; plugin sandbox; first example
-  plugins
-- Definition of Done: GUI and TUI are feature-identical projections of one view-model;
-  a GitOps change can be authored and opened as a PR entirely from the UI.
+  plugins; a versioning + deprecation policy for WIT interfaces so plugins don't break
+  across releases
+- Definition of Done: GUI and TUI are feature-identical projections of one view-model —
+  proven by contract tests asserting the TUI, GUI, and headless all consume the same
+  render intent; a GitOps change can be authored and opened as a PR entirely from the UI.
 
 ## Phase 3 — Time machine, fleet, cost, security
 
@@ -100,7 +106,8 @@ Milestones:
 Milestones:
 
 - **M3.1 Time machine**
-  - Persist watch stream locally (redb/SQLite, optionally centralized)
+  - Persist watch stream locally (redb/SQLite, optionally centralized) with compaction
+    and a configurable retention TTL
   - Scrub backwards, diff two timestamps, "what changed between 14:20 and 14:35"
   - Events + Git deploy markers on one timeline
 - **M3.2 Fleet**
@@ -123,10 +130,10 @@ Milestones:
   - Continuous sanity scan with score/trend; OOM forensics; blast-radius preview
   - Istio mTLS/ambient/`istioctl analyze`/config-dump; Cilium/Hubble flow-map
   - Loki/OpenSearch historical logs; Tempo/Jaeger traces; Alertmanager + silences
-  - Crossplane XRD/claims + composition trace; OLM subscriptions
 - **M3.6 Incident & collaboration**
   - Session recording (asciinema-like TUI / event-log GUI) → Markdown incident timeline
-  - Shared workspace configs in Git; full local audit log
+  - Shared workspace configs in Git; full local audit log (stable format, reused by the
+    incident-timeline export)
 - Definition of Done: the complete capability set from `README.md`, with the four
   differentiators (GitOps write path, drift detection, fleet query, time machine) fully
   functional and cross-frontend.
@@ -143,6 +150,10 @@ Milestones:
 - **Same keymap** in TUI and GUI.
 - i18n + screen-reader-friendly GUI.
 - Signed releases with SBOM.
+- **Performance budget**: informer-driven views stay responsive against a synthetic
+  cluster with thousands of CRDs; k9s is the baseline to beat (benchmarked in CI).
+- **Kubernetes version support**: latest three minors; older API versions handled via
+  discovery.
 
 ## Immediate next steps
 
