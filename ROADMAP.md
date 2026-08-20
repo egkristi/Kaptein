@@ -62,6 +62,14 @@ Milestones:
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight, and
   guardrails. Read-only default for unknown contexts.
 
+  **k9s-parity checklist (all must be true):**
+  - list pods / deployments / services / nodes; column sort and filter
+  - context switching and namespace switching
+  - logs with follow + regex filter; describe
+  - exec into a pod; scale a deployment; delete with cascade selection
+  - port-forward; YAML view of any resource
+  - RBAC-preflight-greyed actions and prod-context "break glass" gate
+
 ## Phase 2 — GUI + view definitions + GitOps + dry-run diff
 
 **Goal:** the same view-model drives a native GUI, and the GitOps write path becomes the
@@ -154,10 +162,15 @@ Milestones:
   cluster with thousands of CRDs; k9s is the baseline to beat (benchmarked in CI).
 - **Kubernetes version support**: latest three minors; older API versions handled via
   discovery.
+- **Config & errors**: a single config file (XDG path, TOML, schema-validated) with
+  precedence config → CLI → env; a unified error enum in `kube-viewmodel` that maps raw
+  `kube::Error` and subprocess failures to redaction-aware, user-facing messages.
 
 ## Immediate next steps
 
-1. Scaffold the Cargo workspace and the three core crates (Phase 0).
-2. Stand up the `kube-core` watcher/reflector store and CRD discovery.
-3. Define the `kube-viewmodel` column/action-graph types.
-4. Build the first ratatui table view on top of it.
+1. Scaffold the Cargo workspace and all six members (Phase 0): `kube-core`,
+   `kube-viewmodel`, `frontend-tui`, `frontend-gui`, `headless`, `serve`.
+2. Define the `kube-viewmodel` core types first: the render-intent (columns, rows,
+   actions, status) and the `AuditEvent` type, before any frontend code.
+3. Stand up the `kube-core` watcher/reflector store and CRD discovery.
+4. Build the first ratatui table view on top of the render-intent.

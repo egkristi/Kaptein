@@ -257,10 +257,11 @@ WASM plugins only when real logic is needed. **This is the only way "and more" s
 
 ## Non-functional requirements
 
-- **One static binary.** No runtime dependencies. External tools that can't be embedded
+- **One static binary** for the native and headless builds. No runtime dependencies.
+  External tools that can't be embedded
   (Krew plugins, `kustomize`, `helm`, Trivy/Grype, `istioctl`, cloud billing CLIs) are
   invoked when present and degrade gracefully when absent — the core binary stays
-  self-contained.
+  self-contained. The browser UI is a **wasm bundle** served by `serve`, not a binary.
 - **No telemetry, no account, works in airgaps.**
 - **Read-only default** for unknown contexts.
 - **Signed releases with SBOM** — practice what we scan for.
@@ -303,9 +304,9 @@ extensions/        # example view definitions & plugins
 docs/
   adr/             # architecture decision records (see ADR-0001)
   architecture.md  # architecture overview
-  security.md      # threat model
 CONTRIBUTING.md    # contributing guide
-SECURITY.md        # security policy & disclosure
+SECURITY.md        # security policy & disclosure (the canonical threat model)
+LICENSE            # MIT OR Apache-2.0
 ```
 
 ---
@@ -327,4 +328,4 @@ cargo build --release
 
 ## License
 
-TBD.
+Licensed under either of **MIT** or **Apache-2.0**, at your option. See [`LICENSE`](./LICENSE).
