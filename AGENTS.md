@@ -104,6 +104,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 - Keep `README.md`, `ROADMAP.md`, `CONTRIBUTING.md`, and `SECURITY.md` in sync with
   behavior changes.
 - When referencing roadmap work, cite the milestone (`M#.#`).
+- **License**: Kaptein is BUSL-1.1 (source-available), converting to Apache-2.0 on the
+  Change Date. Do not label it "open source"; do not reintroduce a MIT/Apache-only
+  `LICENSE`.
 
 ## Naming & consistency
 

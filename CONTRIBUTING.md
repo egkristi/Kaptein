@@ -49,6 +49,13 @@ cargo clippy --workspace --all-targets -- -D warnings
   the "One static binary" non-functional requirement).
 - Signed releases ship an SBOM — keep dependency changes reviewable and minimal.
 
+## License & contributions
+
+Kaptein is **source-available** under the Business Source License 1.1 (`LICENSE`),
+which converts to Apache-2.0 on the Change Date. By submitting a contribution you
+license it under these terms. To permit commercial (paid) licensing, contributions
+must also be covered by a contributor license agreement (CLA) or DCO sign-off.
+
 ## Security-sensitive changes
 
 See `SECURITY.md`. Features that touch secrets, audit logging, RBAC preflight, or the

@@ -324,7 +324,7 @@ docs/
   architecture.md  # architecture overview
 CONTRIBUTING.md    # contributing guide
 SECURITY.md        # security policy & disclosure (the canonical threat model)
-LICENSE            # MIT OR Apache-2.0
+LICENSE            # BUSL-1.1 (source-available; converts to Apache-2.0 on Change Date)
 ```
 
 ---
@@ -346,4 +346,16 @@ cargo build --release
 
 ## License
 
-Licensed under either of **MIT** or **Apache-2.0**, at your option. See [`LICENSE`](./LICENSE).
+Kaptein is **source-available** under the [Business Source License 1.1](./LICENSE) —
+**not** an OSI open-source license.
+
+- **Free for individuals, home use, and small/medium businesses**: production use is
+  granted while you and your affiliates have less than **USD 5,000,000** in annual
+  revenue **and** fewer than **25 employees**.
+- **Larger commercial entities** require a commercial license (or must wait for the
+  Change Date).
+- On the **Change Date** (2030-08-20), each released version automatically converts to
+  **Apache-2.0**.
+
+The exact thresholds and terms are in the [Additional Use Grant](./LICENSE) and are
+easy to adjust as the project evolves.
