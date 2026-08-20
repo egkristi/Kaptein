@@ -38,8 +38,8 @@ kube-viewmodel/    # renderer-agnostic logic (the product)
 crates/
   frontend-tui/    # ratatui
   frontend-gui/    # egui (+ wasm)
-  headless/        # agent mode, CI, fleet-hub
-  serve/           # serve backend (axum + tonic)
+  headless/        # agent mode: drives the view-model directly (no listener)
+  serve/           # network server: axum HTTP/gRPC-Web + tonic gRPC; browser + hub
   plugins/         # WASM component-model host + WIT interfaces + manifest loader
   viewdef/         # view definition schema + engine (YAML/CUE)
   ext-sdk/         # extension authoring SDK: manifest types, WIT worlds, host imports
@@ -104,9 +104,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 - Keep `README.md`, `ROADMAP.md`, `CONTRIBUTING.md`, and `SECURITY.md` in sync with
   behavior changes.
 - When referencing roadmap work, cite the milestone (`M#.#`).
-- **License**: Kaptein is BUSL-1.1 (source-available), converting to Apache-2.0 on the
-  Change Date. Do not label it "open source"; do not reintroduce a MIT/Apache-only
-  `LICENSE`.
+- **License**: Kaptein is BUSL-1.1 (source-available), converting to MIT on the
+  Change Date. Do not label it "open source"; do not replace it with a permissive-only
+  (MIT/Apache) `LICENSE`.
 
 ## Naming & consistency
 

@@ -52,9 +52,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 ## License & contributions
 
 Kaptein is **source-available** under the Business Source License 1.1 (`LICENSE`),
-which converts to Apache-2.0 on the Change Date. By submitting a contribution you
-license it under these terms. To permit commercial (paid) licensing, contributions
-must also be covered by a contributor license agreement (CLA) or DCO sign-off.
+which converts to MIT on the Change Date. By submitting a contribution you license it
+under these terms.
+
+To permit commercial (paid) licensing, every contribution must include a
+**Developer Certificate of Origin (DCO)** sign-off: add a `Signed-off-by:` line to your
+commit message (use `git commit -s`). See [`DCO`](./DCO) for the full text.
 
 ## Security-sensitive changes
 

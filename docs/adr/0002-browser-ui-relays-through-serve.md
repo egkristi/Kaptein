@@ -15,8 +15,9 @@ be reimplemented or proxied. The docs previously left this unspecified.
 ## Decision
 
 The browser UI is a **thin client to `serve`**. The WASM bundle talks to the `serve`
-backend (axum + tonic) over a defined HTTP/gRPC API, and `serve` owns the actual
-Kubernetes connection via `kube-core`.
+backend over **gRPC-Web (and plain HTTP/REST) served by axum** — browsers cannot speak
+raw gRPC — while `serve` owns the actual Kubernetes connection via `kube-core`. `tonic`
+gRPC is reserved for the native headless↔serve path.
 
 ## Rationale
 
@@ -38,5 +39,6 @@ Kubernetes connection via `kube-core`.
 
 - **Direct browser→API-server via wasm transport** — rejected for complexity and
   credential-handling risk.
-- **WebSocket-only relay** — considered; gRPC (tonic) + HTTP chosen for a richer, typed
-  surface that already matches the `serve` crate.
+- **WebSocket-only relay** — considered; a typed HTTP/gRPC-Web surface on `axum` (with
+  `tonic` gRPC for native peers) was chosen instead for a richer, typed contract that
+  already matches the `serve` crate.

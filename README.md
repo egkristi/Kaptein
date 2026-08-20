@@ -299,7 +299,7 @@ the only way "and more" scales.**
 | Async runtime | `tokio` |
 | TUI | `ratatui` |
 | GUI | `egui` (+ wasm target for browser UI) |
-| Headless / serve / agent | `axum` + `tonic` (gRPC) |
+| Headless / serve / agent | `axum` (HTTP/REST + gRPC-Web) + `tonic` (gRPC) |
 | Local persistence | `redb` or `sqlite` |
 | Extensibility | WASM component model (WIT) |
 | View definitions | YAML / CUE |
@@ -313,8 +313,8 @@ kube-viewmodel/    # renderer-agnostic logic: columns, sort/filter, status, acti
 crates/
   frontend-tui/    # ratatui
   frontend-gui/    # egui (+ wasm)
-  headless/        # agent mode, CI, fleet-hub
-  serve/           # serve backend
+  headless/        # agent mode: drives the view-model directly (no listener)
+  serve/           # network server: axum HTTP/gRPC-Web + tonic gRPC; browser + hub
   plugins/         # WASM component-model host + WIT interfaces + manifest loader
   viewdef/         # view definition schema + engine (YAML/CUE)
   ext-sdk/         # extension authoring SDK: manifest types, WIT worlds, host imports
@@ -324,7 +324,7 @@ docs/
   architecture.md  # architecture overview
 CONTRIBUTING.md    # contributing guide
 SECURITY.md        # security policy & disclosure (the canonical threat model)
-LICENSE            # BUSL-1.1 (source-available; converts to Apache-2.0 on Change Date)
+LICENSE            # BUSL-1.1 (source-available; converts to MIT on Change Date)
 ```
 
 ---
@@ -355,7 +355,7 @@ Kaptein is **source-available** under the [Business Source License 1.1](./LICENS
 - **Larger commercial entities** require a commercial license (or must wait for the
   Change Date).
 - On the **Change Date** (2030-08-20), each released version automatically converts to
-  **Apache-2.0**.
+  **MIT**.
 
 The exact thresholds and terms are in the [Additional Use Grant](./LICENSE) and are
 easy to adjust as the project evolves.

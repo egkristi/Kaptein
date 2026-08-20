@@ -2,9 +2,8 @@
 /target/
 **/*.rs.bk
 
-# Cargo.lock is committed: Kaptein is a binary application, so lockfiles give
-# reproducible, signed, auditable builds.
-
+# Cargo.lock is committed (do NOT ignore it): Kaptein is a binary application,
+# so the lockfile gives reproducible, signed, auditable builds.
 
 # IDE / editor
 .idea/

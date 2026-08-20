@@ -1,7 +1,9 @@
 [licenses]
 # Dependencies must use one of these licenses. Kaptein itself is BUSL-1.1
 # (Business Source License) — this allow list governs third-party crates only.
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-DFS-2016", "MPL-2.0"]
+# MPL-2.0 (file-level copyleft) is intentionally excluded to keep commercial
+# relicensing clean.
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-DFS-2016"]
 confidence-threshold = 0.8
 
 [advisories]

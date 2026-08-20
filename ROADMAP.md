@@ -23,6 +23,8 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
   `PartialObjectMetadata` for list-heavy views
 - `kube-viewmodel` skeleton: column model, sort/filter, action-graph types — *no*
   rendering
+- Config & error foundation: define the config-file schema (XDG path + TOML) and the
+  unified `Error` enum in `kube-viewmodel`, so every later milestone builds on them
 - Extension foundation: define the extension manifest schema (`extension.yaml`) and the
   versioned WIT worlds in `plugins/` + `ext-sdk/`, before any frontend or plugin code
 - Repo hygiene: `CONTRIBUTING.md`, `SECURITY.md`, and an ADR process (`docs/adr/`),
