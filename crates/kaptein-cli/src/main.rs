@@ -23,6 +23,21 @@ enum Command {
         #[arg(short, long)]
         namespace: Option<String>,
     },
+    /// RBAC preflight: check whether the current user may perform a verb.
+    Can {
+        /// verb, e.g. "get", "create", "delete"
+        #[arg(short, long)]
+        verb: String,
+        /// plural resource name, e.g. "pods", "deployments"
+        #[arg(short, long)]
+        resource: String,
+        /// API group (empty for core)
+        #[arg(short, long, default_value = "")]
+        group: String,
+        /// namespace to evaluate
+        #[arg(short, long, default_value = "default")]
+        namespace: String,
+    },
 }
 
 #[tokio::main]
@@ -48,6 +63,22 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     item.namespace, item.kind, item.name, created
                 );
             }
+            Ok(())
+        }
+        Command::Can {
+            verb,
+            resource,
+            group,
+            namespace,
+        } => {
+            let perm =
+                kaptein_core::auth::can(&client, &verb, &resource, &group, &namespace).await?;
+            let group_prefix = if group.is_empty() { "" } else { &group };
+            let sep = if group.is_empty() { "" } else { "/" };
+            println!(
+                "{group_prefix}{sep}{verb} {resource} in {namespace}: {}",
+                if perm.allowed { "ALLOWED" } else { "DENIED" }
+            );
             Ok(())
         }
     }
