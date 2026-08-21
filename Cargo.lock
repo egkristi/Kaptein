@@ -1014,9 +1014,11 @@ name = "kaptein"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "futures-util",
  "kaptein-core",
  "kaptein-viewmodel",
  "kube",
+ "regex",
  "rmcp",
  "serde_json",
  "tokio",
@@ -1026,6 +1028,7 @@ dependencies = [
 name = "kaptein-core"
 version = "0.3.0"
 dependencies = [
+ "futures-util",
  "k8s-openapi",
  "kube",
  "regex",

@@ -81,6 +81,9 @@ enum Command {
         /// number of lines to tail
         #[arg(long, default_value_t = 100)]
         tail: i64,
+        /// follow the log stream until interrupted (only with --name)
+        #[arg(short = 'f', long)]
+        follow: bool,
     },
     /// Run the governed MCP server over stdio (read-only).
     Mcp,
@@ -280,18 +283,53 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             selector,
             regex,
             tail,
+            follow,
         } => {
             match name {
                 Some(pod_name) => {
-                    let logs = kaptein_core::describe::pod_logs(
-                        &client,
-                        &namespace,
-                        &pod_name,
-                        Some(tail),
-                    )
-                    .await?;
-                    for (container, line) in logs {
-                        println!("[{container}] {line}");
+                    if follow {
+                        // Stream and follow until Ctrl-C.
+                        use futures_util::StreamExt;
+                        let stream = kaptein_core::describe::follow_logs(
+                            &client,
+                            &namespace,
+                            &pod_name,
+                            None,
+                            Some(tail),
+                        );
+                        let mut stream = Box::pin(stream);
+                        let re = regex
+                            .as_deref()
+                            .map(regex::Regex::new)
+                            .transpose()
+                            .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+                        while let Some(item) = stream.next().await {
+                            match item {
+                                Ok((_container, line)) => {
+                                    if let Some(re) = &re
+                                        && !re.is_match(&line)
+                                    {
+                                        continue;
+                                    }
+                                    println!("{line}");
+                                }
+                                Err(e) => {
+                                    eprintln!("error: {e}");
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        let logs = kaptein_core::describe::pod_logs(
+                            &client,
+                            &namespace,
+                            &pod_name,
+                            Some(tail),
+                        )
+                        .await?;
+                        for (container, line) in logs {
+                            println!("[{container}] {line}");
+                        }
                     }
                 }
                 None => {

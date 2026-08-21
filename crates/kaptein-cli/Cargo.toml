@@ -18,6 +18,8 @@ kaptein-core = { version = "0.3.0", path = "../kaptein-core" }
 kaptein-viewmodel = { version = "0.3.0", path = "../kaptein-viewmodel" }
 kube = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+futures-util = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 rmcp = { version = "3", features = ["server", "transport-io"] }
 serde_json = "1"
+regex = "1"

@@ -124,3 +124,46 @@ pub async fn multi_pod_logs(
     }
     Ok(out)
 }
+
+/// Stream log lines from a pod, following indefinitely until the stream closes.
+///
+/// This is the "logs with follow" k9s-parity primitive (M1.2): a bounded `tail` is
+/// applied, then new lines are emitted as they arrive. The caller decides how long to
+/// drive the returned stream (e.g. until Ctrl-C).
+pub fn follow_logs<'a>(
+    client: &'a Client,
+    namespace: &'a str,
+    name: &'a str,
+    container: Option<&'a str>,
+    tail_lines: Option<i64>,
+) -> impl futures_util::Stream<Item = Result<(String, String), Error>> + 'a {
+    use futures_util::{AsyncBufReadExt, StreamExt, TryStreamExt};
+
+    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let lp = LogParams {
+        container: container.map(|c| c.to_string()),
+        follow: true,
+        tail_lines,
+        ..Default::default()
+    };
+    let cname = container.unwrap_or("").to_string();
+
+    // Open the follow stream once, then flatten the per-line stream into a single
+    // `Result<(container, line), Error>` stream.
+    futures_util::stream::once(async move { pods.log_stream(name, &lp).await.map_err(Error::Api) })
+        .map_ok(move |stream| {
+            let lines = stream.lines();
+            let cname = cname.clone();
+            futures_util::stream::unfold(lines, move |mut lines| {
+                let value = cname.clone();
+                async move {
+                    match lines.next().await {
+                        Some(Ok(line)) => Some((Ok((value, line)), lines)),
+                        Some(Err(e)) => Some((Err(Error::Internal(e.to_string())), lines)),
+                        None => None,
+                    }
+                }
+            })
+        })
+        .try_flatten()
+}
