@@ -5,7 +5,7 @@
 //! return the server's dry-run result. No write ever reaches etcd — the API server runs
 //! admission and validation, then returns the object it *would* have persisted.
 
-use kube::api::{Api, DynamicObject, PostParams};
+use kube::api::{Api, DynamicObject, Patch, PatchParams, PostParams};
 use kube::{Client, ResourceExt};
 
 use crate::Error;
@@ -70,6 +70,77 @@ pub async fn dry_run_apply(client: &Client, manifest: &str) -> Result<DryRun, Er
         }
         Err(e) => Err(Error::Api(e)),
     }
+}
+
+/// Server-side-apply (patch) a YAML manifest as a **dry-run** — the edit path.
+///
+/// Unlike `dry_run_apply` (a create), this uses a `Patch::Apply` against an existing
+/// object, which is the correct semantic for "edit then validate" (M1.3): the object
+/// already exists, so a create would fail with `AlreadyExists`.
+///
+/// Server-managed fields (`metadata.managedFields`, `metadata.resourceVersion`,
+/// `metadata.creationTimestamp`, `metadata.uid`, `status`) are stripped before the
+/// patch — they are read-only and would otherwise be rejected by the API server.
+pub async fn dry_run_apply_patch(client: &Client, manifest: &str) -> Result<DryRun, Error> {
+    let mut obj: DynamicObject =
+        serde_yaml::from_str(manifest).map_err(|e| Error::Internal(e.to_string()))?;
+
+    strip_server_managed(&mut obj);
+
+    let namespace = obj.namespace();
+    let name = obj.name_any();
+    let api_version = obj
+        .types
+        .as_ref()
+        .map(|t| t.api_version.clone())
+        .unwrap_or_default();
+    let kind = obj
+        .types
+        .as_ref()
+        .map(|t| t.kind.clone())
+        .unwrap_or_default();
+    let gvk = parse_gvk(&api_version, &kind);
+    let ar = kube::core::ApiResource::from_gvk(&gvk);
+
+    let api: Api<DynamicObject> = match namespace.as_deref() {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let pp = PatchParams {
+        dry_run: true,
+        field_manager: Some("kaptein".into()),
+        ..PatchParams::default()
+    };
+    let patch = Patch::Apply(&obj);
+
+    match api.patch(&name, &pp, &patch).await {
+        Ok(patched) => Ok(DryRun {
+            response_yaml: serde_yaml::to_string(&patched)
+                .map_err(|e| Error::Internal(e.to_string()))?,
+            accepted: true,
+        }),
+        Err(kube::Error::Api(ae)) if ae.code == 422 || ae.code == 400 => Ok(DryRun {
+            response_yaml: format!("rejected: {}", ae.message),
+            accepted: false,
+        }),
+        Err(e) => Err(Error::Api(e)),
+    }
+}
+
+/// Strip the read-only, server-managed metadata fields and status from a dynamic object
+/// before submitting it as an apply patch. `managedFields` in particular is rejected by
+/// the API server ("metadata.managedFields must be nil") if present.
+fn strip_server_managed(obj: &mut DynamicObject) {
+    obj.metadata.managed_fields = None;
+    obj.metadata.resource_version = None;
+    obj.metadata.creation_timestamp = None;
+    obj.metadata.uid = None;
+    obj.metadata.generation = None;
+    obj.metadata.self_link = None;
+    // `status` and `data`-adjacent fields differ per kind; `DynamicObject`'s `data`
+    // field carries everything else, but `status` is a well-known top-level key.
+    obj.data.as_object_mut().map(|m| m.remove("status"));
 }
 
 /// Construct a `GroupVersionKind` from an `apiVersion` and `kind` string.

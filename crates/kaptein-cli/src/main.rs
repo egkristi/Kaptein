@@ -3,6 +3,7 @@
 //! The CLI drives `kaptein-core` directly; it is a projection, not a home for logic.
 
 mod audit;
+mod edit;
 mod mcp;
 
 use clap::{Parser, Subcommand};
@@ -116,6 +117,18 @@ enum Command {
         /// path to a YAML manifest, or "-" for stdin
         #[arg(short = 'f', long)]
         file: String,
+    },
+    /// Edit a resource's YAML in $EDITOR, then dry-run the result (never applies).
+    Edit {
+        /// group/version/kind, e.g. v1/ConfigMap or apps/v1/Deployment
+        #[arg(short, long, default_value = "v1/ConfigMap")]
+        gvk: String,
+        /// resource name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace (omit for cluster-scoped)
+        #[arg(short = 'n', long)]
+        namespace: Option<String>,
     },
     /// Forward a pod port to a local TCP listener (Ctrl-C to stop).
     PortForward {
@@ -428,6 +441,16 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 println!("dry-run REJECTED (no changes applied):");
             }
             println!("{}", dry_run.response_yaml);
+            Ok(())
+        }
+        Command::Edit {
+            gvk,
+            name,
+            namespace,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let result = edit::edit_in_editor(&client, &gvk, namespace.as_deref(), &name).await?;
+            println!("{}", result);
             Ok(())
         }
         Command::PortForward {
