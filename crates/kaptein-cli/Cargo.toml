@@ -14,7 +14,7 @@ name = "kaptein"
 path = "src/main.rs"
 
 [dependencies]
-kaptein-core = { path = "../kaptein-core" }
+kaptein-core = { version = "0.1.0", path = "../kaptein-core" }
 kube = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 clap = { version = "4", features = ["derive"] }
