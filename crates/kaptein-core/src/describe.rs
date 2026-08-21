@@ -4,8 +4,8 @@
 //! and the logs primitive streams recent log lines from a pod (M1.2).
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::Client;
-use kube::api::{Api, LogParams};
+use kube::api::{Api, ListParams, LogParams};
+use kube::{Client, ResourceExt};
 
 use crate::Error;
 
@@ -57,6 +57,69 @@ pub async fn pod_logs(
         let logs = pods.logs(name, &lp).await.map_err(Error::Api)?;
         for line in logs.lines() {
             out.push((cname.clone(), line.to_string()));
+        }
+    }
+    Ok(out)
+}
+
+/// A single log line from a multi-pod stream.
+#[derive(Debug, Clone)]
+pub struct LogLine {
+    pub pod: String,
+    pub namespace: String,
+    pub container: String,
+    pub line: String,
+}
+
+/// Stream recent logs from all pods matching a label selector, optionally filtered by a
+/// regex. Each matching line is prefixed with the pod/container it came from.
+///
+/// This is the "multi-pod/multi-container log streaming with regex filter" primitive
+/// (M1.2). `follow` is not implemented — this returns a bounded tail, not an open stream.
+pub async fn multi_pod_logs(
+    client: &Client,
+    namespace: &str,
+    label_selector: Option<&str>,
+    regex_filter: Option<&str>,
+    tail_lines: Option<i64>,
+) -> Result<Vec<LogLine>, Error> {
+    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let lp = ListParams::default().labels(label_selector.unwrap_or(""));
+    let list = pods.list(&lp).await.map_err(Error::Api)?;
+
+    let re = regex_filter
+        .map(regex::Regex::new)
+        .transpose()
+        .map_err(|e| Error::Internal(e.to_string()))?;
+
+    let mut out = Vec::new();
+    for pod in list.into_iter() {
+        let pod_name = pod.name_any();
+        let container_names: Vec<String> = pod
+            .spec
+            .as_ref()
+            .map(|s| s.containers.iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default();
+        for cname in container_names {
+            let lp = LogParams {
+                container: Some(cname.clone()),
+                tail_lines,
+                ..Default::default()
+            };
+            let logs = pods.logs(&pod_name, &lp).await.map_err(Error::Api)?;
+            for line in logs.lines() {
+                if let Some(re) = &re
+                    && !re.is_match(line)
+                {
+                    continue;
+                }
+                out.push(LogLine {
+                    pod: pod_name.clone(),
+                    namespace: namespace.to_string(),
+                    container: cname.clone(),
+                    line: line.to_string(),
+                });
+            }
         }
     }
     Ok(out)

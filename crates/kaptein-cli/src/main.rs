@@ -66,12 +66,18 @@ enum Command {
     },
     /// Tail recent logs from a pod.
     Logs {
-        /// pod name
+        /// pod name (omit to stream all pods via --selector)
         #[arg(short = 'p', long)]
-        name: String,
+        name: Option<String>,
         /// namespace
         #[arg(short = 'n', long, default_value = "default")]
         namespace: String,
+        /// label selector for multi-pod streaming (e.g. app=foo)
+        #[arg(short = 'l', long)]
+        selector: Option<String>,
+        /// regex filter applied to each log line
+        #[arg(short = 'r', long)]
+        regex: Option<String>,
         /// number of lines to tail
         #[arg(long, default_value_t = 100)]
         tail: i64,
@@ -229,12 +235,36 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         Command::Logs {
             name,
             namespace,
+            selector,
+            regex,
             tail,
         } => {
-            let logs =
-                kaptein_core::describe::pod_logs(&client, &namespace, &name, Some(tail)).await?;
-            for (container, line) in logs {
-                println!("[{container}] {line}");
+            match name {
+                Some(pod_name) => {
+                    let logs = kaptein_core::describe::pod_logs(
+                        &client,
+                        &namespace,
+                        &pod_name,
+                        Some(tail),
+                    )
+                    .await?;
+                    for (container, line) in logs {
+                        println!("[{container}] {line}");
+                    }
+                }
+                None => {
+                    let lines = kaptein_core::describe::multi_pod_logs(
+                        &client,
+                        &namespace,
+                        selector.as_deref(),
+                        regex.as_deref(),
+                        Some(tail),
+                    )
+                    .await?;
+                    for l in lines {
+                        println!("[{}/{}] {}", l.pod, l.container, l.line);
+                    }
+                }
             }
             Ok(())
         }
