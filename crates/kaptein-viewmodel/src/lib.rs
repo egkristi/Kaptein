@@ -24,8 +24,8 @@ pub use render::{
 pub use semantic::{Action, ActionState, Status};
 pub use sink::{AuditConfig, AuditSink};
 pub use surface::{
-    Column, ColumnKind, EditorMode, Field, FieldKind, Projection, SURFACE_SUPPORT, SupportLevel,
-    Surface, SurfaceKind, support_level,
+    Column, ColumnKind, EditorMode, Field, FieldKind, Projection, SupportLevel, Surface,
+    SurfaceKind, support_level,
 };
 
 #[cfg(test)]

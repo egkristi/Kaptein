@@ -1,6 +1,6 @@
 # ADR-0009: Rename `kube-*` crates to `kaptein-*` and consolidate layout
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0014
 - **Date:** 2026-08-21
 - **Deciders:** Kaptein maintainers
 

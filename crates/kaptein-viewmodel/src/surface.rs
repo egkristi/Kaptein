@@ -69,45 +69,58 @@ pub enum SupportLevel {
 }
 
 /// A projection (which frontend or agent surface).
+///
+/// Only the **rendering** projections are here. Headless and MCP are consumers of the
+/// *semantic layer* (they read the data plane and action graph, they never render a
+/// surface), so they are a different axis — not members of this enum. Modelling them as
+/// projections that are always `None` conflates two distinct concepts and implies that
+/// e.g. MCP "cannot do graph things", when in fact MCP's `blast_radius` tool *is* graph
+/// data (ADR-0013).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Projection {
     Tui,
     Gui,
     Browser,
-    Headless,
-    Mcp,
 }
 
-/// The support matrix: `(projection, surface kind) → support level`.
+/// Look up the support level for a `(projection, kind)` pair.
 ///
-/// Populated once here and used by the frontends to declare what they implement and by
-/// contract tests to assert the truth of the DoD ("semantic equivalence where the
-/// surface kind allows it").
-pub const SURFACE_SUPPORT: &[(Projection, SurfaceKind, SupportLevel)] = &[
-    // Table, Tree, Form, Matrix, Editor (text), Chart, Stream render near-natively
-    // everywhere except headless/MCP, which expose the semantic layer, not surfaces.
-    (Projection::Tui, SurfaceKind::Graph, SupportLevel::Alternate), // Tree projection
-    (Projection::Tui, SurfaceKind::Terminal, SupportLevel::Full),   // PTY pass-through
-    (Projection::Gui, SurfaceKind::Graph, SupportLevel::Full),      // force-directed
-    (Projection::Gui, SurfaceKind::Terminal, SupportLevel::Full),   // VT emulator
-    (Projection::Browser, SurfaceKind::Graph, SupportLevel::Full),
-    (
-        Projection::Browser,
-        SurfaceKind::Terminal,
-        SupportLevel::Full,
-    ),
-    (Projection::Browser, SurfaceKind::Editor, SupportLevel::Full), // real editor (no $EDITOR)
-                                                                    // Headless and MCP never render surfaces; they expose semantics only.
-];
-
-/// Look up the support level for a `(projection, kind)` pair, defaulting to `None`.
+/// This is an **exhaustive** match, not a sparse lookup table. The compiler forces every
+/// new `SurfaceKind` to be considered here — which is the whole point of a closed set. A
+/// sparse table with a `None` default silently lied about `(Tui, Table)` (the primary
+/// surface) and 19 of the other 26 pairs.
 pub fn support_level(projection: Projection, kind: SurfaceKind) -> SupportLevel {
-    SURFACE_SUPPORT
-        .iter()
-        .find(|(p, k, _)| *p == projection && *k == kind)
-        .map(|(_, _, level)| *level)
-        .unwrap_or(SupportLevel::None)
+    use Projection::*;
+    use SupportLevel::*;
+    use SurfaceKind::*;
+
+    match (projection, kind) {
+        // These six render natively in every projection.
+        (_, Table) => Full,
+        (_, Tree) => Full,
+        (_, Form) => Full,
+        (_, Matrix) => Full,
+        (_, Stream) => Full,
+        (_, Chart) => Full,
+
+        // Graph: force-directed + mouse in GUI/browser, keyboard-navigable tree
+        // projection in the TUI (same data, different geometry).
+        (Tui, Graph) => Alternate,
+        (Gui, Graph) => Full,
+        (Browser, Graph) => Full,
+
+        // Editor: $EDITOR handoff in the TUI, a real editor in GUI/browser (no $EDITOR
+        // exists in a browser).
+        (Tui, Editor) => Alternate,
+        (Gui, Editor) => Full,
+        (Browser, Editor) => Full,
+
+        // Terminal: PTY pass-through in the TUI, a full VT emulator in GUI/browser.
+        (Tui, Terminal) => Full,
+        (Gui, Terminal) => Full,
+        (Browser, Terminal) => Full,
+    }
 }
 
 /// The closed set of surface kinds, derived from `Surface` via

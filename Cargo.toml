@@ -21,6 +21,9 @@ async-trait = "0.1"
 futures-util = "0.3"
 thiserror = "2"
 strum = { version = "0.26", features = ["derive"] }
+kube = { version = "4", default-features = false, features = ["client", "config", "rustls-tls"] }
+k8s-openapi = { version = "0.28", features = ["latest"] }
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [workspace.lints.rust]
 # Enforced centrally rather than repeated as `#![forbid(unsafe_code)]` per crate.

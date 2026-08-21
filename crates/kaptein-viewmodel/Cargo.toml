@@ -9,7 +9,6 @@ authors.workspace = true
 description = "Kaptein view-model: renderer-agnostic logic (the product)"
 
 [dependencies]
-kaptein-core = { path = "../kaptein-core" }
 serde = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }

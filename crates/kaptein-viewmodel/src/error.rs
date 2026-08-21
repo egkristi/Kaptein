@@ -26,22 +26,8 @@ pub enum Error {
     Internal(String),
 }
 
-/// Map the raw `kaptein-core` error into a user-facing, redaction-aware error.
-///
-/// The core reports *what failed*; the view-model decides *how to say it* without
-/// leaking secrets. This `From` impl is the single mapping point (see ADR-0009 /
-/// `architecture.md`).
-impl From<kaptein_core::Error> for Error {
-    fn from(err: kaptein_core::Error) -> Self {
-        match err {
-            kaptein_core::Error::Auth(msg) => Error::Forbidden {
-                verb: "authenticate".into(),
-                resource: msg,
-            },
-            kaptein_core::Error::Network(msg)
-            | kaptein_core::Error::WatchInterrupted(msg)
-            | kaptein_core::Error::Discovery(msg)
-            | kaptein_core::Error::Internal(msg) => Error::Internal(msg),
-        }
-    }
-}
+// NOTE: the `From<kaptein_core::Error>` mapping deliberately does **not** live here.
+// `kaptein-viewmodel` must be wasm-pure (the browser UI consumes it), so it cannot
+// depend on `kaptein-core` (which pulls `kube` → `hyper` → `mio`, all non-wasm). The
+// core→viewmodel error mapping lives at the *integration layer* — the native frontend
+// or binary that owns both crates — not in the view-model.

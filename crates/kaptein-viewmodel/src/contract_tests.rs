@@ -100,11 +100,17 @@ fn surface_kind_is_derived_from_surface() {
 
 /// The support matrix — not universal parity — is the truth contract tests assert
 /// against. "TUI has no force-directed Graph; it has a Tree projection" is a documented
-/// design decision, encoded here.
+/// design decision, encoded here. The matrix is exhaustive, so the primary surface
+/// `(Tui, Table)` is `Full` (the sparse-table bug made it `None`).
 #[test]
-fn graph_is_alternate_in_tui_full_in_gui() {
+fn support_matrix_is_exhaustive_and_correct() {
     use crate::surface::{Projection, SupportLevel, SurfaceKind, support_level};
 
+    // Primary surface must be full in the TUI.
+    assert_eq!(
+        support_level(Projection::Tui, SurfaceKind::Table),
+        SupportLevel::Full
+    );
     assert_eq!(
         support_level(Projection::Tui, SurfaceKind::Graph),
         SupportLevel::Alternate
@@ -113,9 +119,13 @@ fn graph_is_alternate_in_tui_full_in_gui() {
         support_level(Projection::Gui, SurfaceKind::Graph),
         SupportLevel::Full
     );
-    // Headless/MCP expose semantics, never surfaces.
+    // Editor: $EDITOR handoff (alternate) in TUI, real editor (full) in browser.
     assert_eq!(
-        support_level(Projection::Mcp, SurfaceKind::Graph),
-        SupportLevel::None
+        support_level(Projection::Tui, SurfaceKind::Editor),
+        SupportLevel::Alternate
+    );
+    assert_eq!(
+        support_level(Projection::Browser, SurfaceKind::Editor),
+        SupportLevel::Full
     );
 }

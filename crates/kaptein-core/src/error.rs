@@ -20,6 +20,12 @@ pub enum Error {
     #[error("discovery failed: {0}")]
     Discovery(String),
 
+    #[error("kubeconfig error: {0}")]
+    Kubeconfig(#[from] kube::config::KubeconfigError),
+
+    #[error("kubernetes API error: {0}")]
+    Api(#[from] kube::Error),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

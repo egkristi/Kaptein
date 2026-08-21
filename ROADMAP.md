@@ -60,10 +60,18 @@ Milestones:
   - "What changed in the last 15 minutes" without the time-machine storage subsystem
   - Validates the differentiator's behavior a year before the redb layer exists
 - **M1.5 Landing view**
-  - One screen that answers the three operator questions: is anything broken, what
-    changed recently, what is about to break (certificates, quota, capacity)
+  - One screen answering **two** of the three operator questions: is anything broken,
+    and what changed recently (from the M1.4 ring buffer + events)
   - The k9s Pulses / OpenShift cluster-overview equivalent — the screen that decides
     whether anyone leaves the tool open
+  - *The third question — "what is about to break" (certificates, quota, capacity) —
+    needs subsystems from M3a/M3b and lands there, not in Phase 1.*
+- **M1.6 Minimal diagnostics rule engine**
+  - One rule engine, **one rule pack**: "why isn't this pod ready" over events,
+    scheduler reasons, probes, and PVC binding
+  - This single pack feeds **three consumers at once**: the landing view (M1.5), the
+    TUI diagnostics, and the MCP moat tool in 1b — validating the engine's shape before
+    3a builds out the rest (resolves the ADR-0013 vs Phase 1b contradiction)
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight, and
   guardrails. Read-only default for unknown contexts.
 
@@ -91,8 +99,8 @@ GitOps write path, time machine, or fleet.
   `impersonate` dependency).
 - **M1b.3** Tool taxonomy (ADR-0013): primitives (`list_resources`, `describe`,
   `get_logs`, `get_events`) plus the diagnostic moat (`explain_pod_failure`,
-  `what_changed_between`, `blast_radius`, `why_is_job_pending`), backed by the
-  diagnostics rule engine.
+  `what_changed_between`, `blast_radius`, `why_is_job_pending`), backed by the M1.6
+  rule engine (the one pack ships in Phase 1; more packs in 3a).
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
   does not have.
@@ -125,6 +133,12 @@ Milestones:
 - **M2.4 Topology & diff**
   - ownerRef/selector/volume/RBAC resource graph, keyboard-navigable
   - Diff between two namespaces / clusters / points in time
+  - **Application-centric view** (the "app as the unit" navigation): a Deployment and
+    its ReplicaSets, Pods, Service, Ingress/HTTPRoute, ConfigMaps, Secrets, PVCs, HPA,
+    PDB, ServiceAccount, NetworkPolicy — one screen. Uses the `Tree`/`Graph` surface
+    kinds as the *default* navigation, not a feature you go to. *(Decide now whether the
+    app view, not the resource list, is the primary navigation — it is expensive to
+    change in Phase 3.)*
 - **M2.5 Network & storage v1**
   - Gateway API + Ingress side by side; DNS/endpoint debugging
   - PV/PVC/StorageClass/Snapshot, CSI status, Velero/VolSync overview
@@ -174,10 +188,10 @@ Milestones:
   - KubeVirt lens: console, live migration, snapshots, MTV plans, instance types, hotplug
   - CNPG lens: topology, replication lag, switchover/failover, PITR, WAL status
   - These three are the **acceptance tests** for the view-definition schema (ADR-0012)
-- **M3a.4 Diagnostics subsystem (`kaptein-diagnostics`)**
+- **M3a.4 Diagnostics subsystem (`kaptein-diagnostics`)** — *extends the M1.6 engine*
   - One rule engine over live state, events, and history — not four separate features
   - Rule packs **are lenses**: every lens contributes diagnostics, not just views
-  - Backs the MCP diagnostic tools (ADR-0013) and the landing view
+  - Backs the MCP diagnostic tools (ADR-0013), the landing view, and the TUI
 - **M3a.5 Native desktop packaging (post-validation)**
   - Same egui code as the browser UI; code-signing, notarization, installers,
     auto-update — done only after 3a proves the product is worth packaging

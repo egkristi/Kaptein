@@ -39,9 +39,12 @@ crates/
 Errors are split deliberately:
 
 - **`kaptein-core::Error`** — the raw type: network, auth, watch interruption, discovery.
-- **`kaptein-viewmodel::Error`** — the user-facing, redaction-aware type, with a `From`
-  impl that maps the core error. The core reports *what failed*; the view-model decides
-  *how to say it* without leaking secrets.
+- **`kaptein-viewmodel::Error`** — the user-facing, redaction-aware type. It is **wasm-pure**
+  and does **not** depend on `kaptein-core` (the browser UI consumes the view-model, and
+  `kaptein-core` pulls `kube` → `hyper` → `mio`, all non-wasm).
+- The **core → view-model error mapping** lives at the *integration layer* — the native
+  frontend or binary that owns both crates — not inside the view-model. The core reports
+  *what failed*; the integration layer decides *how to say it* without leaking secrets.
 
 ### The one workspace repo
 
@@ -233,3 +236,4 @@ inference**, **KubeVirt**, and **CNPG** — as acceptance tests, not frozen in P
 - ADR-0011 — fleet query data layer
 - ADR-0012 — lens schema acceptance tests
 - ADR-0013 — MCP tool taxonomy
+- ADR-0014 — collapse to four crates

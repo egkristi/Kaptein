@@ -37,6 +37,11 @@ The **extension surface** (`ext-sdk/`, WIT worlds, the view-definition schema, a
 `extensions/`) is MIT/Apache-2.0. Contributions there use **DCO sign-off** only
 (`git commit -s`) — no CLA required. See [`DCO`](./DCO).
 
+> **Current status (pre-`ext-sdk`):** the `ext-sdk/` crate and the WIT worlds do not
+> exist yet. Until they do, **every** contribution is a core contribution and therefore
+> CLA-required — there is no MIT/Apache-2.0 surface to contribute to. This will change
+> when `ext-sdk/` is created (per ADR-0014, only when it has code).
+
 ---
 
 > This is a reference CLA. It is **not legal advice**. Before the first external core

@@ -61,16 +61,18 @@ jobs:
       - run: cargo build --workspace --locked
 
   wasm:
-    name: WASM (browser UI — Phase 2)
+    name: WASM (view-model target)
     runs-on: ubuntu-latest
-    if: false # re-enable when frontend-gui exists (Phase 2, browser UI first)
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p frontend-gui --target wasm32-unknown-unknown --locked
+      # The view-model must be wasm-compatible from day one: the browser UI consumes
+      # it, and this is where a non-wasm dependency (mio via tokio rt-multi-thread,
+      # std::time::Instant misuse, etc.) will actually break first.
+      - run: cargo build -p kaptein-viewmodel --target wasm32-unknown-unknown --locked
 
   layers:
     name: Layer dependencies
