@@ -1,0 +1,95 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cross-compiling to aarch64-linux-gnu requires a linker (gcc-aarch64).
+      - name: Install cross linker (aarch64 linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p kaptein -p frontend-tui --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/kaptein dist/
+          cp target/${{ matrix.target }}/release/kaptein-tui dist/
+          tar -czf kaptein-${{ matrix.target }}.tar.gz -C dist kaptein kaptein-tui
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/kaptein.exe dist/
+          cp target/${{ matrix.target }}/release/kaptein-tui.exe dist/
+          cd dist && 7z a ../kaptein-${{ matrix.target }}.zip kaptein.exe kaptein-tui.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kaptein-${{ matrix.target }}
+          path: |
+            kaptein-${{ matrix.target }}.tar.gz
+            kaptein-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach to GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Upload binaries to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Flatten artifacts into a single directory.
+          find dist -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
+            | xargs -0 -I{} cp {} .
+          # Attach to the release for this tag.
+          gh release upload "${GITHUB_REF_NAME}" *.tar.gz *.zip --clobber
