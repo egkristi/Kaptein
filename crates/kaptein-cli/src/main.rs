@@ -99,6 +99,21 @@ enum Command {
         #[arg(short = 'f', long)]
         file: String,
     },
+    /// Forward a pod port to a local TCP listener (Ctrl-C to stop).
+    PortForward {
+        /// pod name
+        #[arg(short = 'p', long)]
+        pod: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// target (pod) port
+        #[arg(short = 't', long)]
+        port: u16,
+        /// local bind port (0 = ephemeral)
+        #[arg(long, default_value_t = 0)]
+        local: u16,
+    },
 }
 
 #[tokio::main]
@@ -243,6 +258,26 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 println!("dry-run REJECTED (no changes applied):");
             }
             println!("{}", dry_run.response_yaml);
+            Ok(())
+        }
+        Command::PortForward {
+            pod,
+            namespace,
+            port,
+            local,
+        } => {
+            let local_addr = format!("127.0.0.1:{local}")
+                .parse::<std::net::SocketAddr>()
+                .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+            let bound =
+                kaptein_core::portforward::forward(&client, &namespace, &pod, port, local_addr)
+                    .await?;
+            println!("forwarding {namespace}/{pod}:{port} -> {bound} (Ctrl-C to stop)");
+            // Keep the process alive until Ctrl-C.
+            tokio::signal::ctrl_c()
+                .await
+                .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+            println!("stopped");
             Ok(())
         }
     }

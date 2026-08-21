@@ -19,5 +19,6 @@ pub mod events;
 pub mod guardrails;
 pub mod overview;
 pub mod pods;
+pub mod portforward;
 
 pub use error::Error;
