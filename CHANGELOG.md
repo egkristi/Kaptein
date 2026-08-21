@@ -4,24 +4,24 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-22
 
 ### Added
-- Project planning documents (README, ROADMAP, architecture, ADRs, security, contributing).
-- Three-tier extension model (ADR-0004).
-- Governed MCP surface design (ADR-0010).
-- AI/GPU (DRA/Kueue/inference) and KubeVirt lens designs.
-- Business Source License 1.1 with rolling MIT conversion.
-- `kaptein` CLI: `get`, `can` (RBAC preflight), `context` (guardrails), `diagnose`, `describe`, `logs`.
-- `kaptein-tui` ratatui table view with vim navigation.
-- Diagnostics rule engine ("why isn't this pod ready").
+- `kaptein events --minutes N` — recent cluster events (M1.4), the cheap form of the
+  time-machine differentiator (no persistence).
+- `kaptein overview --minutes N` — the landing view (M1.5): "is anything broken" +
+  "what changed recently" (k9s Pulses equivalent).
+- `kaptein apply --file X` — server-side dry-run validation (M1.3); never mutates the
+  cluster, returns the server-validated object or the admission/validation rejection.
+- `kaptein port-forward --pod X --port N --local M` — bridge a pod port to a local
+  TCP listener (M1.2), read-only.
+- `kaptein exec --pod X -- cmd...` — one-shot command execution with concurrent
+  stdout/stderr streaming (M1.2).
+- `kaptein delete --gvk X --name Y [--cascade] [--confirm]` — delete with explicit
+  cascade selection, dry-run by default (read-only-default guardrail).
 
 ### Changed
-- License: MIT → BUSL-1.1 (core) + MIT/Apache-2.0 (extension surface).
-- Render contract redefined as three layers (ADR-0005).
-
-### Fixed
-- Architecture diagram, framework choice (egui), and crate naming.
+- Enabled kube `ws` feature for port-forward/exec transport.
 
 ## [0.2.0] - 2026-08-22
 
