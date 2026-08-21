@@ -23,6 +23,21 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ### Fixed
 - Architecture diagram, framework choice (egui), and crate naming.
 
+## [0.2.0] - 2026-08-22
+
+### Added
+- Governed MCP server (`kaptein mcp`) — read-only Model Context Protocol server over
+  stdio (the #1 differentiator), exposing `list_resources`, `describe`, `logs`, and
+  `diagnose` tools through the same guardrails as the CLI (ADR-0010, ADR-0013).
+- MCP audit-log integration — every tool call writes a JSONL `AuditEvent` with agent
+  identity (`source=mcp`), via `KAPTEIN_AUDIT`.
+- Read-operation audit variants (`List`, `Describe`, `Logs`, `Diagnose`).
+- TUI resource-kind switching (pods/deployments/namespaces), namespace cycling, status
+  column, and an in-app detail pane (describe + diagnose).
+
+### Changed
+- README status promoted to MVP with concrete build/test instructions.
+
 ## [0.1.0] - 2026-08-21
 
 First release with a functional core against a live cluster: generic resource listing,
