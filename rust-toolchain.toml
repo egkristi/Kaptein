@@ -1,5 +1,9 @@
 [toolchain]
 # Pinned (not "stable") so the `-D warnings` clippy gate is reproducible across
 # contributors and CI. Bump deliberately, not automatically.
+#
+# MSRV policy: the pinned version is the Minimum Supported Rust Version. CI runs
+# on both the pinned toolchain and `stable`, so breakage is caught before a bump.
+# Bump cadence: after each `cargo update`, or when a dependency raises its MSRV.
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]

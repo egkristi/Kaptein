@@ -8,39 +8,48 @@ are recorded as numbered ADRs under `docs/adr/`; this file ties them together.
 **The domain layer is the product.** Layer dependencies are strictly one-directional:
 
 ```
-kube-core ──► kube-viewmodel ──► frontend-tui
-                             ──► frontend-gui
-                             ──► headless / serve
+kaptein-core ──► kaptein-viewmodel ──► frontend-tui
+                                 ──► frontend-gui
+                                 ──► headless / serve
 ```
 
-- `kube-core` owns the Kubernetes client (`kube-rs` + `tokio`), watchers/reflectors, CRD
-  discovery, and stores. It must not depend on the view-model or any frontend.
-- `kube-viewmodel` owns all logic: columns, sorting, filtering, status inference,
+- `kaptein-core` owns the Kubernetes client (`kube-rs` + `tokio`), watchers/reflectors,
+  CRD discovery, and stores. It must not depend on the view-model or any frontend.
+- `kaptein-viewmodel` owns all logic: columns, sorting, filtering, status inference,
   permission decisions, and action graphs.
 - The frontends (`frontend-tui`, `frontend-gui`, `headless`, `serve`) render, never
   compute — they consume a **render-intent** produced by the view-model.
 
-## The two stable interfaces
+### Semantics vs. geometry
 
-Two types are the product's load-bearing contract and are defined **first**, in
-`kube-viewmodel`, before any frontend:
+"Frontends render, never compute" is about **semantics**, not geometry. The view-model
+owns *meaning*; the frontend owns *layout*. Concretely:
 
-### `RenderIntent`
+| Owned by view-model (semantics) | Owned by frontend (geometry) |
+|---|---|
+| Which columns exist, their ids, sort/filter, status | Column *width* (terminal cells vs. font metrics) |
+| Actions and their enabled/greyed state (RBAC) | Text truncation (grapheme width vs. glyph advance) |
+| Row content, typed and redaction-aware | Scroll position, focus, hover |
+| Overall status and selection *identity* | Modal overlay z-order |
 
-The single output every projection consumes. Minimal sketch:
+The view-model must **never** know which frontend is rendering (no circular dependency);
+the frontend must never recompute meaning (no drift).
 
-```rust
-struct RenderIntent {
-    columns: Vec<Column>,      // id, header key, width, alignment
-    rows: Vec<Row>,            // cell values (typed, redaction-aware)
-    actions: Vec<Action>,      // available actions + enabled/greyed (RBAC preflight)
-    status: Option<Status>,    // overall view status
-    selection: Selection,      // focus/selection state
-}
-```
+## The render contract: three layers
 
-Frontends may *style* this but never recompute it. Contract tests assert the TUI, GUI,
-and headless all consume the **same** `RenderIntent` for the same input.
+The render-intent is **not** one materialized snapshot. It is three layers (see
+ADR-0005):
+
+1. **Data plane** — a virtualized, queryable source emitting deltas:
+   `query(range, sort, filter) -> Page` and `Stream<RowPatch>` with a revision number.
+2. **Semantic layer** — the renderer-agnostic part: actions, RBAC state, status
+   inference, blast radius.
+3. **Surface kinds** — a small, closed set: `Table`, `Tree`, `Graph`, `Stream`,
+   `Editor`, `Chart`, `Terminal`. Each frontend implements the set once; new views are
+   combinations, never new variants.
+
+Contract tests assert that the same query yields the same rows, actions, and enabled
+state across projections — not merely that the same variant was passed.
 
 ### `AuditEvent`
 
@@ -50,10 +59,10 @@ and the incident-timeline export (one format, two consumers):
 ```rust
 struct AuditEvent {
     timestamp: SystemTime,
+    actor: String,             // the real user, after serve impersonation
     context: String,           // cluster/context id — never a secret
     operation: Operation,      // e.g. Delete, Scale, GitPrOpened
     target: ResourceRef,       // group/kind/name/namespace
-    actor: String,
     outcome: Outcome,          // applied / dry-run / rejected
 }
 ```
@@ -64,16 +73,19 @@ Audit records **operations, not values** — secrets are never persisted.
 
 - **`frontend-tui`** (ratatui) — terminal, SSH/bastion. The first daily-driver surface.
 - **`frontend-gui`** (egui + wasm) — native desktop, and a browser bundle that relays
-  through `serve` (see ADR-0002).
+  through `serve` (see ADR-0002). Uses `egui_table` for the virtualized `Table` surface.
 - **`headless`** — agent mode that drives the view-model directly, **no network
   listener**; used for CI and scripting.
 - **`serve`** — the network server (`axum` HTTP/REST + gRPC-Web, `tonic` gRPC for native
-  peers); the target for the browser UI and the hub mode (M3.2).
+  peers); the target for the browser UI and the hub mode (M3.2). Authenticates its own
+  users and **impersonates** them against the cluster (see ADR-0007).
 
 ### Transport note
 
 Browsers cannot speak raw gRPC. The browser surface is **gRPC-Web (and HTTP/REST)** on
-`axum`; `tonic` gRPC is reserved for the native headless↔serve path. See ADR-0002.
+`axum`; `tonic` gRPC is reserved for the native headless↔serve path. Exec/attach and
+port-forward are relayed as streams through `serve` (SPDY/WebSocket); this is clarified
+in ADR-0002.
 
 ## Typed vs. dynamic resources
 
@@ -85,6 +97,12 @@ Two code paths, deliberately separated:
 Do not force built-ins through `DynamicObject` (unnecessary `serde_json` thrash), and do
 not try to type CRDs at compile time.
 
+## Informer management
+
+Informers are lazy per view, evicted LRU + TTL, default to `PartialObjectMetadata`, use
+label/field selectors where scoped, and are subject to a **hard cap** on concurrent
+watches with degradation to on-demand list (see ADR-0006).
+
 ## Extensibility
 
 Three tiers, one `extension.yaml` manifest, data-first (see ADR-0004):
@@ -93,6 +111,17 @@ Three tiers, one `extension.yaml` manifest, data-first (see ADR-0004):
 2. WASM component-model plugins (WIT) — sandboxed (fuel metering, memory cap,
    default-deny network/FS).
 3. Shell-out integrations — external binaries, graceful when absent.
+
+The extension *surface* (`ext-sdk`, WIT worlds, view-definition schema, example
+extensions) is **MIT/Apache-2.0**, not BUSL — so third parties can build lenses without
+taking BUSL terms on their own work.
+
+## GitOps source discovery
+
+The write path locates the owning file by **re-render + match** (GVK + name + namespace),
+caches re-render results by source revision, and **degrades honestly** when the source is
+ambiguous (generated by Helm/Crossplane/ConfigMap-generator/webhook): it does not open a
+PR, it shows *why*. See ADR-0008.
 
 ## Storage & the time machine
 
@@ -105,3 +134,8 @@ layout with compaction + retention TTL (see ADR-0003).
 - ADR-0002 — browser relays through `serve` (transport)
 - ADR-0003 — time-machine storage layout
 - ADR-0004 — three-tier extension model
+- ADR-0005 — `RenderIntent` is three layers
+- ADR-0006 — informer management
+- ADR-0007 — `serve` authentication & impersonation
+- ADR-0008 — GitOps source discovery
+- ADR-0009 — crate renaming

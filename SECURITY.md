@@ -19,7 +19,8 @@ discovery API's served versions.
 We will acknowledge within 3 business days and aim to publish a fix and advisory for
 confirmed issues in supported versions.
 
-*(Insert the private reporting channel / security contact here before the first release.)*
+*(Set the private reporting channel before the first release — e.g. a `security@` alias
+or GitHub private vulnerability reporting.)*
 
 ## Threat model
 
@@ -42,6 +43,24 @@ access** on an operator's workstation. Our mitigations:
   they're attempted.
 - The GitOps write path writes to **Git, not the API server**, and requires an explicit
   PR review, adding a second human gate before any live change.
+
+### `serve` / hub authentication & impersonation
+
+`serve` holds cluster credentials on behalf of multiple users (browser and hub modes).
+To keep RBAC preflight truthful for the *actual* caller:
+
+- `serve` authenticates its own users (TLS client certs or OIDC tokens), then
+  **impersonates** the authenticated user via Kubernetes `--as` / `--as-group`.
+- `SelfSubjectRulesReview` runs **as the impersonated user**, so greying reflects the
+  caller's rights — not `serve`'s.
+- `serve` holds a **minimal bootstrap identity** whose only privilege is the
+  `impersonate` verb — never cluster admin.
+- Where impersonation is unavailable, the behavior is **read-only with a clear warning**,
+  never silent escalation.
+- Audit events record the **real actor**, not `serve`.
+
+This is the largest privilege-escalation surface in the design; it is specified in
+ADR-0007 and must not be weakened.
 
 ### LLM assistance (opt-in only)
 

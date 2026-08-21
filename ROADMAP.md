@@ -16,22 +16,20 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
 
 **Goal:** a compiling workspace with the layer boundaries enforced from day one.
 
-- Cargo workspace: `kube-core`, `kube-viewmodel`, `frontend-tui`, `frontend-gui`,
-  `headless`, `serve`
-- `kube-core` skeleton: `kube-rs` + `tokio` client bootstrap, watcher/reflector store
+- Cargo workspace under `crates/`: `kaptein-core`, `kaptein-viewmodel`, `frontend-tui`,
+  `frontend-gui`, `headless`, `serve` (plus `plugins`, `viewdef`, `ext-sdk` stubs)
+- `kaptein-core` skeleton: `kube-rs` + `tokio` client bootstrap, watcher/reflector store
   trait, CRD discovery (`DynamicObject`), protobuf content-type flag,
   `PartialObjectMetadata` for list-heavy views
-- `kube-viewmodel` skeleton: column model, sort/filter, action-graph types — *no*
-  rendering
+- `kaptein-viewmodel` skeleton: three-layer render contract (data plane, semantic layer,
+  surface kinds) + `AuditEvent` type — *no* rendering (see ADR-0005)
 - Config & error foundation: define the config-file schema (XDG path + TOML) and the
-  unified `Error` enum in `kube-viewmodel`, so every later milestone builds on them
-- Extension foundation: define the extension manifest schema (`extension.yaml`) and the
-  versioned WIT worlds in `plugins/` + `ext-sdk/`, before any frontend or plugin code
-- Repo hygiene: `CONTRIBUTING.md`, `SECURITY.md`, and an ADR process (`docs/adr/`),
-  starting with ADR-0001 (`egui` over `iced`)
-- CI: `cargo fmt`, `clippy`, `test`, signed release + SBOM pipeline stub
+  unified `Error` enum in `kaptein-viewmodel`, so every later milestone builds on them
+- Repo hygiene: `CONTRIBUTING.md`, `SECURITY.md`, CLA, and an ADR process (`docs/adr/`)
+- CI: `cargo fmt`, `clippy`, `test`, `cargo deny check licenses`, signed release + SBOM
+  pipeline stub
 - Definition of Done: `cargo build --workspace` is green; layer deps are one-directional
-  (`frontend-*` → `viewmodel` → `core`)
+  (`frontend-*` → `viewmodel` → `core`); `cargo deny check licenses` passes on the skeleton
 
 ## Phase 1 — Core + viewmodel + ratatui (k9s parity + RBAC preflight)
 
@@ -40,12 +38,12 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
 Milestones:
 
 - **M1.1 Auth & context**
-  - `kubeconfig` load, exec credential plugins, OIDC device flow, client certs, SA
-    tokens, SPIFFE, `--as` impersonation
+  - `kubeconfig` load + exec credential plugins (AKS/Entra, EKS, GKE)
   - **RBAC preflight**: `SelfSubjectRulesReview` on context switch → grey out
     disallowed actions
   - **Context guardrails**: prod-context red frame, read-only default, "break glass"
     confirmation; configurable per regex on context name
+  - *Deferred to 1b:* SPIFFE, OIDC device flow, SA tokens
 - **M1.2 Resource navigation**
   - Command palette + vim keymap + fuzzy jump
   - Built-in resources + all CRDs auto-discovered
@@ -54,15 +52,9 @@ Milestones:
   - Exec/attach, ephemeral containers, node debug pods
   - Port-forward manager (named, persistent, auto-reconnect)
   - Krew shell-out
-- **M1.3 YAML editor**
-  - OpenAPI/CRD schema validation, server-side dry-run, diff before apply
-- **M1.4 Diagnostics (v1)**
-  - *"Why isn't this pod ready?"* decision tree over events, scheduler reasons, node
-    capacity, taints, imagePull, probes, PVC binding
-  - Sanity scan v1 (missing limits/requests, no probes, `:latest`, orphaned resources)
-  - Events deduplicated onto a timeline (feeds the decision tree)
-- **M1.5 Observability (v1) — *stretch, not required for k9s parity***
-  - Metrics-server reading; Prometheus/Thanos/VictoriaMetrics adapter + PromQL console
+- **M1.3 Edit & apply**
+  - `$EDITOR` handoff for edits; server-side dry-run + diff before apply
+  - *OpenAPI/CRD schema validation lands in Phase 2 with the lens engine*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight, and
   guardrails. Read-only default for unknown contexts.
 
@@ -112,6 +104,9 @@ Milestones:
   - `ext-sdk/` authoring crate (manifest types, WIT worlds, host imports) with a
     versioning + deprecation policy so plugins don't break across releases
   - First example extensions: a lens, a WASM plugin, and a shell-out integration
+
+  *The WIT worlds are defined here, late in Phase 2, after real lenses exist — not in
+  Phase 0 (see ADR-0004).*
 - Definition of Done: GUI and TUI are feature-identical projections of one view-model —
   proven by contract tests asserting the TUI, GUI, and headless all consume the same
   render intent; a GitOps change can be authored and opened as a PR entirely from the UI.
@@ -167,19 +162,27 @@ Milestones:
 - **Same keymap** in TUI and GUI.
 - i18n + screen-reader-friendly GUI.
 - Signed releases with SBOM.
-- **Performance budget**: informer-driven views stay responsive against a synthetic
-  cluster with thousands of CRDs; k9s is the baseline to beat (benchmarked in CI).
+- **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
+  pods, no kubelets) drives CI benchmarks. Falsifiable targets:
+  - p99 keystroke-to-frame < 16 ms at 50 000 objects in store
+  - steady-state RSS < 250 MB at 50 000 objects
+  - cold start to first usable frame < 500 ms
+  - concurrent watches ≤ N for a given view set (see ADR-0006)
+  - idle bytes/sec over the `serve` path ≈ 0 (no polling)
 - **Kubernetes version support**: latest three minors; older API versions handled via
   discovery.
 - **Config & errors**: a single config file (XDG path, TOML, schema-validated) with
-  precedence config → CLI → env; a unified error enum in `kube-viewmodel` that maps raw
+  precedence config → CLI → env; a unified error enum in `kaptein-viewmodel` that maps raw
   `kube::Error` and subprocess failures to redaction-aware, user-facing messages.
 
 ## Immediate next steps
 
-1. Scaffold the Cargo workspace and all six members (Phase 0): `kube-core`,
-   `kube-viewmodel`, `frontend-tui`, `frontend-gui`, `headless`, `serve`.
-2. Define the `kube-viewmodel` core types first: the render-intent (columns, rows,
-   actions, status) and the `AuditEvent` type, before any frontend code.
-3. Stand up the `kube-core` watcher/reflector store and CRD discovery.
-4. Build the first ratatui table view on top of the render-intent.
+1. Scaffold the Cargo workspace under `crates/` (Phase 0): `kaptein-core`,
+   `kaptein-viewmodel`, `frontend-tui`, `frontend-gui`, `headless`, `serve`.
+2. Define the three-layer render contract (data plane, semantic layer, surface kinds)
+   and the `AuditEvent` type in `kaptein-viewmodel`, before any frontend code
+   (ADR-0005).
+3. Stand up the `kaptein-core` watcher/reflector store and CRD discovery, with informer
+   management (ADR-0006).
+4. Build the first ratatui `Table` surface on top of the data plane.
+5. Run `cargo deny check licenses` on the skeleton and fix allowlist collisions early.

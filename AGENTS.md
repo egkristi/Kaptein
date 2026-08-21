@@ -6,7 +6,7 @@ Guidance for AI coding agents working in this repository. The product is **Kapte
 ## Project identity
 
 - **Product name:** Kaptein (repo folder is also `Kaptein`).
-- **Language:** Rust (2021 edition or newer as configured).
+- **Language:** Rust (2024 edition).
 - **Core thesis:** *The domain layer is the product.* The TUI, GUI, and headless agent
   are thin projections of one renderer-agnostic view-model.
 - **Target platforms:** Linux/macOS/Windows native + WASM (browser) + headless/CI.
@@ -16,33 +16,36 @@ Guidance for AI coding agents working in this repository. The product is **Kapte
 Layer dependencies are strictly one-directional:
 
 ```
-kube-core ──► kube-viewmodel ──► frontend-tui
-                             ──► frontend-gui
-                             ──► headless / serve
+kaptein-core ──► kaptein-viewmodel ──► frontend-tui
+                                 ──► frontend-gui
+                                 ──► headless / serve
 ```
 
-- **All business logic lives in `kube-viewmodel`**: columns, sorting, filtering, status
-  inference, permission decisions, action graphs.
-- **Frontends render, never compute.** They consume a render-intent produced by the
-  view-model.
+- **All business logic lives in `kaptein-viewmodel`**: columns, sorting, filtering,
+  status inference, permission decisions, action graphs.
+- **Frontends render, never compute — semantics vs. geometry.** The view-model owns
+  *meaning* (which columns, actions, status, row content); the frontend owns *layout*
+  (column width in cells vs. font metrics, text truncation, scroll/focus/hover, modal
+  z-order). Never let layout math leak into the view-model, and never let meaning drift
+  into a frontend.
 - If a change adds logic to `frontend-tui`, `frontend-gui`, `headless`, or `serve` that
-  should be reusable across frontends, move it into `kube-viewmodel`.
-- `kube-core` owns the Kubernetes client, watchers/reflectors, CRD discovery, and
+  should be reusable across frontends, move it into `kaptein-viewmodel`.
+- `kaptein-core` owns the Kubernetes client, watchers/reflectors, CRD discovery, and
   stores. It must not depend on the view-model or any frontend.
 
 ## Planned crate layout
 
 ```
-kube-core/         # kube-rs client, watchers/reflectors, CRD discovery, stores
-kube-viewmodel/    # renderer-agnostic logic (the product)
 crates/
+  kaptein-core/    # kube-rs client, watchers/reflectors, CRD discovery, stores
+  kaptein-viewmodel/ # renderer-agnostic logic (the product)
   frontend-tui/    # ratatui
   frontend-gui/    # egui (+ wasm)
   headless/        # agent mode: drives the view-model directly (no listener)
   serve/           # network server: axum HTTP/gRPC-Web + tonic gRPC; browser + hub
   plugins/         # WASM component-model host + WIT interfaces + manifest loader
   viewdef/         # view definition schema + engine (YAML/CUE)
-  ext-sdk/         # extension authoring SDK: manifest types, WIT worlds, host imports
+  ext-sdk/         # extension authoring SDK (MIT/Apache-2.0)
 extensions/        # example extensions (lenses, plugins, integrations)
 docs/adr/          # architecture decision records
 ```
@@ -91,7 +94,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 - Unit-test view-model logic directly (it is renderer-agnostic, so no UI needed).
 - **Contract tests**: when adding view-model output, assert that the TUI, GUI, and
   headless paths all consume the *same* render-intent for the same input.
-- New `kube-core` watcher/reflector code should have tests with mock or synthetic data;
+- New `kaptein-core` watcher/reflector code should have tests with mock or synthetic data;
   avoid requiring a live cluster in CI.
 - Benchmark-sensitive paths (informer-driven views) are validated against a synthetic
   cluster with thousands of CRDs; k9s is the baseline to beat.
@@ -104,9 +107,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 - Keep `README.md`, `ROADMAP.md`, `CONTRIBUTING.md`, and `SECURITY.md` in sync with
   behavior changes.
 - When referencing roadmap work, cite the milestone (`M#.#`).
-- **License**: Kaptein is BUSL-1.1 (source-available), converting to MIT on the
-  Change Date. Do not label it "open source"; do not replace it with a permissive-only
-  (MIT/Apache) `LICENSE`.
+- **License**: Kaptein core is BUSL-1.1 (source-available), converting to MIT on the
+  Change Date (rolling, per version). The extension surface (`ext-sdk/`, WIT worlds,
+  view-definition schema, `extensions/`) is **MIT/Apache-2.0**. Do not label the project
+  "open source"; do not put BUSL terms on the extension surface.
 
 ## Naming & consistency
 
@@ -117,7 +121,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ## Common pitfalls
 
 - Adding UI-only state that duplicates view-model state (keep one source of truth).
-- Introducing a frontend dependency on `kube-core` directly (go through the view-model).
+- Introducing a frontend dependency on `kaptein-core` directly (go through the view-model).
 - Hardcoding per-CRD UIs — use view definitions (data) or WASM plugins (code) instead.
 - Writing a WASM plugin where a view definition (lens) suffices (data first, code second).
 - Granting network/FS or any capability to a plugin by default instead of via the

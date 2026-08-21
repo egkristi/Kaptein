@@ -3,7 +3,11 @@
 # (Business Source License) — this allow list governs third-party crates only.
 # MPL-2.0 (file-level copyleft) is intentionally excluded to keep commercial
 # relicensing clean.
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-DFS-2016"]
+#
+# Note: unicode-ident is licensed "Unicode-3.0" (not Unicode-DFS-2016); add it
+# when it appears. option-ext (MPL-2.0) is pulled in via dirs/directories and is
+# intentionally NOT allowed — see CONTRIBUTING for the XDG-path plan.
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-DFS-2016", "Unicode-3.0"]
 confidence-threshold = 0.8
 
 [advisories]
@@ -11,8 +15,9 @@ confidence-threshold = 0.8
 yanked = "deny"
 
 [bans]
-# Catch accidental duplicate versions of hot deps (e.g. tokio, serde, kube).
-multiple-versions = "warn"
+# Deny duplicate versions of hot deps; list known exceptions explicitly rather
+# than warning on every build.
+multiple-versions = "deny"
 wildcards = "deny"
 highlight = "all"
 

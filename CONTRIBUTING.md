@@ -2,20 +2,25 @@
 
 Thanks for your interest. Kaptein's core rule is simple and applies to every change:
 
-> **The domain layer is the product.** All logic lives in `kube-viewmodel`; the TUI,
+> **The domain layer is the product.** All logic lives in `kaptein-viewmodel`; the TUI,
 > GUI, and headless agent are thin projections and must never own business logic.
 
 ## Architecture at a glance
 
 ```
-kube-core ──► kube-viewmodel ──► frontend-tui
-                             ──► frontend-gui
-                             ──► headless / serve
+kaptein-core ──► kaptein-viewmodel ──► frontend-tui
+                                 ──► frontend-gui
+                                 ──► headless / serve
 ```
 
 Layer dependencies are **one-directional**: `frontend-*` → `viewmodel` → `core`.
 A pull request that adds logic to a frontend that should live in the view-model is the
 single most likely reason for a review hold.
+
+**Semantics vs. geometry:** the view-model owns *meaning* (columns, actions, status, row
+content); the frontend owns *layout* (column width in cells vs. font metrics, text
+truncation, scroll/focus/hover, modal z-order). Do not put layout math in the view-model,
+and do not compute meaning in a frontend.
 
 ## Getting started
 
@@ -28,7 +33,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Before you submit
 
-1. **Put logic in `kube-viewmodel`.** If the TUI needs a column, a sort, a filter, a
+1. **Put logic in `kaptein-viewmodel`.** If the TUI needs a column, a sort, a filter, a
    status, or an action, define it once in the view-model.
 2. **Keep the projections thin.** A frontend should render a render-intent (columns,
    rows, actions, status) produced by the view-model, not compute it.
@@ -51,13 +56,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## License & contributions
 
-Kaptein is **source-available** under the Business Source License 1.1 (`LICENSE`),
-which converts to MIT on the Change Date. By submitting a contribution you license it
-under these terms.
+Kaptein's **core** is source-available under the Business Source License 1.1 (`LICENSE`),
+which converts to MIT on the rolling Change Date. The **extension surface** (`ext-sdk/`,
+WIT worlds, view-definition schema, `extensions/`) is MIT/Apache-2.0.
 
-To permit commercial (paid) licensing, every contribution must include a
-**Developer Certificate of Origin (DCO)** sign-off: add a `Signed-off-by:` line to your
-commit message (use `git commit -s`). See [`DCO`](./DCO) for the full text.
+To permit commercial (paid) licensing of the core, contributions to the core require a
+**Contributor License Agreement (CLA)** that grants EGK AS the right to relicense your
+contribution — a DCO sign-off alone is **not** sufficient for commercial relicensing.
+Sign the CLA before submitting core changes. (Extension-surface contributions use DCO
+sign-off: `git commit -s`.)
 
 ## Security-sensitive changes
 

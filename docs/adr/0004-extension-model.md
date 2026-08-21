@@ -60,12 +60,28 @@ shared workspace config. Lifecycle is managed with `kaptein extension {validate,
 enable,disable}`; `validate` checks the manifest, lens schema, and WIT signature before
 anything is enabled.
 
+## Licensing split
+
+The extension *surface* must not inherit the BUSL terms, or the "and more" ecosystem
+cannot form: no one writes lenses for a source-available tool without knowing what
+happens to their own work. Therefore:
+
+- **BUSL-1.1** on the Kaptein core (`kaptein-core`, `kaptein-viewmodel`, frontends,
+  `serve`, `headless`).
+- **MIT (or Apache-2.0)** on `ext-sdk/`, the **WIT worlds**, the **view-definition
+  schema**, and the **example extensions** under `extensions/`.
+
+This keeps the monetizable core protected while making the extension surface safe to
+build on.
+
 ## Consequences
 
 - **Positive:** one mental model and one lifecycle for all extensibility; a secure default
-  for the highest-risk tier; a versioning story that makes plugins survive releases.
-- **Negative:** the manifest and versioned WIT worlds must be defined early (Phase 0) and
-  maintained as a stable contract — churn here is expensive.
+  for the highest-risk tier; a versioning story that makes plugins survive releases; a
+  permissively-licensed surface that a third-party ecosystem can build on.
+- **Negative:** the manifest and versioned WIT worlds are a stable contract — churn is
+  expensive. For this reason the WIT worlds are defined **late in Phase 2**, after
+  real lenses exist, not in Phase 0.
 - **Scope note:** the `ext-sdk` crate is the only supported way to author tier-2 plugins;
   it publishes the WIT worlds and host-import bindings plugin authors compile against.
 

@@ -15,36 +15,35 @@ is built for operators, SREs, platform engineers, and security teams who live in
 
 ## Why this exists
 
-The Kubernetes tooling landscape is fragmented. Each tool owns a slice and locks you
-into *its* UI:
+The Kubernetes tooling landscape is fragmented — each tool owns a slice and locks you
+into *its* UI. Rather than grade individual projects, here is **what Kaptein does
+differently**:
 
-| Tool | Strong at | Weak at |
-|------|-----------|---------|
-| **k9s** | Fast terminal nav, vim keymap | Shallow — no deep diagnostics, no GitOps, no fleet |
-| **Lens / Headlamp** | Polished GUI, RBAC, multi-cluster | Heavy, web/Electron-centric, hard over SSH/bastion, logic lives in the UI |
-| **Aptakube** | Clean desktop UX | Closed, opinionated, no automation path |
-| **K8Studio** | Topology/relationship views | No write path, mouse-first |
-| **Popeye** | Sanity scans | Read-only reports, no remediation loop |
-| **kubescape** | Security posture scanning | Reports, not a daily-driver |
-| **SRExpert** | SRE diagnostics | Point tool, not integrated |
-| **OpenShift Console** | Dev perspective, topology | OpenShift-only, web-only |
-| **Krust** | Rust-native k8s | Young, focused on primitives |
-| **kubecost** | Cost allocation | Cost-only, commercial SaaS gravity |
+| What existing tools do well | What Kaptein adds |
+|-----------------------------|-------------------|
+| k9s — fast terminal nav, vim keymap | The same speed *plus* deep diagnostics, GitOps, and fleet — without a second tool |
+| Lens / Headlamp — polished GUI, RBAC, multi-cluster | The same UI *plus* a TUI over SSH, with logic that lives in a shared layer, not the UI |
+| K8Studio / OpenShift Console — topology views | Keyboard-navigable topology, not mouse-first |
+| Popeye / kubescape / SRExpert — scans and reports | Integrated into a daily-driver with a remediation loop, not a one-off report |
+| kubecost — cost allocation | Cost plus capacity simulation and an on-prem TCO model |
 
-**Kaptein** aims for *all of the above, and more* — with one architecture that keeps the
-TUI, GUI, and headless agent from ever drifting apart, because none of them owns any
-logic.
+The unifying idea: **the domain layer is the product.** The TUI, GUI, and headless agent
+are three thin projections of one view-model, so they cannot drift apart — none of them
+owns any logic.
 
 ---
 
-## The four things nobody else has
+## The four things that are hard to find elsewhere
 
 These are the differentiators that hit where daily work actually hurts:
 
-1. **GitOps write path** — you edit in the UI; the tool figures out *which file in which
-   repo* owns the resource (via Flux/Argo metadata), makes the change in a branch, and
-   opens a PR — with diff at both manifest level *and* rendered level
-   (`kustomize build` / `helm template`). You write to Git, not to the API server.
+1. **GitOps write path, from the operator console** — you edit in the UI *where you
+   already stand during an incident*, with live cluster state beside you; the tool
+   figures out *which file in which repo* owns the resource (via Flux/Argo metadata),
+   makes the change in a branch, and opens a PR — with diff at both manifest level *and*
+   rendered level (`kustomize build` / `helm template`). You write to Git, not to the
+   API server. (IDP portals like Backstage/Port offer self-service actions, but two
+   clicks away from reality; Kaptein does it from the live operator console.)
 
 2. **Drift detection** — live state vs. rendered Git-state, continuously compared and
    surfaced, not a one-off report.
@@ -81,14 +80,14 @@ These exclusions are what keep the surface tractable and the single binary hones
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  kube-core                                                              │
+│  kaptein-core                                                           │
 │  kube-rs + tokio; watcher/reflector-based stores; CRD discovery;         │
 │  DynamicObject; protobuf content-type; PartialObjectMetadata for         │
 │  list-heavy views                                                        │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────────────┐
-│  kube-viewmodel  (renderer-agnostic)                                     │
+│  kaptein-viewmodel  (renderer-agnostic)                                  │
 │  columns, sorting, filtering, status inference, "what am I allowed to    │
 │  do here", action graphs. **All logic lives here.**                       │
 └───────┬──────────────────────┬──────────────────────┬────────────────────┘
@@ -295,10 +294,10 @@ the only way "and more" scales.**
 | Concern | Choice |
 |---------|--------|
 | Language | Rust |
-| Kubernetes client | `kube-rs` |
+| Kubernetes client | `kube-rs` + `k8s-openapi` (typed built-ins) |
 | Async runtime | `tokio` |
 | TUI | `ratatui` |
-| GUI | `egui` (+ wasm target for browser UI) |
+| GUI | `egui` + `egui_table` (+ wasm target for browser UI) |
 | Headless / serve / agent | `axum` (HTTP/REST + gRPC-Web) + `tonic` (gRPC) |
 | Local persistence | `redb` or `sqlite` |
 | Extensibility | WASM component model (WIT) |
@@ -308,16 +307,16 @@ the only way "and more" scales.**
 ### Repository layout (planned)
 
 ```
-kube-core/         # kube-rs client, watchers/reflectors, CRD discovery, stores
-kube-viewmodel/    # renderer-agnostic logic: columns, sort/filter, status, action graphs
 crates/
+  kaptein-core/    # kube-rs client, watchers/reflectors, CRD discovery, stores
+  kaptein-viewmodel/ # renderer-agnostic logic: columns, sort/filter, status, action graphs
   frontend-tui/    # ratatui
-  frontend-gui/    # egui (+ wasm)
+  frontend-gui/    # egui + egui_table (+ wasm)
   headless/        # agent mode: drives the view-model directly (no listener)
   serve/           # network server: axum HTTP/gRPC-Web + tonic gRPC; browser + hub
   plugins/         # WASM component-model host + WIT interfaces + manifest loader
   viewdef/         # view definition schema + engine (YAML/CUE)
-  ext-sdk/         # extension authoring SDK: manifest types, WIT worlds, host imports
+  ext-sdk/         # extension authoring SDK (MIT/Apache-2.0)
 extensions/        # example extensions (lenses, plugins, integrations)
 docs/
   adr/             # architecture decision records (see ADR-0001)
@@ -354,8 +353,11 @@ Kaptein is **source-available** under the [Business Source License 1.1](./LICENS
   revenue **and** fewer than **25 employees**.
 - **Larger commercial entities** require a commercial license (or must wait for the
   Change Date).
-- On the **Change Date** (2030-08-20), each released version automatically converts to
-  **MIT**.
+- On the **Change Date** (rolling — four years after each version's first public
+  release), each version automatically converts to **MIT**.
+- The **extension surface** (`ext-sdk/`, WIT worlds, view-definition schema, example
+  extensions) is **MIT/Apache-2.0**, so third parties can write lenses and plugins
+  without taking BUSL terms on their own work.
 
 The exact thresholds and terms are in the [Additional Use Grant](./LICENSE) and are
 easy to adjust as the project evolves.
