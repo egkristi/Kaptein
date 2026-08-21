@@ -153,6 +153,39 @@ enum Command {
         #[arg(long)]
         confirm: bool,
     },
+    /// Scale a workload's replicas (dry-run by default; requires --confirm).
+    Scale {
+        /// group/version/kind, e.g. apps/v1/Deployment
+        #[arg(short, long, default_value = "apps/v1/Deployment")]
+        gvk: String,
+        /// resource name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// target replica count
+        #[arg(long)]
+        replicas: i32,
+        /// actually scale (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Trigger a rollout restart (annotates the pod template; requires --confirm).
+    Restart {
+        /// group/version/kind, e.g. apps/v1/Deployment
+        #[arg(short, long, default_value = "apps/v1/Deployment")]
+        gvk: String,
+        /// resource name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// actually restart (restart has no dry-run; this is required)
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 #[tokio::main]
@@ -373,6 +406,43 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 confirm,
             )
             .await?;
+            println!("{}", outcome.message);
+            Ok(())
+        }
+        Command::Scale {
+            gvk,
+            name,
+            namespace,
+            replicas,
+            confirm,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let outcome = kaptein_core::workloads::scale(
+                &client,
+                &gvk,
+                &name,
+                Some(&namespace),
+                replicas,
+                confirm,
+            )
+            .await?;
+            println!("{}", outcome.message);
+            Ok(())
+        }
+        Command::Restart {
+            gvk,
+            name,
+            namespace,
+            confirm,
+        } => {
+            if !confirm {
+                return Err(kaptein_core::Error::Internal(
+                    "restart has no dry-run; re-run with --confirm to actually restart".into(),
+                ));
+            }
+            let gvk = parse_gvk(&gvk);
+            let outcome =
+                kaptein_core::workloads::restart(&client, &gvk, &name, &namespace).await?;
             println!("{}", outcome.message);
             Ok(())
         }
