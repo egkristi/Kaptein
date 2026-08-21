@@ -1,5 +1,7 @@
 # Kaptein — *the console that knows what changed — and lets you fix it in Git*
 
+> Website: <https://kaptein.io> · Source: <https://github.com/egkristi/Kaptein>
+
 **Kaptein** is a unified Kubernetes workbench: a fast terminal UI, a native GUI, and a
 headless agent — all three thin projections of one renderer-agnostic domain layer. It
 is built for operators, SREs, platform engineers, and security teams who live inside

@@ -13,6 +13,7 @@ edition = "2024"
 rust-version = "1.97"
 license = "BUSL-1.1"
 repository = "https://github.com/egkristi/Kaptein"
+homepage = "https://kaptein.io"
 authors = ["Kaptein contributors"]
 
 [workspace.dependencies]
