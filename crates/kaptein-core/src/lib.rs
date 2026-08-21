@@ -14,6 +14,7 @@ pub mod describe;
 pub mod diagnostics;
 pub mod discovery;
 pub mod error;
+pub mod events;
 pub mod guardrails;
 pub mod pods;
 

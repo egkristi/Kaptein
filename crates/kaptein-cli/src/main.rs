@@ -78,6 +78,15 @@ enum Command {
     },
     /// Run the governed MCP server over stdio (read-only).
     Mcp,
+    /// Show recent cluster events ("what changed in the last N minutes").
+    Events {
+        /// namespace (omit for all namespaces)
+        #[arg(short = 'n', long)]
+        namespace: Option<String>,
+        /// look back this many minutes
+        #[arg(long, default_value_t = 15)]
+        minutes: i64,
+    },
 }
 
 #[tokio::main]
@@ -172,7 +181,27 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         Command::Mcp => mcp::serve()
             .await
             .map_err(|e| kaptein_core::Error::Internal(e.to_string())),
+        Command::Events { namespace, minutes } => {
+            let since_ms = now_ms().saturating_sub(minutes * 60 * 1000);
+            let events =
+                kaptein_core::events::recent_events(&client, namespace.as_deref(), Some(since_ms))
+                    .await?;
+            for e in events {
+                println!(
+                    "{}\t{}\t{}/{}\t{}\t{}",
+                    e.last_timestamp_ms, e.type_, e.kind, e.name, e.reason, e.message
+                );
+            }
+            Ok(())
+        }
     }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Parse a "group/version/kind" string. A single-segment input is treated as a core
