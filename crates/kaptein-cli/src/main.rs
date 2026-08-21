@@ -40,6 +40,15 @@ enum Command {
     },
     /// Show the current context and its guardrail classification.
     Context,
+    /// Diagnose why a pod is not ready.
+    Diagnose {
+        /// pod name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+    },
 }
 
 #[tokio::main]
@@ -89,6 +98,18 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             let class = config.guardrails.classify(&ctx);
             println!("context: {ctx}");
             println!("class: {class:?}");
+            Ok(())
+        }
+        Command::Diagnose { name, namespace } => {
+            let pod = kaptein_core::pods::get_pod(&client, &namespace, &name).await?;
+            let findings = kaptein_core::diagnostics::diagnose(&pod);
+            if findings.is_empty() {
+                println!("{name}: ready (no findings)");
+            } else {
+                for f in findings {
+                    println!("{}: {}", f.code, f.summary);
+                }
+            }
             Ok(())
         }
     }

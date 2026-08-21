@@ -66,6 +66,12 @@ fn pod_ready(pod: &Pod) -> String {
     format!("{ready}/{total}")
 }
 
+/// Fetch a single pod by name in a namespace.
+pub async fn get_pod(client: &Client, namespace: &str, name: &str) -> Result<Pod, Error> {
+    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    pods.get(name).await.map_err(Error::Api)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
