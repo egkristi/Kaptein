@@ -97,3 +97,25 @@ fn surface_kind_is_derived_from_surface() {
     };
     assert_eq!(table.kind(), crate::surface::SurfaceKind::Table);
 }
+
+/// The support matrix — not universal parity — is the truth contract tests assert
+/// against. "TUI has no force-directed Graph; it has a Tree projection" is a documented
+/// design decision, encoded here.
+#[test]
+fn graph_is_alternate_in_tui_full_in_gui() {
+    use crate::surface::{Projection, SupportLevel, SurfaceKind, support_level};
+
+    assert_eq!(
+        support_level(Projection::Tui, SurfaceKind::Graph),
+        SupportLevel::Alternate
+    );
+    assert_eq!(
+        support_level(Projection::Gui, SurfaceKind::Graph),
+        SupportLevel::Full
+    );
+    // Headless/MCP expose semantics, never surfaces.
+    assert_eq!(
+        support_level(Projection::Mcp, SurfaceKind::Graph),
+        SupportLevel::None
+    );
+}

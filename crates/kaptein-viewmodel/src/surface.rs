@@ -51,6 +51,65 @@ impl Surface {
     }
 }
 
+/// Which projections implement which surface kind, and at what fidelity.
+///
+/// This is the **support matrix** that replaces the (unreachable) promise of universal
+/// feature-parity. "TUI has no force-directed Graph layout — it has a keyboard-navigable
+/// Tree projection of the same graph" is a documented design decision here, not a
+/// contract breach. Contract tests assert against this matrix, not against parity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportLevel {
+    /// Full surface: the kind renders natively.
+    Full,
+    /// Alternate projection: the same semantics, a different geometry (e.g. Graph → Tree).
+    Alternate,
+    /// Not supported by this projection.
+    None,
+}
+
+/// A projection (which frontend or agent surface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Projection {
+    Tui,
+    Gui,
+    Browser,
+    Headless,
+    Mcp,
+}
+
+/// The support matrix: `(projection, surface kind) → support level`.
+///
+/// Populated once here and used by the frontends to declare what they implement and by
+/// contract tests to assert the truth of the DoD ("semantic equivalence where the
+/// surface kind allows it").
+pub const SURFACE_SUPPORT: &[(Projection, SurfaceKind, SupportLevel)] = &[
+    // Table, Tree, Form, Matrix, Editor (text), Chart, Stream render near-natively
+    // everywhere except headless/MCP, which expose the semantic layer, not surfaces.
+    (Projection::Tui, SurfaceKind::Graph, SupportLevel::Alternate), // Tree projection
+    (Projection::Tui, SurfaceKind::Terminal, SupportLevel::Full),   // PTY pass-through
+    (Projection::Gui, SurfaceKind::Graph, SupportLevel::Full),      // force-directed
+    (Projection::Gui, SurfaceKind::Terminal, SupportLevel::Full),   // VT emulator
+    (Projection::Browser, SurfaceKind::Graph, SupportLevel::Full),
+    (
+        Projection::Browser,
+        SurfaceKind::Terminal,
+        SupportLevel::Full,
+    ),
+    (Projection::Browser, SurfaceKind::Editor, SupportLevel::Full), // real editor (no $EDITOR)
+                                                                    // Headless and MCP never render surfaces; they expose semantics only.
+];
+
+/// Look up the support level for a `(projection, kind)` pair, defaulting to `None`.
+pub fn support_level(projection: Projection, kind: SurfaceKind) -> SupportLevel {
+    SURFACE_SUPPORT
+        .iter()
+        .find(|(p, k, _)| *p == projection && *k == kind)
+        .map(|(_, _, level)| *level)
+        .unwrap_or(SupportLevel::None)
+}
+
 /// The closed set of surface kinds, derived from `Surface` via
 /// `#[strum_discriminants(name(SurfaceKind))]`, so the variant lists cannot drift apart.
 /// Adding a new kind is a breaking contract change (see `docs/versioning.md`).

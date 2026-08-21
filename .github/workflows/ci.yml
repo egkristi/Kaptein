@@ -61,8 +61,9 @@ jobs:
       - run: cargo build --workspace --locked
 
   wasm:
-    name: WASM (frontend-gui target)
+    name: WASM (browser UI — Phase 2)
     runs-on: ubuntu-latest
+    if: false # re-enable when frontend-gui exists (Phase 2, browser UI first)
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -81,7 +82,7 @@ jobs:
           set -euo pipefail
           cargo metadata --no-deps --format-version 1 > /tmp/meta.json
           # Enforce the one-directional dependency rule (ADR / AGENTS.md):
-          # no frontend, serve, or headless may depend on kaptein-core directly.
+          # no frontend may depend on kaptein-core directly.
           # They reach it only through kaptein-viewmodel.
           python3 - <<'PY'
           import json

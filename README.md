@@ -1,4 +1,4 @@
-# Kaptein — *the domain layer is the product*
+# Kaptein — *the console that knows what changed — and lets you fix it in Git*
 
 **Kaptein** is a unified Kubernetes workbench: a fast terminal UI, a native GUI, and a
 headless agent — all three thin projections of one renderer-agnostic domain layer. It
@@ -363,17 +363,16 @@ the only way "and more" scales.**
 
 ### Repository layout (planned)
 
+Only the crates that carry real structure exist now; the rest are split out when they
+have code.
+
 ```
 crates/
-  kaptein-core/    # kube-rs client, watchers/reflectors, CRD discovery, stores
-  kaptein-viewmodel/ # renderer-agnostic logic: columns, sort/filter, status, action graphs
-  frontend-tui/    # ratatui
-  frontend-gui/    # egui + egui_table (+ wasm)
-  headless/        # agent mode: drives the view-model directly (no listener)
-  serve/           # network server: axum HTTP/gRPC-Web + tonic gRPC; browser + hub
-  plugins/         # WASM component-model host + WIT interfaces + manifest loader
-  viewdef/         # view definition schema + engine (YAML/CUE)
-  ext-sdk/         # extension authoring SDK (MIT/Apache-2.0)
+  kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
+  kaptein-viewmodel/  # renderer-agnostic logic: columns, sort/filter, status, action graphs
+  frontend-tui/       # ratatui
+  # future (split out when they have code): frontend-gui, serve, headless,
+  # viewdef, plugins, ext-sdk
 extensions/        # example extensions (lenses, plugins, integrations)
 docs/
   adr/             # architecture decision records (see ADR-0001)

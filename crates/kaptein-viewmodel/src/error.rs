@@ -25,3 +25,23 @@ pub enum Error {
     #[error("internal error: {0}")]
     Internal(String),
 }
+
+/// Map the raw `kaptein-core` error into a user-facing, redaction-aware error.
+///
+/// The core reports *what failed*; the view-model decides *how to say it* without
+/// leaking secrets. This `From` impl is the single mapping point (see ADR-0009 /
+/// `architecture.md`).
+impl From<kaptein_core::Error> for Error {
+    fn from(err: kaptein_core::Error) -> Self {
+        match err {
+            kaptein_core::Error::Auth(msg) => Error::Forbidden {
+                verb: "authenticate".into(),
+                resource: msg,
+            },
+            kaptein_core::Error::Network(msg)
+            | kaptein_core::Error::WatchInterrupted(msg)
+            | kaptein_core::Error::Discovery(msg)
+            | kaptein_core::Error::Internal(msg) => Error::Internal(msg),
+        }
+    }
+}

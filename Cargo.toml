@@ -4,12 +4,6 @@ members = [
     "crates/kaptein-core",
     "crates/kaptein-viewmodel",
     "crates/frontend-tui",
-    "crates/frontend-gui",
-    "crates/headless",
-    "crates/serve",
-    "crates/plugins",
-    "crates/viewdef",
-    "crates/ext-sdk",
 ]
 
 [workspace.package]

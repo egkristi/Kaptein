@@ -8,17 +8,48 @@ are recorded as numbered ADRs under `docs/adr/`; this file ties them together.
 **The domain layer is the product.** Layer dependencies are strictly one-directional:
 
 ```
-kaptein-core ──► kaptein-viewmodel ──► frontend-tui
-                                 ──► frontend-gui
-                                 ──► headless / serve
+kaptein-core ──► kaptein-viewmodel ──► frontend-tui (and future frontends)
 ```
 
 - `kaptein-core` owns the Kubernetes client (`kube-rs` + `tokio`), watchers/reflectors,
   CRD discovery, and stores. It must not depend on the view-model or any frontend.
 - `kaptein-viewmodel` owns all logic: columns, sorting, filtering, status inference,
-  permission decisions, and action graphs.
-- The frontends (`frontend-tui`, `frontend-gui`, `headless`, `serve`) render, never
-  compute — they consume a **render-intent** produced by the view-model.
+  permission decisions, action graphs, the render contract, diagnostics, and the audit
+  record.
+- Frontends render, never compute — they consume a **render-intent** produced by the
+  view-model.
+
+### Crate layout (current, four crates)
+
+Only the crates that carry real structure exist now; the rest are split out when they
+have code (splitting a module into a crate is an afternoon; holding nine synchronized
+crates through Phase 1 is weekly friction):
+
+```
+crates/
+  kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
+  kaptein-viewmodel/  # renderer-agnostic logic (the product)
+  frontend-tui/       # ratatui
+  # future (split out when they have code): frontend-gui, serve, headless,
+  # viewdef, plugins, ext-sdk
+```
+
+### Error placement
+
+Errors are split deliberately:
+
+- **`kaptein-core::Error`** — the raw type: network, auth, watch interruption, discovery.
+- **`kaptein-viewmodel::Error`** — the user-facing, redaction-aware type, with a `From`
+  impl that maps the core error. The core reports *what failed*; the view-model decides
+  *how to say it* without leaking secrets.
+
+### The one workspace repo
+
+Team configuration lives in **one Git repo**, not four loose surfaces: keymap, lenses,
+saved fleet queries, view layouts, and guardrail policy in a single folder with one
+schema, reviewed in PRs like everything else. This is both a simplification and a
+feature — *"your team's Kaptein setup is a Git repo"* — which gives onboarding for free
+and fits the GitOps thesis.
 
 ### Semantics vs. geometry
 
@@ -137,10 +168,42 @@ layout with compaction + retention TTL (see ADR-0003).
 
 `kaptein mcp` exposes the view-model as a governed MCP server. Every tool call passes
 through the same guardrails as a human (RBAC preflight, context guardrails, read-only
-default, break-glass), is impersonated as a real identity via `--as` (ADR-0007), and
-lands in the same `AuditEvent` log. An agent **never writes to the API server** — it can
-only open a PR (ADR-0010). Kaptein does **not** run agents; it is the governed tool
-surface they call.
+default, break-glass), runs under a **dedicated agent identity** (ADR-0007), and lands
+in the same `AuditEvent` log. An agent **never writes to the API server** — it can only
+open a PR (ADR-0010). Kaptein does **not** run agents; it is the governed tool surface
+they call.
+
+The tool taxonomy (ADR-0013) splits into **primitives** (`list_resources`, `describe`,
+`get_logs`, `get_events` — commodity) and **diagnostics** (`explain_pod_failure`,
+`what_changed_between`, `blast_radius`, `why_is_job_pending` — the moat). Diagnostics are
+backed by the rule engine below.
+
+## Semantic equivalence & the support matrix
+
+Not all surface kinds project identically across frontends, for structural reasons:
+`Terminal` is a PTY pass-through in the TUI but a full VT emulator in a GUI; `Editor` is
+`$EDITOR` handoff in the TUI but a real editor in the browser (no `$EDITOR` exists);
+`Graph` is force-directed + mouse in a GUI but a keyboard-navigated `Tree` projection in
+the TUI; `Stream` needs backpressure handling over gRPC-Web. The DoD is therefore
+**semantic equivalence where the surface kind allows it**, encoded in the
+`SurfaceSupport` matrix (`Projection` × `SurfaceKind` → `SupportLevel::Full | Alternate |
+None`), not universal parity. Contract tests assert against the matrix.
+
+## Diagnostics subsystem
+
+"why isn't this pod ready", sanity scan, blast radius, and "why isn't this job admitted"
+are one engine, not four features: rules over live state, events, and history that
+produce an evidence chain. It lives in `kaptein-diagnostics` (a module in the view-model,
+split out when it grows), and its **rule packs are lenses** — so every new lens
+contributes diagnostics, and the engine is exactly what the MCP diagnostic tools call
+(ADR-0013).
+
+## Audit sink
+
+The local audit log is not an audit trail for a reviewer. An optional **audit sink**
+(syslog, OTLP, or webhook), configured per context with local buffering during downtime,
+forwards events (ADR: `AuditSink`/`AuditConfig`). This is the hook for enterprise
+adoption and the CRA/NIS2/DORA mapping in M3.4.
 
 ## Fleet query as a data layer
 
@@ -169,3 +232,4 @@ inference**, **KubeVirt**, and **CNPG** — as acceptance tests, not frozen in P
 - ADR-0010 — governed MCP server
 - ADR-0011 — fleet query data layer
 - ADR-0012 — lens schema acceptance tests
+- ADR-0013 — MCP tool taxonomy

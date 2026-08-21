@@ -55,6 +55,15 @@ Milestones:
 - **M1.3 Edit & apply**
   - `$EDITOR` handoff for edits; server-side dry-run + diff before apply
   - *OpenAPI/CRD schema validation lands in Phase 2 with the lens engine*
+- **M1.4 Recent activity (cheap "what changed")**
+  - In-memory ring buffer of the watch stream + the events API — **no persistence**
+  - "What changed in the last 15 minutes" without the time-machine storage subsystem
+  - Validates the differentiator's behavior a year before the redb layer exists
+- **M1.5 Landing view**
+  - One screen that answers the three operator questions: is anything broken, what
+    changed recently, what is about to break (certificates, quota, capacity)
+  - The k9s Pulses / OpenShift cluster-overview equivalent — the screen that decides
+    whether anyone leaves the tool open
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight, and
   guardrails. Read-only default for unknown contexts.
 
@@ -80,19 +89,25 @@ GitOps write path, time machine, or fleet.
   agent under a **dedicated identity** (ADR-0007, ADR-0010), landed in the audit log.
 - **M1b.2** Auth: OIDC token forwarding and dedicated agent ServiceAccounts (no
   `impersonate` dependency).
+- **M1b.3** Tool taxonomy (ADR-0013): primitives (`list_resources`, `describe`,
+  `get_logs`, `get_events`) plus the diagnostic moat (`explain_pod_failure`,
+  `what_changed_between`, `blast_radius`, `why_is_job_pending`), backed by the
+  diagnostics rule engine.
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
   does not have.
 
-## Phase 2 — GUI + view definitions + GitOps + dry-run diff
+## Phase 2 — Browser UI + view definitions + GitOps + dry-run diff
 
-**Goal:** the same view-model drives a native GUI, and the GitOps write path becomes the
-differentiator.
+**Goal:** the same view-model drives the **browser UI** (via `serve` + wasm), and the
+GitOps write path becomes the differentiator. The native desktop GUI is **not** on the
+critical path — it is the same egui code packaged later, after 3a validates the product.
 
 Milestones:
 
-- **M2.1 egui GUI** on the *same* view-model, same keymap, wasm backend for
-  browser UI
+- **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
+  packaging (code-signing, notarization, installers, auto-update) is deferred until
+  after Phase 3a
 - **M2.2 Workload lenses as data**: view-definition engine (YAML/CUE) binding CRDs to
   panels/columns/status/actions/health-checks; ship lenses for Strimzi, KubeVirt,
   cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative
@@ -129,10 +144,12 @@ Milestones:
   surface with the PR write path*: every tool call passes through the same guardrails,
   each agent under a dedicated identity (ADR-0007), and landed in the same audit log;
   an agent only opens PRs (ADR-0010).
-- Definition of Done: GUI and TUI are feature-identical projections of one view-model —
-  proven by contract tests asserting the TUI, GUI, and headless all consume the same
-  render intent; a GitOps change can be authored and opened as a PR entirely from the UI;
-  `kaptein mcp` exposes the governed agent surface with the PR write path.
+- Definition of Done: the browser UI and TUI are **semantically equivalent where the
+  surface kind allows it** — proven by contract tests asserting against the
+  `SurfaceSupport` matrix, not universal feature-parity (`Terminal`, `Editor`, `Graph`,
+  and `Stream` differ structurally per projection); a GitOps change can be authored and
+  opened as a PR entirely from the browser UI; `kaptein mcp` exposes the governed agent
+  surface with the PR write path.
 
 ## Phase 3a — Differentiators & relevance
 
@@ -157,6 +174,13 @@ Milestones:
   - KubeVirt lens: console, live migration, snapshots, MTV plans, instance types, hotplug
   - CNPG lens: topology, replication lag, switchover/failover, PITR, WAL status
   - These three are the **acceptance tests** for the view-definition schema (ADR-0012)
+- **M3a.4 Diagnostics subsystem (`kaptein-diagnostics`)**
+  - One rule engine over live state, events, and history — not four separate features
+  - Rule packs **are lenses**: every lens contributes diagnostics, not just views
+  - Backs the MCP diagnostic tools (ADR-0013) and the landing view
+- **M3a.5 Native desktop packaging (post-validation)**
+  - Same egui code as the browser UI; code-signing, notarization, installers,
+    auto-update — done only after 3a proves the product is worth packaging
 - Definition of Done: the five differentiators (governed MCP, GitOps write path, time
   machine, fleet query + drift) are functional and cross-frontend, and the three lenses
   are usable on real clusters.
@@ -194,6 +218,8 @@ Milestones:
     Grafana OnCall), runbook from `runbook_url` or Git-backed markdown
   - Incident timeline records cluster actions (deploys, scaling, node events, alerts) —
     a postmortem, not a command log
+  - **Optional audit sink** (syslog / OTLP / webhook) with local buffering — the hook
+    for enterprise adoption and the CRA/NIS2/DORA mapping
 - **M3b.5 Cluster lifecycle, certificates & DR**
   - Version matrix + EOL per cluster; operator compatibility; PDB blockers
   - Control-plane health for on-prem: etcd size, defrag, leader elections, apiserver

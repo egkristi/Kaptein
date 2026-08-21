@@ -9,3 +9,4 @@ authors.workspace = true
 description = "Kaptein core: kube-rs client, watchers/reflectors, CRD discovery, stores"
 
 [dependencies]
+thiserror = { workspace = true }

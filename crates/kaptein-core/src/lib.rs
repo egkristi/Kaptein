@@ -7,3 +7,7 @@
 //! Scaffold: no implementation yet. See the roadmap (Phase 0 / M1.x).
 
 #![forbid(unsafe_code)]
+
+pub mod error;
+
+pub use error::Error;

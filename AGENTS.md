@@ -28,30 +28,32 @@ kaptein-core ──► kaptein-viewmodel ──► frontend-tui
   (column width in cells vs. font metrics, text truncation, scroll/focus/hover, modal
   z-order). Never let layout math leak into the view-model, and never let meaning drift
   into a frontend.
-- If a change adds logic to `frontend-tui`, `frontend-gui`, `headless`, or `serve` that
-  should be reusable across frontends, move it into `kaptein-viewmodel`.
+- If a change adds logic to a frontend that should be reusable across frontends, move it
+  into `kaptein-viewmodel`.
 - `kaptein-core` owns the Kubernetes client, watchers/reflectors, CRD discovery, and
   stores. It must not depend on the view-model or any frontend.
+- Errors: `kaptein-core::Error` is the raw type (network/auth/watch/discovery);
+  `kaptein-viewmodel::Error` is the user-facing, redaction-aware type with a `From` impl.
+  Do not leak raw core errors to users.
 
-## Planned crate layout
+## Crate layout
+
+Only four crates exist now — split a module out only when it has code (splitting is an
+afternoon; holding nine synchronized crates through Phase 1 is weekly friction):
 
 ```
 crates/
-  kaptein-core/    # kube-rs client, watchers/reflectors, CRD discovery, stores
-  kaptein-viewmodel/ # renderer-agnostic logic (the product)
-  frontend-tui/    # ratatui
-  frontend-gui/    # egui (+ wasm)
-  headless/        # agent mode: drives the view-model directly (no listener)
-  serve/           # network server: axum HTTP/gRPC-Web + tonic gRPC; browser + hub
-  plugins/         # WASM component-model host + WIT interfaces + manifest loader
-  viewdef/         # view definition schema + engine (YAML/CUE)
-  ext-sdk/         # extension authoring SDK (MIT/Apache-2.0)
+  kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
+  kaptein-viewmodel/  # renderer-agnostic logic (the product)
+  frontend-tui/       # ratatui
+  # future (split out when they have code): frontend-gui, serve, headless,
+  # viewdef, plugins, ext-sdk
 extensions/        # example extensions (lenses, plugins, integrations)
 docs/adr/          # architecture decision records
 ```
 
-Note: not all crates exist yet — the project is pre-alpha. When scaffolding, follow this
-layout and create the workspace members accordingly.
+Note: the project is pre-alpha. When scaffolding, follow this layout and split crates
+only when they carry real code.
 
 ## Build & test commands
 

@@ -13,6 +13,7 @@ pub mod audit;
 pub mod error;
 pub mod render;
 pub mod semantic;
+pub mod sink;
 pub mod surface;
 
 pub use audit::{Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source};
@@ -21,7 +22,11 @@ pub use render::{
     Cell, DataPlane, Filter, Page, Query, Revision, Row, RowId, RowPatch, SortSpec, StatusLevel,
 };
 pub use semantic::{Action, ActionState, Status};
-pub use surface::{Column, ColumnKind, EditorMode, Field, FieldKind, Surface, SurfaceKind};
+pub use sink::{AuditConfig, AuditSink};
+pub use surface::{
+    Column, ColumnKind, EditorMode, Field, FieldKind, Projection, SURFACE_SUPPORT, SupportLevel,
+    Surface, SurfaceKind, support_level,
+};
 
 #[cfg(test)]
 mod contract_tests;
