@@ -1,0 +1,12 @@
+[package]
+name = "kaptein-viewmodel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Kaptein view-model: renderer-agnostic logic (the product)"
+
+[dependencies]
+kaptein-core = { path = "../kaptein-core" }

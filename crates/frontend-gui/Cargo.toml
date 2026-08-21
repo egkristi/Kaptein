@@ -1,0 +1,12 @@
+[package]
+name = "frontend-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Kaptein egui desktop + wasm frontend"
+
+[dependencies]
+kaptein-viewmodel = { path = "../kaptein-viewmodel" }

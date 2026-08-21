@@ -61,10 +61,12 @@ which converts to MIT on the rolling Change Date. The **extension surface** (`ex
 WIT worlds, view-definition schema, `extensions/`) is MIT/Apache-2.0.
 
 To permit commercial (paid) licensing of the core, contributions to the core require a
-**Contributor License Agreement (CLA)** that grants EGK AS the right to relicense your
-contribution — a DCO sign-off alone is **not** sufficient for commercial relicensing.
-Sign the CLA before submitting core changes. (Extension-surface contributions use DCO
-sign-off: `git commit -s`.)
+**Contributor License Agreement (CLA)** — see [`CLA.md`](./CLA.md) — that grants EGK AS
+the right to relicense your contribution. A DCO sign-off alone is **not** sufficient for
+commercial relicensing. Sign the CLA before submitting core changes.
+
+Extension-surface contributions use **DCO sign-off only** (`git commit -s`) — no CLA
+required. See [`DCO`](./DCO).
 
 ## Security-sensitive changes
 

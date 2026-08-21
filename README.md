@@ -39,9 +39,10 @@ These are the differentiators that hit where daily work actually hurts:
 
 1. **Governed MCP surface** — `kaptein mcp` lets AI agents drive Kaptein through the
    *same* guardrails as a human: RBAC preflight, context guardrails, read-only default,
-   and break-glass, impersonated as a real Kubernetes identity (`--as`) and landed in the
-   same audit log. An agent never writes to the API server — it can only open a PR. This
-   is the answer to "Shadow MCP": governed, auditable, scoped agent access (ADR-0010).
+   and break-glass, each agent running under its **own dedicated identity** (its own
+   ServiceAccount and narrow RBAC) and landed in the same audit log with the *agent* as
+   the actor. An agent never writes to the API server — it can only open a PR. This is
+   the answer to "Shadow MCP": governed, auditable, scoped agent access (ADR-0010).
 
 2. **GitOps write path, from the operator console** — you edit in the UI *where you
    already stand during an incident*, with live cluster state beside you; the tool

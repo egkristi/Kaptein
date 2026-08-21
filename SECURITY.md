@@ -15,12 +15,10 @@ discovery API's served versions.
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Report security issues privately to the maintainers.
-We will acknowledge within 3 business days and aim to publish a fix and advisory for
-confirmed issues in supported versions.
-
-*(Set the private reporting channel before the first release — e.g. a `security@` alias
-or GitHub private vulnerability reporting.)*
+**Do not open a public issue.** Report security issues privately via **GitHub private
+vulnerability reporting** (enabled in repo settings → Security → Private vulnerability
+reporting). We will acknowledge within 3 business days and aim to publish a fix and
+advisory for confirmed issues in supported versions.
 
 ## Threat model
 
@@ -44,20 +42,22 @@ access** on an operator's workstation. Our mitigations:
 - The GitOps write path writes to **Git, not the API server**, and requires an explicit
   PR review, adding a second human gate before any live change.
 
-### `serve` / hub authentication & impersonation
+### `serve` / hub identity (three modes)
 
 `serve` holds cluster credentials on behalf of multiple users (browser and hub modes).
-To keep RBAC preflight truthful for the *actual* caller:
+To keep RBAC preflight truthful for the *actual* caller, it uses one of three identity
+modes (ADR-0007):
 
-- `serve` authenticates its own users (TLS client certs or OIDC tokens), then
-  **impersonates** the authenticated user via Kubernetes `--as` / `--as-group`.
-- `SelfSubjectRulesReview` runs **as the impersonated user**, so greying reflects the
-  caller's rights — not `serve`'s.
-- `serve` holds a **minimal bootstrap identity** whose only privilege is the
-  `impersonate` verb — never cluster admin.
-- Where impersonation is unavailable, the behavior is **read-only with a clear warning**,
-  never silent escalation.
-- Audit events record the **real actor**, not `serve`.
+1. **Token forwarding (default for human browser access)** — the browser's own OIDC
+   token is forwarded as a bearer token, **not stored**. The API server sees the real
+   user natively; the `impersonate` verb is never needed.
+2. **Impersonation** (where policy permits) — `serve` impersonates via `--as`/`--as-group`
+   for hub-relayed human actions.
+3. **Dedicated agent identity** (default for MCP) — each agent has its own ServiceAccount
+   with narrow RBAC.
+
+`serve` holds a **minimal bootstrap identity** (least privilege for the chosen mode) —
+never cluster admin. Audit events record the **real actor** (user or agent), not `serve`.
 
 This is the largest privilege-escalation surface in the design; it is specified in
 ADR-0007 and must not be weakened.
@@ -77,8 +77,9 @@ plane, not a new one:
 
 - Every agent tool call passes through **the same guardrails**: RBAC preflight, context
   guardrails, read-only default, and break-glass.
-- Agent calls are **impersonated** via `--as`, so the cluster sees the agent's real
-  identity, not `serve`'s.
+- Agents run under a **dedicated agent identity** (own ServiceAccount, narrow RBAC) —
+  **not** impersonated as the operator, so the audit log distinguishes agent actions
+  from human actions.
 - Agent calls land in the **same `AuditEvent` log**, with the agent as the actor.
 - An agent **never writes to the API server** — the only write path is a PR (ADR-0010,
   ADR-0008).

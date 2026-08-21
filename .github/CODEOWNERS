@@ -1,0 +1,11 @@
+# Core crates and legal documents require maintainer review.
+* @egkristi
+
+# Docs and ADRs.
+/docs/ @egkristi
+/AGENTS.md @egkristi
+/CONTRIBUTING.md @egkristi
+/SECURITY.md @egkristi
+/LICENSE @egkristi
+/CLA.md @egkristi
+/DCO @egkristi

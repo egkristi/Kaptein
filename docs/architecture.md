@@ -44,9 +44,12 @@ ADR-0005):
    `query(range, sort, filter) -> Page` and `Stream<RowPatch>` with a revision number.
 2. **Semantic layer** — the renderer-agnostic part: actions, RBAC state, status
    inference, blast radius.
-3. **Surface kinds** — a small, closed set: `Table`, `Tree`, `Graph`, `Stream`,
-   `Editor`, `Chart`, `Terminal`. Each frontend implements the set once; new views are
-   combinations, never new variants.
+3. **Surface kinds** — a small, closed set: `Table`, `Tree`, `Graph`, `Form`, `Matrix`,
+   `Stream`, `Editor`, `Chart`, `Terminal`. Each frontend implements the set once; new
+   views are combinations, never new variants. `Form` (schema-driven structured input)
+   and `Matrix` (two-axis virtualized data) are included up front because both appear in
+   the roadmap — see ADR-0005. Diff is a *mode* over `Editor`/`Table`/`Matrix`, not a
+   separate kind.
 
 Contract tests assert that the same query yields the same rows, actions, and enabled
 state across projections — not merely that the same variant was passed.
@@ -59,7 +62,7 @@ and the incident-timeline export (one format, two consumers):
 ```rust
 struct AuditEvent {
     timestamp: SystemTime,
-    actor: String,             // the real user, after serve impersonation
+    actor: String,             // the real user OR the dedicated agent identity
     context: String,           // cluster/context id — never a secret
     operation: Operation,      // e.g. Delete, Scale, GitPrOpened
     target: ResourceRef,       // group/kind/name/namespace
@@ -67,7 +70,9 @@ struct AuditEvent {
 }
 ```
 
-Audit records **operations, not values** — secrets are never persisted.
+Audit records **operations, not values** — secrets are never persisted. An agent has its
+**own** actor identity (never the operator's), so agent actions are distinguishable in
+the log (ADR-0010, ADR-0007).
 
 ## The projections
 
@@ -77,8 +82,8 @@ Audit records **operations, not values** — secrets are never persisted.
 - **`headless`** — agent mode that drives the view-model directly, **no network
   listener**; used for CI and scripting.
 - **`serve`** — the network server (`axum` HTTP/REST + gRPC-Web, `tonic` gRPC for native
-  peers); the target for the browser UI and the hub mode (M3.2). Authenticates its own
-  users and **impersonates** them against the cluster (see ADR-0007).
+  peers); the target for the browser UI and the hub mode (M3.2). Uses one of three
+  identity modes (token forwarding, impersonation, dedicated agent identity) per ADR-0007.
 
 ### Transport note
 

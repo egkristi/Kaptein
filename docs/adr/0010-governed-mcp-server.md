@@ -23,19 +23,28 @@ Expose `kaptein mcp` as a **governed MCP server** where every tool call:
 
 1. passes through the **same guardrails** as a human (context guardrails, read-only
    default, break-glass),
-2. is **impersonated as a real Kubernetes identity** via `--as` (see ADR-0007), so the
-   cluster sees the agent, not `serve`,
+2. runs under a **dedicated agent identity** — by default each registered agent gets its
+   own ServiceAccount with its own narrow RBAC (identity mode 3 of ADR-0007), so the
+   audit log records *the agent* as the actor, never the operator,
 3. lands in the **same `AuditEvent` log**, with the agent as the actor.
 
 Crucially, an agent **never writes to the API server** — it can only open a **PR**, the
 same GitOps write path as a human (ADR-0008). This is the safest agent-write path that
 has been proposed, and the infrastructure already exists.
 
+### Identity — the critical correction
+
+An agent must **not** be impersonated as the operator's identity. If it were, the audit
+log would say "Erling deleted this" instead of "the agent deleted this on Erling's
+behalf," which destroys the accountability that agent-governance exists to provide.
+**Dedicated agent identity is the default for MCP**, not impersonation. See ADR-0007 for
+the three identity modes.
+
 ## Consequences
 
 - **Positive:** this is the answer to Shadow MCP — governed, auditable, scoped agent
-  access that reuses the human control plane. It composes with the GitOps differentiator
-  and becomes the **fifth differentiator**.
+  access with the agent as its own actor. It composes with the GitOps differentiator and
+  becomes the **fifth differentiator**.
 - **Negative:** the MCP surface is a new, stable API and must carry the same versioning
   discipline as WIT worlds (ADR-0004); "every tool call → same guardrails" must be
   enforced, not assumed.
@@ -48,3 +57,5 @@ has been proposed, and the infrastructure already exists.
   problem that now dominates.
 - **Ungoverned MCP passthrough** — rejected: reintroduces exactly the Shadow MCP risk
   this ADR exists to close.
+- **Impersonating the operator for agent calls** — rejected: destroys agent
+  accountability; the audit log must distinguish agent actions from human actions.

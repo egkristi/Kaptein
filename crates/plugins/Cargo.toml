@@ -1,0 +1,11 @@
+[package]
+name = "plugins"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Kaptein WASM component-model host + WIT interfaces + manifest loader"
+
+[dependencies]

@@ -1,0 +1,11 @@
+[package]
+name = "kaptein-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Kaptein core: kube-rs client, watchers/reflectors, CRD discovery, stores"
+
+[dependencies]

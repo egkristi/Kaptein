@@ -66,6 +66,24 @@ Milestones:
   - port-forward; YAML view of any resource
   - RBAC-preflight-greyed actions and prod-context "break glass" gate
 
+## Phase 1b — Governed MCP surface (read-only)
+
+**Goal:** a distributable `kaptein mcp` artifact in month 4–5, before k9s parity is
+complete. It is the one differentiator with a limited shelf life (agent-governance is
+hot now, commoditized by ~2028) and it is cheap: it needs `kaptein-core`, the semantic
+layer, RBAC preflight, context guardrails, and `AuditEvent` — all of which land in Phase
+0 and Phase 1 — and needs **none** of the GUI, lens engine, viewdef schema, WIT/WASM,
+GitOps write path, time machine, or fleet.
+
+- **M1b.1** `kaptein mcp` as a read-only MCP server: every tool call through the same
+  guardrails (RBAC preflight, context guardrails, read-only default, break-glass), each
+  agent under a **dedicated identity** (ADR-0007, ADR-0010), landed in the audit log.
+- **M1b.2** Auth: OIDC token forwarding and dedicated agent ServiceAccounts (no
+  `impersonate` dependency).
+- **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
+  read-only Kubernetes access without opening the TUI — a distribution channel the TUI
+  does not have.
+
 ## Phase 2 — GUI + view definitions + GitOps + dry-run diff
 
 **Goal:** the same view-model drives a native GUI, and the GitOps write path becomes the
@@ -107,39 +125,55 @@ Milestones:
 
   *The WIT worlds are defined here, late in Phase 2, after real lenses exist — not in
   Phase 0 (see ADR-0004).*
-- **M2.7 Governed MCP surface (`kaptein mcp`)** — every tool call passes through the same
-  guardrails (RBAC preflight, context guardrails, read-only default, break-glass),
-  impersonated via `--as`, and landed in the same audit log; an agent only opens PRs
-  (ADR-0010).
+- **M2.7 Governed MCP surface (`kaptein mcp`)** — *extends the read-only Phase 1b
+  surface with the PR write path*: every tool call passes through the same guardrails,
+  each agent under a dedicated identity (ADR-0007), and landed in the same audit log;
+  an agent only opens PRs (ADR-0010).
 - Definition of Done: GUI and TUI are feature-identical projections of one view-model —
   proven by contract tests asserting the TUI, GUI, and headless all consume the same
   render intent; a GitOps change can be authored and opened as a PR entirely from the UI;
-  `kaptein mcp` exposes the governed agent surface.
+  `kaptein mcp` exposes the governed agent surface with the PR write path.
 
-## Phase 3 — Time machine, fleet, cost, security, lenses
+## Phase 3a — Differentiators & relevance
 
-**Goal:** the five differentiators are complete, plus the scanning/analytics surface and
-  the workload lenses that decide relevance.
+**Goal:** ship the differentiators and the lenses that decide whether Kaptein is
+relevant. This is the phase that "ships something useful alone"; Phase 3b is gated on it.
 
 Milestones:
 
-- **M3.1 Time machine**
+- **M3a.1 Time machine**
   - Persist watch stream locally (redb/SQLite, optionally centralized) with compaction
     and a configurable retention TTL
   - Scrub backwards, diff two timestamps, "what changed between 14:20 and 14:35"
   - Events + Git deploy markers on one timeline
-- **M3.2 Fleet**
+- **M3a.2 Fleet**
   - Fleet query (one query, all clusters); cross-cluster diff + drift matrix
   - Saved queries in Git; scheduled reports; **query-as-policy** (fail CI on rows)
   - Clusterpedia-class data layer for hub mode (ADR-0011)
-  - Aggregated compliance/cost/upgrade dashboards
   - Optional hub mode with per-cluster agent (headless/serve)
-- **M3.3 Cost & capacity**
+- **M3a.3 Workload lenses (DRA / KubeVirt / CNPG)**
+  - DRA-native views: `ResourceSlice`/`ResourceClaim`/`DeviceClass`; "why isn't this job
+    admitted?" over ClusterQueue quota, gang scheduling, preemption; InferencePool
+  - KubeVirt lens: console, live migration, snapshots, MTV plans, instance types, hotplug
+  - CNPG lens: topology, replication lag, switchover/failover, PITR, WAL status
+  - These three are the **acceptance tests** for the view-definition schema (ADR-0012)
+- Definition of Done: the five differentiators (governed MCP, GitOps write path, time
+  machine, fleet query + drift) are functional and cross-frontend, and the three lenses
+  are usable on real clusters.
+
+## Phase 3b — Analytics surface (conditional)
+
+**Goal:** the scanning/analytics and lifecycle surface. **Gated on Phase 3a finding
+users** — an explicit stopping point, not a failure.
+
+Milestones:
+
+- **M3b.1 Cost & capacity**
   - Allocation per namespace/label/team/workload (showback + chargeback)
   - Cloud billing import (Azure/AWS/GCP) + on-prem TCO model
   - Rightsizing, idle/waste, budgets + alerting, carbon estimate
   - Capacity simulation (lose a node / an AZ)
-- **M3.4 Security & compliance (kubescape class)**
+- **M3b.2 Security & compliance (kubescape class)**
   - Posture: CIS, NSA/CISA, MITRE ATT&CK, NSM *Grunnprinsipper*, **CRA, NIS2, DORA**
   - Image scan (Trivy/Grype), SBOM, cosign/sigstore, SLSA
   - **SBOM reconciliation** (two generators, diff, trust decision)
@@ -148,17 +182,11 @@ Milestones:
   - **Policy preflight**: Kyverno/Gatekeeper/ValidatingAdmissionPolicy locally
   - NetworkPolicy editor + "can A reach B" simulation
   - Secrets masked; ESO/Vault/SOPS source display; CVE → workloads
-- **M3.5 Deep diagnostics & mesh**
+- **M3b.3 Deep diagnostics & mesh**
   - Continuous sanity scan with score/trend; OOM forensics; blast-radius preview
   - Istio mTLS/ambient/`istioctl analyze`/config-dump; Cilium/Hubble flow-map
   - Loki/OpenSearch historical logs; Tempo/Jaeger traces; Alertmanager + silences
-- **M3.6 Workload lenses (DRA / KubeVirt / CNPG)**
-  - DRA-native views: `ResourceSlice`/`ResourceClaim`/`DeviceClass`; "why isn't this job
-    admitted?" over ClusterQueue quota, gang scheduling, preemption; InferencePool
-  - KubeVirt lens: console, live migration, snapshots, MTV plans, instance types, hotplug
-  - CNPG lens: topology, replication lag, switchover/failover, PITR, WAL status
-  - These three are the **acceptance tests** for the view-definition schema (ADR-0012)
-- **M3.7 Incident & collaboration**
+- **M3b.4 Incident & collaboration**
   - Session recording (asciinema-like TUI / event-log GUI) → Markdown incident timeline
   - Shared workspace configs in Git; full local audit log (stable format, reused by the
     incident-timeline export)
@@ -166,7 +194,7 @@ Milestones:
     Grafana OnCall), runbook from `runbook_url` or Git-backed markdown
   - Incident timeline records cluster actions (deploys, scaling, node events, alerts) —
     a postmortem, not a command log
-- **M3.8 Cluster lifecycle, certificates & DR**
+- **M3b.5 Cluster lifecycle, certificates & DR**
   - Version matrix + EOL per cluster; operator compatibility; PDB blockers
   - Control-plane health for on-prem: etcd size, defrag, leader elections, apiserver
     latency
