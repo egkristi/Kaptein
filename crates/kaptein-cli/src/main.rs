@@ -152,6 +152,9 @@ enum Command {
         /// actually delete (default is dry-run)
         #[arg(long)]
         confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
     },
     /// Scale a workload's replicas (dry-run by default; requires --confirm).
     Scale {
@@ -170,6 +173,9 @@ enum Command {
         /// actually scale (default is dry-run)
         #[arg(long)]
         confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
     },
     /// Trigger a rollout restart (annotates the pod template; requires --confirm).
     Restart {
@@ -185,6 +191,9 @@ enum Command {
         /// actually restart (restart has no dry-run; this is required)
         #[arg(long)]
         confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
     },
 }
 
@@ -394,7 +403,11 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             namespace,
             cascade,
             confirm,
+            break_glass,
         } => {
+            if confirm {
+                gate_write(break_glass.as_deref())?;
+            }
             let gvk = parse_gvk(&gvk);
             let policy = kaptein_core::delete::parse_propagation(&cascade);
             let outcome = kaptein_core::delete::delete(
@@ -415,7 +428,11 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             namespace,
             replicas,
             confirm,
+            break_glass,
         } => {
+            if confirm {
+                gate_write(break_glass.as_deref())?;
+            }
             let gvk = parse_gvk(&gvk);
             let outcome = kaptein_core::workloads::scale(
                 &client,
@@ -434,12 +451,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             name,
             namespace,
             confirm,
+            break_glass,
         } => {
             if !confirm {
                 return Err(kaptein_core::Error::Internal(
                     "restart has no dry-run; re-run with --confirm to actually restart".into(),
                 ));
             }
+            gate_write(break_glass.as_deref())?;
             let gvk = parse_gvk(&gvk);
             let outcome =
                 kaptein_core::workloads::restart(&client, &gvk, &name, &namespace).await?;
@@ -454,6 +473,15 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Enforce the context guardrail for a confirmed write: classify the current context
+/// and require a non-empty break-glass reason for prod/unknown contexts.
+fn gate_write(break_glass: Option<&str>) -> Result<(), kaptein_core::Error> {
+    let config = kaptein_core::config::load();
+    let ctx = kaptein_core::discovery::current_context_name()?;
+    let class = config.guardrails.classify(&ctx);
+    kaptein_core::guardrails::gate_write(class, break_glass).map_err(kaptein_core::Error::Internal)
 }
 
 /// Parse a "group/version/kind" string. A single-segment input is treated as a core

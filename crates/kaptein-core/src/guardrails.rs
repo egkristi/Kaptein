@@ -58,6 +58,27 @@ impl Guardrails {
     }
 }
 
+/// Whether a *write* is permitted given a context class and an optional break-glass
+/// reason. `Staging` is always allowed (the operator opted in); `Prod` and `Unknown`
+/// are read-only by default and require an explicit, non-empty break-glass reason.
+///
+/// Returns `Err` with a user-facing reason when the write must be blocked. The caller
+/// surfaces this before invoking any mutating API call, so the gate is enforced *before*
+/// the request reaches the API server (defense in depth with RBAC).
+pub fn gate_write(class: ContextClass, break_glass_reason: Option<&str>) -> Result<(), String> {
+    match class {
+        ContextClass::Staging => Ok(()),
+        ContextClass::Prod | ContextClass::Unknown => match break_glass_reason {
+            Some(reason) if !reason.trim().is_empty() => Ok(()),
+            _ => Err(
+                "write blocked: context is classified as prod/unknown (read-only default). \
+                 Re-run with --break-glass '<reason>' to override."
+                    .into(),
+            ),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +110,26 @@ mod tests {
         let g = Guardrails::default();
         assert_eq!(g.classify("prod"), ContextClass::Unknown);
         assert_eq!(g.classify("anything"), ContextClass::Unknown);
+    }
+
+    #[test]
+    fn gate_write_blocks_prod_without_reason() {
+        assert!(gate_write(ContextClass::Prod, None).is_err());
+        assert!(gate_write(ContextClass::Prod, Some("   ")).is_err());
+    }
+
+    #[test]
+    fn gate_write_allows_prod_with_reason() {
+        assert!(gate_write(ContextClass::Prod, Some("maintenance")).is_ok());
+    }
+
+    #[test]
+    fn gate_write_unknown_read_only_by_default() {
+        assert!(gate_write(ContextClass::Unknown, None).is_err());
+    }
+
+    #[test]
+    fn gate_write_staging_always_allowed() {
+        assert!(gate_write(ContextClass::Staging, None).is_ok());
     }
 }
