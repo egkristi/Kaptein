@@ -16,15 +16,27 @@ use rmcp::model::{
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData, ServerHandler, ServiceExt};
 
-/// The Kaptein MCP server: holds a Kubernetes client and tool state.
+/// The Kaptein MCP server: holds a Kubernetes client, tool state, and agent identity.
 pub struct KapteinMcp {
     client: kube::Client,
+    /// The dedicated agent identity (ADR-0007): `$KAPTEIN_AGENT` or the current
+    /// context name. Agent actions are attributed to this identity, not a human.
+    agent_name: String,
+    /// The current context name (for the audit `context` field).
+    context_name: String,
 }
 
 impl KapteinMcp {
     pub async fn new() -> Result<Self, CoreError> {
+        let agent_name = std::env::var("KAPTEIN_AGENT")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "mcp-client".to_string());
+        let context_name = discovery::current_context_name().unwrap_or_default();
         Ok(Self {
             client: discovery::client().await?,
+            agent_name,
+            context_name,
         })
     }
 
@@ -253,9 +265,9 @@ impl KapteinMcp {
             timestamp: now_ms,
             actor: Actor {
                 kind: ActorKind::Agent,
-                name: "mcp-client".into(),
+                name: self.agent_name.clone(),
             },
-            context: "".into(), // populated once agent identity/context is wired
+            context: self.context_name.clone(),
             operation,
             target: ResourceRef {
                 group: "".into(),

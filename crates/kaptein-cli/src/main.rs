@@ -507,6 +507,19 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 confirm,
             )
             .await?;
+            let audit_outcome = if outcome.deleted {
+                kaptein_viewmodel::audit::Outcome::Applied
+            } else {
+                kaptein_viewmodel::audit::Outcome::DryRun
+            };
+            audit_write(
+                kaptein_viewmodel::audit::Operation::Delete,
+                &gvk.kind,
+                namespace.as_deref().unwrap_or(""),
+                &name,
+                audit_outcome,
+                break_glass.as_deref(),
+            );
             println!("{}", outcome.message);
             Ok(())
         }
@@ -531,6 +544,19 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 confirm,
             )
             .await?;
+            let audit_outcome = if outcome.scaled {
+                kaptein_viewmodel::audit::Outcome::Applied
+            } else {
+                kaptein_viewmodel::audit::Outcome::DryRun
+            };
+            audit_write(
+                kaptein_viewmodel::audit::Operation::Scale,
+                &gvk.kind,
+                &namespace,
+                &name,
+                audit_outcome,
+                break_glass.as_deref(),
+            );
             println!("{}", outcome.message);
             Ok(())
         }
@@ -550,6 +576,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             let gvk = parse_gvk(&gvk);
             let outcome =
                 kaptein_core::workloads::restart(&client, &gvk, &name, &namespace).await?;
+            audit_write(
+                kaptein_viewmodel::audit::Operation::Restart,
+                &gvk.kind,
+                &namespace,
+                &name,
+                kaptein_viewmodel::audit::Outcome::Applied,
+                break_glass.as_deref(),
+            );
             println!("{}", outcome.message);
             Ok(())
         }
@@ -570,6 +604,45 @@ fn gate_write(break_glass: Option<&str>) -> Result<(), kaptein_core::Error> {
     let ctx = kaptein_core::discovery::current_context_name()?;
     let class = config.guardrails.classify(&ctx);
     kaptein_core::guardrails::gate_write(class, break_glass).map_err(kaptein_core::Error::Internal)
+}
+
+/// Emit a best-effort audit event for a CLI write operation (ADR-0010). Audit is a
+/// governance requirement; an audit-write failure must not block the operation.
+fn audit_write(
+    operation: kaptein_viewmodel::audit::Operation,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+    outcome: kaptein_viewmodel::audit::Outcome,
+    break_glass: Option<&str>,
+) {
+    use kaptein_viewmodel::audit::{Actor, ActorKind, AuditEvent, ResourceRef, Source};
+    let context = kaptein_core::discovery::current_context_name().unwrap_or_default();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let event = AuditEvent {
+        timestamp: now_ms,
+        actor: Actor {
+            kind: ActorKind::Human,
+            name: std::env::var("USER").unwrap_or_else(|_| "human".into()),
+        },
+        context,
+        operation,
+        target: ResourceRef {
+            group: "".into(),
+            kind: kind.into(),
+            namespace: namespace.into(),
+            name: name.into(),
+        },
+        outcome,
+        source: Source::Tui,
+        session_id: "cli".into(),
+        reason: break_glass.map(|s| s.to_string()),
+        on_behalf_of: None,
+    };
+    let _ = audit::append(&event);
 }
 
 /// Parse a "group/version/kind" string. A single-segment input is treated as a core
