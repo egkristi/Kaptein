@@ -4,6 +4,28 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-22
+
+### Added
+- `kaptein scale --gvk X --name Y --replicas N [--confirm]` — scale via the scale
+  subresource, server-side dry-run by default (M1.2 k9s parity).
+- `kaptein restart --gvk X --name Y --confirm` — rollout restart via the
+  `kube.kubernetes.io/restartedAt` annotation (kubectl rollout restart equivalent).
+- `kaptein logs --name X --follow` — follow log streaming (kubectl logs -f), with
+  optional regex filter (M1.2).
+- `kaptein get --sort <col> --descending --filter <substr>` — column sort (name/
+  namespace/kind/created) and case-insensitive substring filter (k9s parity).
+- `kaptein edit --gvk X --name Y` — `$EDITOR` handoff: fetch YAML, edit, dry-run the
+  result (never applies) with server-managed field stripping (M1.3).
+- Prod/unknown-context break-glass gate: writes require `--break-glass <reason>`
+  unless the context is classified `staging` (M1.1).
+
+### Changed
+- CLI write operations (scale/delete/restart) now emit `AuditEvent`s with operation,
+  target, outcome (Applied/DryRun), and break-glass reason (ADR-0010).
+- MCP server attributes agent identity from `$KAPTEIN_AGENT` and records the real
+  context name in the audit `context` field (ADR-0007, Phase 1b).
+
 ## [0.3.0] - 2026-08-22
 
 ### Added
