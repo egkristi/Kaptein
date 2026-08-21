@@ -11,6 +11,7 @@
 pub mod apply;
 pub mod auth;
 pub mod config;
+pub mod delete;
 pub mod describe;
 pub mod diagnostics;
 pub mod discovery;

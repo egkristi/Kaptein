@@ -129,6 +129,24 @@ enum Command {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
+    /// Delete a resource (dry-run by default; requires --confirm).
+    Delete {
+        /// group/version/kind, e.g. v1/ConfigMap or apps/v1/Deployment
+        #[arg(short, long, default_value = "v1/ConfigMap")]
+        gvk: String,
+        /// resource name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace (omit for cluster-scoped)
+        #[arg(short = 'n', long)]
+        namespace: Option<String>,
+        /// cascade policy: background (default), foreground, or orphan
+        #[arg(long, default_value = "background")]
+        cascade: String,
+        /// actually delete (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 #[tokio::main]
@@ -305,6 +323,27 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 kaptein_core::exec::exec(&client, &namespace, &pod, &command, container.as_deref())
                     .await?;
             print!("{}", output.output);
+            Ok(())
+        }
+        Command::Delete {
+            gvk,
+            name,
+            namespace,
+            cascade,
+            confirm,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let policy = kaptein_core::delete::parse_propagation(&cascade);
+            let outcome = kaptein_core::delete::delete(
+                &client,
+                &gvk,
+                &name,
+                namespace.as_deref(),
+                policy,
+                confirm,
+            )
+            .await?;
+            println!("{}", outcome.message);
             Ok(())
         }
     }
