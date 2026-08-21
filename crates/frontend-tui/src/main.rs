@@ -1,119 +1,171 @@
-//! Kaptein TUI — a ratatui table view over Kubernetes resources.
+//! Kaptein TUI — the daily-driver MVP surface.
 //!
-//! The first renderer-agnostic projection: it lists pods (default) with vim navigation
-//! (`j`/`k`/`g`/`G`/`q`), demonstrating the "thin frontend" pattern — it consumes data
-//! from `kaptein-core`, owns only *geometry* (scroll, selection, column layout), and
-//! recomputes nothing semantic.
+//! A ratatui table over cluster resources with vim navigation, resource-kind switching,
+//! namespace filtering, and a detail pane (describe + diagnostics) for the selected
+//! resource. It consumes `kaptein-core`, owns only *geometry*, and recomputes nothing
+//! semantic (ADR-0005).
+//!
+//! Keys:
+//!   j/k  move selection        g/G  top/bottom
+//!   <Tab>  cycle resource kind  n  cycle namespace
+//!   d  describe selected        i  diagnose selected
+//!   q / Esc / Ctrl-C  quit
 
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use kube::Client;
 use kube::core::GroupVersionKind;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Cell, Row, Table};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
-/// A tabular row in the TUI's own geometry space (not the view-model's `Row`).
+/// A resource kind the TUI can list.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Pods,
+    Deployments,
+    Namespaces,
+}
+
+impl Kind {
+    const ALL: [Kind; 3] = [Kind::Pods, Kind::Deployments, Kind::Namespaces];
+
+    fn next(self) -> Kind {
+        let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    fn gvk(self) -> GroupVersionKind {
+        match self {
+            Kind::Pods => GroupVersionKind::gvk("", "v1", "Pod"),
+            Kind::Deployments => GroupVersionKind::gvk("apps", "v1", "Deployment"),
+            Kind::Namespaces => GroupVersionKind::gvk("", "v1", "Namespace"),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Kind::Pods => "Pods",
+            Kind::Deployments => "Deployments",
+            Kind::Namespaces => "Namespaces",
+        }
+    }
+}
+
+/// A tabular row (geometry-local, mirrors `kaptein_core::discovery::ResourceSummary`).
 struct TableRow {
     name: String,
     namespace: String,
-    kind: String,
+    status: String,
     created: String,
 }
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    // Connect to the cluster and fetch pods (default resource).
     let client = kaptein_core::discovery::client()
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
-    let gvk = GroupVersionKind::gvk("", "v1", "Pod");
-    let items = kaptein_core::discovery::list(&client, &gvk, None)
-        .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
-
-    let rows: Vec<TableRow> = items
-        .into_iter()
-        .map(|r| TableRow {
-            name: r.name,
-            namespace: r.namespace,
-            kind: r.kind,
-            created: r.created.map(|t| t.0.to_string()).unwrap_or_default(),
-        })
-        .collect();
-
-    run_ui(rows).await
+    run_ui(&client).await
 }
 
-async fn run_ui(rows: Vec<TableRow>) -> io::Result<()> {
+async fn run_ui(client: &Client) -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    let mut kind = Kind::Pods;
+    let mut namespace: Option<String> = None; // None = all namespaces
+    let mut rows: Vec<TableRow> = fetch(client, kind, namespace.as_deref()).await?;
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
+    let mut detail: Option<String> = None;
 
     loop {
+        let status_line = format!(
+            " {:<12} ns:{} ({} rows) — Tab:kind  n:ns  d:describe  i:diagnose  q:quit ",
+            kind.label(),
+            namespace.as_deref().unwrap_or("all"),
+            rows.len()
+        );
+
         terminal.draw(|frame| {
             let area = frame.area();
-            let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
+            let chunks = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Percentage(65),
+                Constraint::Min(0),
+            ])
+            .split(area);
 
-            let header = Block::default()
-                .title(" Kaptein — Pods (j/k navigate, q quit) ")
-                .borders(Borders::ALL);
+            let header = Block::default().title(status_line).borders(Borders::ALL);
             frame.render_widget(header, chunks[0]);
 
-            let rows: Vec<Row> = rows
+            let table_rows: Vec<Row> = rows
                 .iter()
                 .enumerate()
                 .map(|(i, r)| {
-                    let style = if i == selected {
+                    let base = if i == selected {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
                         Style::default()
                     };
+                    let status_style = match r.status.as_str() {
+                        "Running" | "Active" | "Ready" => Style::default().fg(Color::Green),
+                        "Pending" | "ContainerCreating" => Style::default().fg(Color::Yellow),
+                        _ => Style::default().fg(Color::Red),
+                    };
                     Row::new(vec![
                         Cell::from(r.name.as_str()),
                         Cell::from(r.namespace.as_str()),
-                        Cell::from(r.kind.as_str()),
+                        Cell::from(r.status.as_str()).style(status_style),
                         Cell::from(r.created.as_str()),
                     ])
-                    .style(style)
+                    .style(base)
                 })
                 .collect();
 
             let widths = [
-                Constraint::Percentage(30),
+                Constraint::Percentage(35),
                 Constraint::Percentage(25),
                 Constraint::Percentage(20),
-                Constraint::Percentage(25),
+                Constraint::Percentage(20),
             ];
-            let table = Table::new(rows, widths)
-                .header(Row::new(vec!["NAME", "NAMESPACE", "KIND", "CREATED"]))
+            let table = Table::new(table_rows, widths)
+                .header(Row::new(vec!["NAME", "NAMESPACE", "STATUS", "CREATED"]))
                 .block(Block::default().borders(Borders::ALL));
             frame.render_stateful_widget(
                 table,
                 chunks[1],
                 &mut ratatui::widgets::TableState::default().with_offset(scroll),
             );
+
+            let detail_text = detail.clone().unwrap_or_else(|| {
+                "Press d to describe, i to diagnose the selected resource.".into()
+            });
+            let detail_para = Paragraph::new(detail_text)
+                .block(Block::default().title(" Detail ").borders(Borders::ALL));
+            frame.render_widget(detail_para, chunks[2]);
         })?;
 
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
             match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Esc => break,
+                KeyCode::Char('q') => break,
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                 KeyCode::Char('j') | KeyCode::Down => {
                     selected = (selected + 1).min(rows.len().saturating_sub(1));
-                    if selected >= scroll + (area_height(&terminal).unwrap_or(10)) {
+                    if selected >= scroll + 10 {
                         scroll += 1;
                     }
                 }
@@ -129,7 +181,35 @@ async fn run_ui(rows: Vec<TableRow>) -> io::Result<()> {
                 }
                 KeyCode::Char('G') => {
                     selected = rows.len().saturating_sub(1);
-                    scroll = selected;
+                    scroll = selected.saturating_sub(10);
+                }
+                KeyCode::Tab => {
+                    kind = kind.next();
+                    rows = fetch(client, kind, namespace.as_deref()).await?;
+                    selected = 0;
+                    scroll = 0;
+                    detail = None;
+                }
+                KeyCode::Char('n') => {
+                    namespace = cycle_namespace(client, namespace.clone()).await?;
+                    rows = fetch(client, kind, namespace.as_deref()).await?;
+                    selected = 0;
+                    scroll = 0;
+                    detail = None;
+                }
+                KeyCode::Char('d') => {
+                    if let Some(r) = rows.get(selected) {
+                        detail = describe(client, kind, r).await.ok();
+                    }
+                }
+                KeyCode::Char('i') => {
+                    if kind == Kind::Pods
+                        && let Some(r) = rows.get(selected)
+                    {
+                        detail = diagnose(client, r).await.ok();
+                    } else {
+                        detail = Some("Diagnostics are available for pods only.".into());
+                    }
                 }
                 _ => {}
             }
@@ -141,7 +221,71 @@ async fn run_ui(rows: Vec<TableRow>) -> io::Result<()> {
     Ok(())
 }
 
-fn area_height(terminal: &Terminal<CrosstermBackend<io::Stdout>>) -> Option<usize> {
-    let area = terminal.size().ok()?;
-    Some(area.height as usize)
+async fn fetch(client: &Client, kind: Kind, namespace: Option<&str>) -> io::Result<Vec<TableRow>> {
+    let gvk = kind.gvk();
+    let items = kaptein_core::discovery::list(client, &gvk, namespace)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(items
+        .into_iter()
+        .map(|r| TableRow {
+            name: r.name,
+            namespace: r.namespace,
+            status: status_for(kind),
+            created: r.created.map(|t| t.0.to_string()).unwrap_or_default(),
+        })
+        .collect())
+}
+
+fn status_for(kind: Kind) -> String {
+    match kind {
+        Kind::Namespaces => "Active".into(),
+        Kind::Pods => "Running".into(), // refined via pod status in a later milestone
+        Kind::Deployments => "Ready".into(),
+    }
+}
+
+async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result<Option<String>> {
+    let namespaces =
+        kaptein_core::discovery::list(client, &GroupVersionKind::gvk("", "v1", "Namespace"), None)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))?;
+    let mut names: Vec<String> = namespaces.into_iter().map(|n| n.name).collect();
+    names.sort();
+    names.insert(0, String::new()); // empty = all namespaces
+
+    let idx = current
+        .as_ref()
+        .and_then(|c| names.iter().position(|n| n == c))
+        .unwrap_or(0);
+    let next = names[(idx + 1) % names.len()].clone();
+    Ok(if next.is_empty() { None } else { Some(next) })
+}
+
+async fn describe(client: &Client, kind: Kind, row: &TableRow) -> io::Result<String> {
+    let gvk = kind.gvk();
+    let ns = if row.namespace.is_empty() {
+        None
+    } else {
+        Some(row.namespace.as_str())
+    };
+    kaptein_core::describe::describe_dynamic(client, &gvk, ns, &row.name)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))
+}
+
+async fn diagnose(client: &Client, row: &TableRow) -> io::Result<String> {
+    let pod = kaptein_core::pods::get_pod(client, &row.namespace, &row.name)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let findings = kaptein_core::diagnostics::diagnose(&pod);
+    if findings.is_empty() {
+        Ok(format!("{}: ready", row.name))
+    } else {
+        Ok(findings
+            .iter()
+            .map(|f| format!("{}: {}", f.code, f.summary))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
 }

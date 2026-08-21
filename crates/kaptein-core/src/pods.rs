@@ -17,6 +17,7 @@ pub struct PodSummary {
     pub namespace: String,
     pub phase: String,
     pub ready: String,
+    pub ready_bool: bool,
     pub restarts: i32,
 }
 
@@ -31,26 +32,45 @@ pub async fn client() -> Result<Client, Error> {
 pub async fn list_pods(client: &Client, namespace: &str) -> Result<Vec<PodSummary>, Error> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let list: ObjectList<Pod> = pods.list(&Default::default()).await.map_err(Error::Api)?;
+    Ok(summarize(list.into_iter().collect()))
+}
 
-    Ok(list
-        .into_iter()
-        .map(|pod| PodSummary {
-            name: pod.name_any(),
-            namespace: pod.namespace().unwrap_or_else(|| namespace.to_string()),
-            phase: pod
-                .status
-                .as_ref()
-                .and_then(|s| s.phase.clone())
-                .unwrap_or_else(|| "Unknown".into()),
-            ready: pod_ready(&pod),
-            restarts: pod
-                .status
-                .as_ref()
-                .and_then(|s| s.container_statuses.as_ref())
-                .map(|cs| cs.iter().map(|c| c.restart_count).sum())
-                .unwrap_or(0),
+/// List pods across all namespaces and reduce them to `PodSummary`s.
+pub async fn list_pods_all(client: &Client) -> Result<Vec<PodSummary>, Error> {
+    let pods: Api<Pod> = Api::all(client.clone());
+    let list: ObjectList<Pod> = pods.list(&Default::default()).await.map_err(Error::Api)?;
+    Ok(summarize(list.into_iter().collect()))
+}
+
+fn summarize(pods: Vec<Pod>) -> Vec<PodSummary> {
+    pods.into_iter()
+        .map(|pod| {
+            let ready = pod_ready(&pod);
+            let ready_bool = ready
+                .split('/')
+                .next()
+                .and_then(|r| r.parse::<i32>().ok())
+                .map(|r| r > 0)
+                .unwrap_or(false);
+            PodSummary {
+                name: pod.name_any(),
+                namespace: pod.namespace().unwrap_or_default(),
+                phase: pod
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.phase.clone())
+                    .unwrap_or_else(|| "Unknown".into()),
+                ready,
+                ready_bool,
+                restarts: pod
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.container_statuses.as_ref())
+                    .map(|cs| cs.iter().map(|c| c.restart_count).sum())
+                    .unwrap_or(0),
+            }
         })
-        .collect())
+        .collect()
 }
 
 /// Compute a `ready/total` string from a pod's container statuses, or "—" if unknown.

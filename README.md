@@ -386,16 +386,31 @@ LICENSE            # BUSL-1.1 (source-available; converts to MIT on Change Date)
 
 ## Status
 
-**Pre-alpha.** See [`ROADMAP.md`](./ROADMAP.md) for the phased plan. Nothing in this
-repository is functional yet — this document and the roadmap define the target.
+**MVP.** The Phase 1 core is functional against a live cluster: resource listing, RBAC
+preflight, context guardrails, diagnostics, describe, and logs — exposed through a CLI
+(`kaptein`) and a ratatui TUI (`kaptein-tui`). See [`ROADMAP.md`](./ROADMAP.md) for the
+full phased plan; Phases 1b–3b are tracked as GitHub issues (#3–#11).
 
-### Getting started (future)
+### Build & test the MVP
 
 ```bash
-# not yet available
 cargo build --release
-./target/release/kaptein
+
+# CLI (read-only against your current kubeconfig context)
+./target/release/kaptein get --gvk v1/Pod --namespace default
+./target/release/kaptein get --gvk apps/v1/Deployment --namespace kube-system
+./target/release/kaptein can --verb get --resource pods --namespace default
+./target/release/kaptein context
+./target/release/kaptein diagnose --name <pod> --namespace <ns>
+./target/release/kaptein describe --gvk v1/Pod --name <pod> --namespace <ns>
+./target/release/kaptein logs --name <pod> --namespace <ns> --tail 50
+
+# TUI (vim navigation; Tab switches kind, n cycles namespace, d describe, i diagnose)
+./target/release/kaptein-tui
 ```
+
+All commands are read-only and never mutate the cluster. Point `KUBECONFIG` at any
+cluster to test.
 
 ---
 
