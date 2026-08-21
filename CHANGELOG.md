@@ -12,6 +12,9 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Governed MCP surface design (ADR-0010).
 - AI/GPU (DRA/Kueue/inference) and KubeVirt lens designs.
 - Business Source License 1.1 with rolling MIT conversion.
+- `kaptein` CLI: `get`, `can` (RBAC preflight), `context` (guardrails), `diagnose`, `describe`, `logs`.
+- `kaptein-tui` ratatui table view with vim navigation.
+- Diagnostics rule engine ("why isn't this pod ready").
 
 ### Changed
 - License: MIT → BUSL-1.1 (core) + MIT/Apache-2.0 (extension surface).
@@ -20,6 +23,7 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ### Fixed
 - Architecture diagram, framework choice (egui), and crate naming.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-08-21
 
-Pre-alpha: no functional code yet. This file tracks documentation and planning work.
+First release with a functional core against a live cluster: generic resource listing,
+RBAC preflight, context guardrails, diagnostics, describe, logs, and a TUI table view.
