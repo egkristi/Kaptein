@@ -29,6 +29,13 @@ pub async fn client() -> Result<Client, Error> {
     Ok(Client::try_from(config)?)
 }
 
+/// Read the current context name from the kubeconfig (for guardrail classification).
+pub fn current_context_name() -> Result<String, Error> {
+    use kube::config::Kubeconfig;
+    let kc = Kubeconfig::read()?;
+    Ok(kc.current_context.unwrap_or_default())
+}
+
 /// List resources of a given `group/version/kind`, namespaced or cluster-scoped.
 ///
 /// Uses `DynamicObject` so any built-in resource or CRD works without a typed binding.

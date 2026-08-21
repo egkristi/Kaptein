@@ -38,6 +38,8 @@ enum Command {
         #[arg(short, long, default_value = "default")]
         namespace: String,
     },
+    /// Show the current context and its guardrail classification.
+    Context,
 }
 
 #[tokio::main]
@@ -79,6 +81,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 "{group_prefix}{sep}{verb} {resource} in {namespace}: {}",
                 if perm.allowed { "ALLOWED" } else { "DENIED" }
             );
+            Ok(())
+        }
+        Command::Context => {
+            let config = kaptein_core::config::load();
+            let ctx = kaptein_core::discovery::current_context_name()?;
+            let class = config.guardrails.classify(&ctx);
+            println!("context: {ctx}");
+            println!("class: {class:?}");
             Ok(())
         }
     }

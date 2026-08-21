@@ -10,6 +10,9 @@ description = "Kaptein core: kube-rs client, watchers/reflectors, CRD discovery,
 
 [dependencies]
 thiserror = { workspace = true }
+serde = { workspace = true }
 kube = { workspace = true }
 k8s-openapi = { workspace = true }
 tokio = { workspace = true }
+toml = "0.8"
+regex = "1"
