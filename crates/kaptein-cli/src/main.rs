@@ -49,6 +49,30 @@ enum Command {
         #[arg(short = 'n', long, default_value = "default")]
         namespace: String,
     },
+    /// YAML-describe a single resource.
+    Describe {
+        /// group/version/kind
+        #[arg(short, long, default_value = "v1/Pod")]
+        gvk: String,
+        /// resource name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace (omit for cluster-scoped)
+        #[arg(short = 'n', long)]
+        namespace: Option<String>,
+    },
+    /// Tail recent logs from a pod.
+    Logs {
+        /// pod name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// number of lines to tail
+        #[arg(long, default_value_t = 100)]
+        tail: i64,
+    },
 }
 
 #[tokio::main]
@@ -109,6 +133,34 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 for f in findings {
                     println!("{}: {}", f.code, f.summary);
                 }
+            }
+            Ok(())
+        }
+        Command::Describe {
+            gvk,
+            name,
+            namespace,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let yaml = kaptein_core::describe::describe_dynamic(
+                &client,
+                &gvk,
+                namespace.as_deref(),
+                &name,
+            )
+            .await?;
+            println!("{yaml}");
+            Ok(())
+        }
+        Command::Logs {
+            name,
+            namespace,
+            tail,
+        } => {
+            let logs =
+                kaptein_core::describe::pod_logs(&client, &namespace, &name, Some(tail)).await?;
+            for (container, line) in logs {
+                println!("[{container}] {line}");
             }
             Ok(())
         }

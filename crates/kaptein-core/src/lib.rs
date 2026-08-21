@@ -10,6 +10,7 @@
 
 pub mod auth;
 pub mod config;
+pub mod describe;
 pub mod diagnostics;
 pub mod discovery;
 pub mod error;

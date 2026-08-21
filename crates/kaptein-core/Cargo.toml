@@ -16,3 +16,4 @@ k8s-openapi = { workspace = true }
 tokio = { workspace = true }
 toml = "0.8"
 regex = "1"
+serde_yaml = "0.9"
