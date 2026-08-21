@@ -114,6 +114,21 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         local: u16,
     },
+    /// Run a one-shot command in a pod container (read-only).
+    Exec {
+        /// pod name
+        #[arg(short = 'p', long)]
+        pod: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// container name (omit for the default/first container)
+        #[arg(short = 'c', long)]
+        container: Option<String>,
+        /// command + args (e.g. -- cmd arg1 arg2)
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -278,6 +293,18 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 .await
                 .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
             println!("stopped");
+            Ok(())
+        }
+        Command::Exec {
+            pod,
+            namespace,
+            container,
+            command,
+        } => {
+            let output =
+                kaptein_core::exec::exec(&client, &namespace, &pod, &command, container.as_deref())
+                    .await?;
+            print!("{}", output.output);
             Ok(())
         }
     }
