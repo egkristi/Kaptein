@@ -25,6 +25,15 @@ enum Command {
         /// Namespace (omit for cluster-scoped resources)
         #[arg(short, long)]
         namespace: Option<String>,
+        /// sort by column: name, namespace, kind, created
+        #[arg(short, long)]
+        sort: Option<String>,
+        /// sort descending (newest/last first)
+        #[arg(long)]
+        descending: bool,
+        /// case-insensitive substring filter on name/namespace/kind
+        #[arg(short, long)]
+        filter: Option<String>,
     },
     /// RBAC preflight: check whether the current user may perform a verb.
     Can {
@@ -213,9 +222,27 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
     let client = kaptein_core::discovery::client().await?;
 
     match cli.command {
-        Command::Get { gvk, namespace } => {
+        Command::Get {
+            gvk,
+            namespace,
+            sort,
+            descending,
+            filter,
+        } => {
             let gvk = parse_gvk(&gvk);
-            let items = kaptein_core::discovery::list(&client, &gvk, namespace.as_deref()).await?;
+            let sort_key = sort
+                .as_deref()
+                .map(kaptein_core::discovery::SortKey::parse)
+                .unwrap_or(None);
+            let items = kaptein_core::discovery::list_with(
+                &client,
+                &gvk,
+                namespace.as_deref(),
+                sort_key,
+                descending,
+                filter.as_deref(),
+            )
+            .await?;
             for item in items {
                 let created = item.created.map(|t| t.0.to_string()).unwrap_or_default();
                 println!(

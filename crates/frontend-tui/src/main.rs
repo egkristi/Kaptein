@@ -84,16 +84,26 @@ async fn run_ui(client: &Client) -> io::Result<()> {
 
     let mut kind = Kind::Pods;
     let mut namespace: Option<String> = None; // None = all namespaces
-    let mut rows: Vec<TableRow> = fetch(client, kind, namespace.as_deref()).await?;
+    let mut sort_key: kaptein_core::discovery::SortKey = kaptein_core::discovery::SortKey::Name;
+    let mut sort_descending = false;
+    let mut rows: Vec<TableRow> = fetch(
+        client,
+        kind,
+        namespace.as_deref(),
+        sort_key,
+        sort_descending,
+    )
+    .await?;
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
 
     loop {
         let status_line = format!(
-            " {:<12} ns:{} ({} rows) — Tab:kind  n:ns  d:describe  i:diagnose  q:quit ",
+            " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  d:describe  i:diagnose  q:quit ",
             kind.label(),
             namespace.as_deref().unwrap_or("all"),
+            sort_label(sort_key, sort_descending),
             rows.len()
         );
 
@@ -185,17 +195,57 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                 }
                 KeyCode::Tab => {
                     kind = kind.next();
-                    rows = fetch(client, kind, namespace.as_deref()).await?;
+                    rows = fetch(
+                        client,
+                        kind,
+                        namespace.as_deref(),
+                        sort_key,
+                        sort_descending,
+                    )
+                    .await?;
                     selected = 0;
                     scroll = 0;
                     detail = None;
                 }
                 KeyCode::Char('n') => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
-                    rows = fetch(client, kind, namespace.as_deref()).await?;
+                    rows = fetch(
+                        client,
+                        kind,
+                        namespace.as_deref(),
+                        sort_key,
+                        sort_descending,
+                    )
+                    .await?;
                     selected = 0;
                     scroll = 0;
                     detail = None;
+                }
+                KeyCode::Char('s') => {
+                    sort_key = next_sort_key(sort_key);
+                    rows = fetch(
+                        client,
+                        kind,
+                        namespace.as_deref(),
+                        sort_key,
+                        sort_descending,
+                    )
+                    .await?;
+                    selected = 0;
+                    scroll = 0;
+                }
+                KeyCode::Char('S') => {
+                    sort_descending = !sort_descending;
+                    rows = fetch(
+                        client,
+                        kind,
+                        namespace.as_deref(),
+                        sort_key,
+                        sort_descending,
+                    )
+                    .await?;
+                    selected = 0;
+                    scroll = 0;
                 }
                 KeyCode::Char('d') => {
                     if let Some(r) = rows.get(selected) {
@@ -221,11 +271,24 @@ async fn run_ui(client: &Client) -> io::Result<()> {
     Ok(())
 }
 
-async fn fetch(client: &Client, kind: Kind, namespace: Option<&str>) -> io::Result<Vec<TableRow>> {
+async fn fetch(
+    client: &Client,
+    kind: Kind,
+    namespace: Option<&str>,
+    sort_key: kaptein_core::discovery::SortKey,
+    descending: bool,
+) -> io::Result<Vec<TableRow>> {
     let gvk = kind.gvk();
-    let items = kaptein_core::discovery::list(client, &gvk, namespace)
-        .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let items = kaptein_core::discovery::list_with(
+        client,
+        &gvk,
+        namespace,
+        Some(sort_key),
+        descending,
+        None,
+    )
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(items
         .into_iter()
         .map(|r| TableRow {
@@ -235,6 +298,27 @@ async fn fetch(client: &Client, kind: Kind, namespace: Option<&str>) -> io::Resu
             created: r.created.map(|t| t.0.to_string()).unwrap_or_default(),
         })
         .collect())
+}
+
+fn sort_label(key: kaptein_core::discovery::SortKey, descending: bool) -> String {
+    let dir = if descending { "↓" } else { "↑" };
+    let name = match key {
+        kaptein_core::discovery::SortKey::Name => "name",
+        kaptein_core::discovery::SortKey::Namespace => "namespace",
+        kaptein_core::discovery::SortKey::Kind => "kind",
+        kaptein_core::discovery::SortKey::Created => "created",
+    };
+    format!("{name}{dir}")
+}
+
+fn next_sort_key(key: kaptein_core::discovery::SortKey) -> kaptein_core::discovery::SortKey {
+    use kaptein_core::discovery::SortKey;
+    match key {
+        SortKey::Name => SortKey::Namespace,
+        SortKey::Namespace => SortKey::Kind,
+        SortKey::Kind => SortKey::Created,
+        SortKey::Created => SortKey::Name,
+    }
 }
 
 fn status_for(kind: Kind) -> String {
