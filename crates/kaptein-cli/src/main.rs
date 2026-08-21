@@ -87,6 +87,12 @@ enum Command {
         #[arg(long, default_value_t = 15)]
         minutes: i64,
     },
+    /// Landing view: is anything broken, and what changed recently?
+    Overview {
+        /// look back this many minutes
+        #[arg(long, default_value_t = 15)]
+        minutes: i64,
+    },
 }
 
 #[tokio::main]
@@ -190,6 +196,24 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 println!(
                     "{}\t{}\t{}/{}\t{}\t{}",
                     e.last_timestamp_ms, e.type_, e.kind, e.name, e.reason, e.message
+                );
+            }
+            Ok(())
+        }
+        Command::Overview { minutes } => {
+            let since_ms = now_ms().saturating_sub(minutes * 60 * 1000);
+            let overview = kaptein_core::overview::overview(&client, None, since_ms).await?;
+            println!("Kaptein overview (last {minutes} minutes)");
+            println!("  total events: {}", overview.total_events);
+            println!(
+                "  warnings: {} across namespaces: {}",
+                overview.warnings.len(),
+                overview.affected_namespaces.join(", ")
+            );
+            for w in overview.warnings {
+                println!(
+                    "    [WARN] {}/{}\t{}\t{}",
+                    w.kind, w.name, w.reason, w.message
                 );
             }
             Ok(())

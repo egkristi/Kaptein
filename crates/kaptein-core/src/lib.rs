@@ -16,6 +16,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod guardrails;
+pub mod overview;
 pub mod pods;
 
 pub use error::Error;
