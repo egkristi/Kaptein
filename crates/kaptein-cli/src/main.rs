@@ -2,6 +2,8 @@
 //!
 //! The CLI drives `kaptein-core` directly; it is a projection, not a home for logic.
 
+mod mcp;
+
 use clap::{Parser, Subcommand};
 use kube::core::GroupVersionKind;
 
@@ -73,6 +75,8 @@ enum Command {
         #[arg(long, default_value_t = 100)]
         tail: i64,
     },
+    /// Run the governed MCP server over stdio (read-only).
+    Mcp,
 }
 
 #[tokio::main]
@@ -164,6 +168,9 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             }
             Ok(())
         }
+        Command::Mcp => mcp::serve()
+            .await
+            .map_err(|e| kaptein_core::Error::Internal(e.to_string())),
     }
 }
 
