@@ -2,6 +2,7 @@
 //!
 //! The CLI drives `kaptein-core` directly; it is a projection, not a home for logic.
 
+mod audit;
 mod mcp;
 
 use clap::{Parser, Subcommand};

@@ -20,6 +20,12 @@ pub struct ResourceRef {
 /// scales a deployment logs `Operation::Scale` with `source: Surface::Mcp`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Operation {
+    // Read operations (governance requires visibility into reads, not just writes).
+    List,
+    Describe,
+    Logs,
+    Diagnose,
+    // Write operations.
     Delete,
     Scale,
     Restart,

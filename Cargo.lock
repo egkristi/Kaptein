@@ -961,6 +961,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "kaptein-core",
+ "kaptein-viewmodel",
  "kube",
  "rmcp",
  "serde_json",

@@ -218,6 +218,7 @@ impl ServerHandler for KapteinMcp {
     ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
         async move {
             let args = request.arguments.as_ref();
+            self.audit(&request.name);
             match self.exec_tool(&request.name, args).await {
                 Ok(text) => Ok(CallToolResponse::Complete(CallToolResult::success(vec![
                     ContentBlock::text(text),
@@ -227,5 +228,47 @@ impl ServerHandler for KapteinMcp {
                 ]))),
             }
         }
+    }
+}
+
+impl KapteinMcp {
+    /// Emit a best-effort audit event for an MCP tool call. Audit is a governance
+    /// requirement (ADR-0010), but an audit-write failure must not block the tool.
+    fn audit(&self, tool_name: &str) {
+        use kaptein_viewmodel::audit::{
+            Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source,
+        };
+        let operation = match tool_name {
+            "list_resources" => Operation::List,
+            "describe" => Operation::Describe,
+            "logs" => Operation::Logs,
+            "diagnose" => Operation::Diagnose,
+            _ => return,
+        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let event = AuditEvent {
+            timestamp: now_ms,
+            actor: Actor {
+                kind: ActorKind::Agent,
+                name: "mcp-client".into(),
+            },
+            context: "".into(), // populated once agent identity/context is wired
+            operation,
+            target: ResourceRef {
+                group: "".into(),
+                kind: tool_name.into(),
+                namespace: "".into(),
+                name: "".into(),
+            },
+            outcome: Outcome::Applied,
+            source: Source::Mcp,
+            session_id: "mcp".into(),
+            reason: None,
+            on_behalf_of: None,
+        };
+        let _ = crate::audit::append(&event);
     }
 }

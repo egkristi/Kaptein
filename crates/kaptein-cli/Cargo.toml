@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 kaptein-core = { version = "0.1.0", path = "../kaptein-core" }
+kaptein-viewmodel = { version = "0.1.0", path = "../kaptein-viewmodel" }
 kube = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 clap = { version = "4", features = ["derive"] }
