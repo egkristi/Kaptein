@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod apply;
 pub mod auth;
 pub mod config;
 pub mod describe;

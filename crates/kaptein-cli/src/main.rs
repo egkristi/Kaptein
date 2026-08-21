@@ -93,6 +93,12 @@ enum Command {
         #[arg(long, default_value_t = 15)]
         minutes: i64,
     },
+    /// Server-side dry-run a YAML manifest (validate without mutating the cluster).
+    Apply {
+        /// path to a YAML manifest, or "-" for stdin
+        #[arg(short = 'f', long)]
+        file: String,
+    },
 }
 
 #[tokio::main]
@@ -216,6 +222,27 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     w.kind, w.name, w.reason, w.message
                 );
             }
+            Ok(())
+        }
+        Command::Apply { file } => {
+            let manifest = if file == "-" {
+                use std::io::Read;
+                let mut s = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut s)
+                    .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+                s
+            } else {
+                std::fs::read_to_string(&file)
+                    .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?
+            };
+            let dry_run = kaptein_core::apply::dry_run_apply(&client, &manifest).await?;
+            if dry_run.accepted {
+                println!("dry-run accepted (no changes applied):");
+            } else {
+                println!("dry-run REJECTED (no changes applied):");
+            }
+            println!("{}", dry_run.response_yaml);
             Ok(())
         }
     }
