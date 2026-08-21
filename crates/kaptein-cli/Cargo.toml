@@ -1,0 +1,19 @@
+[package]
+name = "kaptein"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Kaptein CLI"
+
+[[bin]]
+name = "kaptein"
+path = "src/main.rs"
+
+[dependencies]
+kaptein-core = { path = "../kaptein-core" }
+kube = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+clap = { version = "4", features = ["derive"] }

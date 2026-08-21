@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod discovery;
 pub mod error;
 pub mod pods;
 
