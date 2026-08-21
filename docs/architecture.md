@@ -128,6 +128,28 @@ PR, it shows *why*. See ADR-0008.
 The watch stream persists to a local embedded store using an append-only, log-structured
 layout with compaction + retention TTL (see ADR-0003).
 
+## The governed MCP surface
+
+`kaptein mcp` exposes the view-model as a governed MCP server. Every tool call passes
+through the same guardrails as a human (RBAC preflight, context guardrails, read-only
+default, break-glass), is impersonated as a real identity via `--as` (ADR-0007), and
+lands in the same `AuditEvent` log. An agent **never writes to the API server** — it can
+only open a PR (ADR-0010). Kaptein does **not** run agents; it is the governed tool
+surface they call.
+
+## Fleet query as a data layer
+
+Fleet query and drift detection share one data layer (ADR-0011). Hub mode considers
+**Clusterpedia** as the sync backend rather than reimplementing multi-cluster sync, and
+fleet query is a product: saved queries in Git, scheduled reports, and query-as-policy
+(a query can fail CI).
+
+## Lens schema acceptance tests
+
+The view-definition schema is designed against the three hardest lenses — **DRA/Kueue/
+inference**, **KubeVirt**, and **CNPG** — as acceptance tests, not frozen in Phase 0
+(ADR-0012). If one of those cannot be expressed in the schema, the schema is too weak.
+
 ## Related ADRs
 
 - ADR-0001 — `egui` over `iced` (GUI framework)
@@ -139,3 +161,6 @@ layout with compaction + retention TTL (see ADR-0003).
 - ADR-0007 — `serve` authentication & impersonation
 - ADR-0008 — GitOps source discovery
 - ADR-0009 — crate renaming
+- ADR-0010 — governed MCP server
+- ADR-0011 — fleet query data layer
+- ADR-0012 — lens schema acceptance tests

@@ -88,6 +88,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 - **Extension sandbox by default.** WASM plugins get no network and no filesystem unless
   declared in the WIT world and the manifest allowlist; enforce fuel metering and a
   memory cap. Version WIT worlds and bump `api_version` on breaking change.
+- **The MCP surface is governed, not open.** Any `kaptein mcp` tool call must go through
+  the same guardrails (RBAC preflight, context guardrails, read-only default,
+  break-glass), be impersonated via `--as`, and land in the audit log. An agent never
+  writes to the API server — PR only (ADR-0010).
 
 ## Testing expectations
 
@@ -131,7 +135,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## When in doubt
 
-- Re-read the "Non-goals" section of `README.md` before adding scope.
+- Re-read the "Non-goals" section of `README.md` before adding scope — in particular:
+  **no CI/CD, no service catalog, no policy engine, no agent runtime, no metrics/log
+  store.** Kaptein is the operator's console and the governed control point, not the
+  platform.
 - Prefer the smallest change that lands on the shared view-model.
 - If a change would break the one-directional dependency rule, refactor instead of
   short-circuiting.

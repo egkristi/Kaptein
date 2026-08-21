@@ -107,13 +107,19 @@ Milestones:
 
   *The WIT worlds are defined here, late in Phase 2, after real lenses exist — not in
   Phase 0 (see ADR-0004).*
+- **M2.7 Governed MCP surface (`kaptein mcp`)** — every tool call passes through the same
+  guardrails (RBAC preflight, context guardrails, read-only default, break-glass),
+  impersonated via `--as`, and landed in the same audit log; an agent only opens PRs
+  (ADR-0010).
 - Definition of Done: GUI and TUI are feature-identical projections of one view-model —
   proven by contract tests asserting the TUI, GUI, and headless all consume the same
-  render intent; a GitOps change can be authored and opened as a PR entirely from the UI.
+  render intent; a GitOps change can be authored and opened as a PR entirely from the UI;
+  `kaptein mcp` exposes the governed agent surface.
 
-## Phase 3 — Time machine, fleet, cost, security
+## Phase 3 — Time machine, fleet, cost, security, lenses
 
-**Goal:** the four differentiators are complete, plus the scanning/analytics surface.
+**Goal:** the five differentiators are complete, plus the scanning/analytics surface and
+  the workload lenses that decide relevance.
 
 Milestones:
 
@@ -124,6 +130,8 @@ Milestones:
   - Events + Git deploy markers on one timeline
 - **M3.2 Fleet**
   - Fleet query (one query, all clusters); cross-cluster diff + drift matrix
+  - Saved queries in Git; scheduled reports; **query-as-policy** (fail CI on rows)
+  - Clusterpedia-class data layer for hub mode (ADR-0011)
   - Aggregated compliance/cost/upgrade dashboards
   - Optional hub mode with per-cluster agent (headless/serve)
 - **M3.3 Cost & capacity**
@@ -132,8 +140,10 @@ Milestones:
   - Rightsizing, idle/waste, budgets + alerting, carbon estimate
   - Capacity simulation (lose a node / an AZ)
 - **M3.4 Security & compliance (kubescape class)**
-  - Posture: CIS, NSA/CISA, MITRE ATT&CK, NSM *Grunnprinsipper*
+  - Posture: CIS, NSA/CISA, MITRE ATT&CK, NSM *Grunnprinsipper*, **CRA, NIS2, DORA**
   - Image scan (Trivy/Grype), SBOM, cosign/sigstore, SLSA
+  - **SBOM reconciliation** (two generators, diff, trust decision)
+  - **VEX filtering** (CVE → actually reachable workloads)
   - RBAC visualization (effective permissions per SA)
   - **Policy preflight**: Kyverno/Gatekeeper/ValidatingAdmissionPolicy locally
   - NetworkPolicy editor + "can A reach B" simulation
@@ -142,13 +152,29 @@ Milestones:
   - Continuous sanity scan with score/trend; OOM forensics; blast-radius preview
   - Istio mTLS/ambient/`istioctl analyze`/config-dump; Cilium/Hubble flow-map
   - Loki/OpenSearch historical logs; Tempo/Jaeger traces; Alertmanager + silences
-- **M3.6 Incident & collaboration**
+- **M3.6 Workload lenses (DRA / KubeVirt / CNPG)**
+  - DRA-native views: `ResourceSlice`/`ResourceClaim`/`DeviceClass`; "why isn't this job
+    admitted?" over ClusterQueue quota, gang scheduling, preemption; InferencePool
+  - KubeVirt lens: console, live migration, snapshots, MTV plans, instance types, hotplug
+  - CNPG lens: topology, replication lag, switchover/failover, PITR, WAL status
+  - These three are the **acceptance tests** for the view-definition schema (ADR-0012)
+- **M3.7 Incident & collaboration**
   - Session recording (asciinema-like TUI / event-log GUI) → Markdown incident timeline
   - Shared workspace configs in Git; full local audit log (stable format, reused by the
     incident-timeline export)
-- Definition of Done: the complete capability set from `README.md`, with the four
-  differentiators (GitOps write path, drift detection, fleet query, time machine) fully
-  functional and cross-frontend.
+  - Operational memory: owner from labels/annotations, on-call (PagerDuty/Opsgenie/
+    Grafana OnCall), runbook from `runbook_url` or Git-backed markdown
+  - Incident timeline records cluster actions (deploys, scaling, node events, alerts) —
+    a postmortem, not a command log
+- **M3.8 Cluster lifecycle, certificates & DR**
+  - Version matrix + EOL per cluster; operator compatibility; PDB blockers
+  - Control-plane health for on-prem: etcd size, defrag, leader elections, apiserver
+    latency
+  - Certificate expiry across the fleet (kubelet, cert-manager, webhook CA, mesh CA)
+  - Backup-gap report + RPO/RTO per namespace
+- Definition of Done: the complete capability set from `README.md`, with the five
+  differentiators (governed MCP, GitOps write path, time machine, fleet query + drift)
+  fully functional and cross-frontend.
 
 ---
 

@@ -70,6 +70,20 @@ ADR-0007 and must not be weakened.
 - The exact payload sent to any model endpoint is shown for review before it leaves the
   machine; a **local endpoint is supported** for airgapped deployments.
 
+### Governed MCP surface (`kaptein mcp`)
+
+This is the answer to **Shadow MCP** (OWASP MCP Top 10). It reuses the human control
+plane, not a new one:
+
+- Every agent tool call passes through **the same guardrails**: RBAC preflight, context
+  guardrails, read-only default, and break-glass.
+- Agent calls are **impersonated** via `--as`, so the cluster sees the agent's real
+  identity, not `serve`'s.
+- Agent calls land in the **same `AuditEvent` log**, with the agent as the actor.
+- An agent **never writes to the API server** — the only write path is a PR (ADR-0010,
+  ADR-0008).
+- Kaptein does **not run agents**; it is the governed surface they call.
+
 ### Supply chain
 
 - Releases are **signed** and ship an **SBOM**.

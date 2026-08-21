@@ -33,27 +33,33 @@ owns any logic.
 
 ---
 
-## The four things that are hard to find elsewhere
+## The five things that are hard to find elsewhere
 
 These are the differentiators that hit where daily work actually hurts:
 
-1. **GitOps write path, from the operator console** — you edit in the UI *where you
+1. **Governed MCP surface** — `kaptein mcp` lets AI agents drive Kaptein through the
+   *same* guardrails as a human: RBAC preflight, context guardrails, read-only default,
+   and break-glass, impersonated as a real Kubernetes identity (`--as`) and landed in the
+   same audit log. An agent never writes to the API server — it can only open a PR. This
+   is the answer to "Shadow MCP": governed, auditable, scoped agent access (ADR-0010).
+
+2. **GitOps write path, from the operator console** — you edit in the UI *where you
    already stand during an incident*, with live cluster state beside you; the tool
    figures out *which file in which repo* owns the resource (via Flux/Argo metadata),
    makes the change in a branch, and opens a PR — with diff at both manifest level *and*
    rendered level (`kustomize build` / `helm template`). You write to Git, not to the
    API server. (IDP portals like Backstage/Port offer self-service actions, but two
-   clicks away from reality; Kaptein does it from the live operator console.)
+   clicks away from reality; Kaptein does it from the live operator console. And an
+   agent's write path is the *same* PR path.)
 
-2. **Drift detection** — live state vs. rendered Git-state, continuously compared and
-   surfaced, not a one-off report.
-
-3. **Fleet query** — one query, all clusters: *"all Deployments without resource limits
-   across 40 clusters"*. Cross-cluster diff and drift matrix.
-
-4. **Time machine** — the watch stream is persisted locally; scrub backwards, see a
+3. **Time machine** — the watch stream is persisted locally; scrub backwards, see a
    resource as it was, diff between two timestamps, *"what changed between 14:20 and
    14:35"* — with events and deploy markers from Git on the same timeline.
+
+4. **Fleet query + drift** — one query, all clusters: *"all Deployments without
+   resource limits across 40 clusters"*. Cross-cluster diff and drift matrix. Saved
+   queries in Git, scheduled reports, and **query-as-policy** (a query can fail CI) —
+   the same data layer as drift detection (ADR-0011).
 
 ---
 
@@ -71,8 +77,17 @@ renders, orchestrates, and cross-references them:
   API server.
 - **No hardcoded per-CRD UIs.** Operator-specific lenses are data (view definitions), not
   code — WASM only when real logic is required.
+- **No CI/CD.** Devtron and Argo own it; Kaptein opens PRs, it does not run pipelines.
+- **No service catalog.** Backstage has the catalog; Kaptein *integrates* (reads owner/
+  runbook annotations), it does not compete.
+- **No policy engine.** Kyverno is CNCF graduated; Kaptein *renders and preflights*
+  policy, it does not enforce it.
+- **No agent runtime.** `kagent` runs agents; Kaptein is the *governed tool surface*
+  they call (ADR-0010).
+- **No metrics/log store.** Kaptein queries Prometheus/Loki/etc., it does not store.
 
-These exclusions are what keep the surface tractable and the single binary honest.
+**Kaptein is the operator's console and the governed control point — not the platform.**
+Everything above it arrives as lenses and integrations, not core code.
 
 ---
 
@@ -185,6 +200,9 @@ Two things nobody does properly, which Kaptein treats as first-class:
 - OOM forensics with `lastTerminatedState` and the memory trend before the kill
 - **Blast-radius preview**: before a change, which pods, PDBs, rollouts, and mesh routes
   are hit
+- **Governed MCP surface** (`kaptein mcp`): AI agents drive Kaptein through the same
+  guardrails as a human — never writing to the API server, only opening a PR (see the
+  fifth differentiator and ADR-0010).
 - LLM assistance: opt-in, local endpoint possible, secrets redacted. **Never on by
   default** — disabled per context until explicitly enabled. Redaction is structural
   (driven by the CRD schema and well-known secret keys like `env`, `data`, and
@@ -197,6 +215,12 @@ Two things nobody does properly, which Kaptein treats as first-class:
   audited on
 - Image scanning (Trivy/Grype), SBOM viewing, cosign/sigstore verification, SLSA
   provenance
+- **SBOM reconciliation**: run two generators, diff them, and show which package list you
+  trust and why — the mismatch is the signal
+- **VEX filtering**: CVE → *actually reachable* workloads, not a CVE dump
+- **Framework mapping**: CIS, NSA/CISA, MITRE ATT&CK, NSM *Grunnprinsipper*, **plus
+  CRA, NIS2, and DORA** control mappings — a European procurement trigger American tools
+  systematically miss
 - RBAC visualization with effective permissions per ServiceAccount
 - **Policy preflight**: run Kyverno/Gatekeeper/ValidatingAdmissionPolicy rulesets locally
   against a manifest and show *which policy would block it* before you send anything
@@ -231,12 +255,28 @@ Two things nobody does properly, which Kaptein treats as first-class:
 - Cilium/Hubble flow-map with live traffic
 - DNS and endpoint debugging
 
+### 8b. AI & GPU workloads (DRA / Kueue / inference)
+- **DRA-native views**: `ResourceSlice`, `ResourceClaim`, and `DeviceClass` as
+  first-class resources (GA in 1.34) — a niche no console renders well yet.
+- **Allocated vs. actual GPU use, with honesty about the measurement**: DCGM Exporter
+  cannot attribute metrics to individual containers under time-slicing, so Kaptein says
+  so — the same "show the source, never the value" honesty as secrets.
+- **"Why isn't this job admitted?"** — the sibling to "why isn't this pod ready?", over
+  ClusterQueue quota, gang scheduling, preemption, and ResourceClaim binding.
+- **Tokens, not just GPU percentage** — Gateway API Inference Extension and `InferencePool`
+  as real resources to render, with TTFT as the north star.
+
 ### 9. Storage & data
 - PV/PVC/StorageClass/VolumeSnapshot, expansion, CSI driver status
-- Velero/VolSync backup overview with restore-test status
+- Velero/VolSync backup overview with restore-test status, plus a **backup-gap report**
+  (which workloads have *no* backup) and RPO/RTO per namespace
 - A proper **CNPG lens**: primary/replica topology, replication lag, switchover/failover,
   backup to object store, PITR window, WAL archive status, pending restart on parameter
   changes. *This does not exist today.*
+- **KubeVirt as a first-class lens** (not one bullet): console (VNC/serial), live
+  migration status, snapshot/restore, MTV migration plans with wave progression,
+  VM templates + instance types, hotplug disk/NIC, node placement and evacuation — the
+  VM vocabulary vSphere admins need when they land on Kubernetes.
 
 ### 10. Workload lenses & extensions (data first, code second)
 Declarative **view definitions** (YAML or CUE) that bind a CRD to panels, columns, status
@@ -249,7 +289,9 @@ integration** (tier 3) — see *Extensibility* above. Data first, code second: *
 the only way "and more" scales.**
 
 ### 11. Fleet
-- **Fleet query**: one query, all clusters
+- **Fleet query**: one query, all clusters — Clusterpedia-class data layer, with saved
+  queries in Git, scheduled reports, and **query-as-policy** (fail CI if a query returns
+  rows)
 - Cross-cluster diff and drift matrix
 - Aggregated compliance, cost, and upgrade dashboards
 - Optional hub mode with a small per-cluster agent, when you don't want N direct laptop
@@ -268,6 +310,20 @@ the only way "and more" scales.**
 - Shared workspace configs in Git
 - Full local audit log of every write operation, in a single stable format that is also
   the source for incident-timeline exports (one format, two consumers)
+- **Operational memory**: owner resolution from labels/annotations (incl. Backstage),
+  on-call from PagerDuty/Opsgenie/Grafana OnCall, and runbook from `runbook_url` or a
+  Git-backed markdown folder.
+- The incident timeline records what *you* did **and** what the *cluster* did (deploys,
+  scaling, node events, alerts) — an actual postmortem, not a command log.
+
+### 14. Cluster lifecycle, certificates & DR
+- **Version matrix and EOL** per cluster, with operator compatibility and PDB blockers
+  before an upgrade
+- **Control-plane health for on-prem**: etcd DB size, defrag, leader elections,
+  apiserver latency
+- **Certificate expiry across the fleet**: kubelet certs, cert-manager, webhook CA
+  bundles, mesh CAs — "what expires in the next 90 days" across 40 clusters
+- **Backup gap, not just backup status**: RPO/RTO per namespace as a DORA compliance hook
 
 ---
 

@@ -6,7 +6,7 @@
 
 ## Context
 
-The "time machine" (one of the four differentiators) persists the watch stream locally so
+The "time machine" (one of Kaptein's differentiators) persists the watch stream locally so
 users can scrub backwards and diff between two timestamps. The store choice was left as
 "redb or SQLite." The access pattern is write-heavy, append-mostly, and read by time
 range — very different from a general-purpose SQL workload.
