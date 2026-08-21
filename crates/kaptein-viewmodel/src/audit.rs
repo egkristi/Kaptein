@@ -1,10 +1,13 @@
 //! The single write-audit record: one format, two consumers.
 //!
 //! Used by both the local audit log and the incident-timeline export. Records
-//! **operations, not values** — secrets are never persisted here.
+//! **operations, not values** — secrets are never persisted here. Fully `serde`-
+//! serializable so it can cross the `serve`/gRPC-Web boundary and be exported.
+
+use serde::{Deserialize, Serialize};
 
 /// A reference to a Kubernetes resource.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResourceRef {
     pub group: String,
     pub kind: String,
@@ -12,8 +15,10 @@ pub struct ResourceRef {
     pub name: String,
 }
 
-/// The operation that was performed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The operation that was performed. `McpToolCall` is intentionally **absent**: MCP is a
+/// *transport*, captured in `AuditEvent::source`, not a distinct operation. An agent that
+/// scales a deployment logs `Operation::Scale` with `source: Surface::Mcp`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Operation {
     Delete,
     Scale,
@@ -25,41 +30,67 @@ pub enum Operation {
     PortForward,
     /// A GitOps write path action (branch + PR), not an API-server write.
     GitPrOpened,
-    /// An MCP tool call, distinguished by the actor being an agent.
-    McpToolCall,
+    /// An operator viewed (unmasked) a secret — the single most audit-relevant event for
+    /// a tool that masks secrets by default.
+    SecretViewed,
 }
 
 /// The outcome of a write attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Outcome {
     Applied,
     DryRun,
     Rejected,
 }
 
+/// Which projection initiated the action. MCP is a *source*, not an operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Tui,
+    Gui,
+    Browser,
+    Mcp,
+    Headless,
+}
+
 /// The actor who performed the operation. An agent has its **own** identity, so agent
 /// actions are distinguishable from human actions (ADR-0007, ADR-0010).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Actor {
     pub kind: ActorKind,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ActorKind {
     Human,
     Agent,
 }
 
 /// A single audit record. Serialized with `serde`; the same shape feeds the incident
-/// timeline export.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// timeline export (one format, two consumers).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditEvent {
-    pub timestamp: String,
+    /// Unix epoch milliseconds — a typed instant, not a pre-formatted string, so it
+    /// sorts and localizes correctly.
+    pub timestamp: i64,
     pub actor: Actor,
     /// Cluster/context id — never a secret.
     pub context: String,
     pub operation: Operation,
     pub target: ResourceRef,
     pub outcome: Outcome,
+    /// Which projection initiated the action (MCP is a source, not an operation).
+    pub source: Source,
+    /// Identifies the debugging session / multi-step agent invocation, so the incident
+    /// timeline can group related events.
+    pub session_id: String,
+    /// Recorded break-glass justification (required for the break-glass guardrail to be
+    /// a complete control).
+    pub reason: Option<String>,
+    /// Who initiated the session on the agent's behalf (an agent acts under its own
+    /// ServiceAccount, but the audit question is still "who asked").
+    pub on_behalf_of: Option<String>,
 }

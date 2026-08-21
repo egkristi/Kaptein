@@ -21,9 +21,16 @@ repository = "https://github.com/egkristi/Kaptein"
 authors = ["Kaptein contributors"]
 
 [workspace.dependencies]
-# Shared dependency versions live here and are referenced by the crates that need
-# them (e.g. kaptein-core = { path = "crates/kaptein-core" }). Kept empty for the
-# initial scaffold; dependencies are added as each crate is implemented.
+# Shared dependency versions, referenced by crates via `foo = { workspace = true }`.
+serde = { version = "1", features = ["derive"] }
+async-trait = "0.1"
+futures-util = "0.3"
+thiserror = "2"
+strum = { version = "0.26", features = ["derive"] }
+
+[workspace.lints.rust]
+# Enforced centrally rather than repeated as `#![forbid(unsafe_code)]` per crate.
+unsafe_code = "forbid"
 
 [profile.release]
 lto = true

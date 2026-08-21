@@ -28,7 +28,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
     name: Test
@@ -37,22 +37,71 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      - run: cargo test --workspace --locked
 
   msrv:
     name: MSRV (pinned toolchain)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # No toolchain override: rustup honors `rust-toolchain.toml`, pinning to the MSRV.
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --locked
+
+  stable:
+    name: Stable (latest)
+    runs-on: ubuntu-latest
+    env:
+      # Overrides rust-toolchain.toml so this job genuinely runs on latest stable,
+      # catching breakage before the MSRV bump (see rust-toolchain.toml policy).
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --locked
+
+  wasm:
+    name: WASM (frontend-gui target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p frontend-gui --target wasm32-unknown-unknown --locked
+
+  layers:
+    name: Layer dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: |
+          set -euo pipefail
+          cargo metadata --no-deps --format-version 1 > /tmp/meta.json
+          # Enforce the one-directional dependency rule (ADR / AGENTS.md):
+          # no frontend, serve, or headless may depend on kaptein-core directly.
+          # They reach it only through kaptein-viewmodel.
+          python3 - <<'PY'
+          import json
+          meta = json.load(open("/tmp/meta.json"))
+          packages = {p["name"]: p for p in meta["packages"]}
+          consumers = ["frontend-tui", "frontend-gui", "serve", "headless", "plugins", "viewdef"]
+          for name in consumers:
+              if name not in packages:
+                  continue
+              deps = {d["name"] for d in packages[name].get("dependencies", [])}
+              if "kaptein-core" in deps:
+                  raise SystemExit(f"{name} must not depend on kaptein-core directly")
+          print("Layer dependency rule satisfied")
+          PY
 
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses advisories bans sources

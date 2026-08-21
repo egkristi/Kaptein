@@ -10,11 +10,18 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod error;
 pub mod render;
 pub mod semantic;
 pub mod surface;
 
-pub use audit::AuditEvent;
-pub use render::{DataPlane, Page, Query, Revision, RowPatch};
+pub use audit::{Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source};
+pub use error::Error;
+pub use render::{
+    Cell, DataPlane, Filter, Page, Query, Revision, Row, RowId, RowPatch, SortSpec, StatusLevel,
+};
 pub use semantic::{Action, ActionState, Status};
-pub use surface::{Surface, SurfaceKind};
+pub use surface::{Column, ColumnKind, EditorMode, Field, FieldKind, Surface, SurfaceKind};
+
+#[cfg(test)]
+mod contract_tests;
