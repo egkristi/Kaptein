@@ -4,6 +4,16 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-22
+
+### Added
+- TUI resource kinds expanded to Services + Nodes (k9s-parity "list
+  pods/deployments/services/nodes" complete).
+- `kaptein contexts` — list all kubeconfig contexts (name/cluster/user/current).
+- `kaptein get --context X` — context switching for a single list.
+- `kaptein preflight --resource X --group G --namespace N` — batch RBAC preflight
+  over the standard 8-verb action set (grey-out support).
+
 ## [0.5.0] - 2026-08-22
 
 ### Added
