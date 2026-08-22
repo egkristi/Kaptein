@@ -4,6 +4,20 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-22
+
+### Added
+- `kaptein cordon/uncordon --name N [--confirm]` — node schedulability toggles
+  (dry-run by default, break-glass gate).
+- `kaptein evict --name N --namespace X [--confirm]` — pod eviction (dry-run by
+  default).
+- `kaptein drain --name N` — read-only drain preview classifying pods on a node
+  as evictable vs. skipped (DaemonSet/mirror/unmanaged).
+- `kaptein krew [--tool krew|kustomize|helm] [-- args...]` — external-tool
+  shell-out with graceful degradation (never panics when a tool is absent).
+- Named, persistent port-forwards: `kaptein port-forward --name N` (auto-reconnect),
+  `kaptein port-forward-list`, `kaptein port-forward-remove`.
+
 ## [0.4.0] - 2026-08-22
 
 ### Added
