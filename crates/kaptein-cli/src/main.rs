@@ -220,6 +220,51 @@ enum Command {
         #[arg(long)]
         break_glass: Option<String>,
     },
+    /// Cordon a node (mark unschedulable; requires --confirm).
+    Cordon {
+        /// node name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// actually cordon (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
+    },
+    /// Uncordon a node (mark schedulable; requires --confirm).
+    Uncordon {
+        /// node name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// actually uncordon (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
+    },
+    /// Evict a pod (requires --confirm).
+    Evict {
+        /// pod name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// actually evict (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
+    },
+    /// Preview what draining a node would evict (read-only; never cordons or evicts).
+    Drain {
+        /// node name
+        #[arg(short = 'p', long)]
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -585,6 +630,91 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 break_glass.as_deref(),
             );
             println!("{}", outcome.message);
+            Ok(())
+        }
+        Command::Cordon {
+            name,
+            confirm,
+            break_glass,
+        } => {
+            if confirm {
+                gate_write(break_glass.as_deref())?;
+            }
+            let outcome = kaptein_core::nodes::cordon(&client, &name, confirm).await?;
+            if confirm {
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::Cordon,
+                    "Node",
+                    "",
+                    &name,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    break_glass.as_deref(),
+                );
+            }
+            println!("{}", outcome.message);
+            Ok(())
+        }
+        Command::Uncordon {
+            name,
+            confirm,
+            break_glass,
+        } => {
+            if confirm {
+                gate_write(break_glass.as_deref())?;
+            }
+            let outcome = kaptein_core::nodes::uncordon(&client, &name, confirm).await?;
+            if confirm {
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::Cordon,
+                    "Node",
+                    "",
+                    &name,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    break_glass.as_deref(),
+                );
+            }
+            println!("{}", outcome.message);
+            Ok(())
+        }
+        Command::Evict {
+            name,
+            namespace,
+            confirm,
+            break_glass,
+        } => {
+            if confirm {
+                gate_write(break_glass.as_deref())?;
+            }
+            let outcome = kaptein_core::nodes::evict(&client, &namespace, &name, confirm).await?;
+            if confirm {
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::Evict,
+                    "Pod",
+                    &namespace,
+                    &name,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    break_glass.as_deref(),
+                );
+            }
+            println!("{}", outcome.message);
+            Ok(())
+        }
+        Command::Drain { name } => {
+            let targets = kaptein_core::nodes::drain_preview(&client, &name).await?;
+            println!("drain preview for node {name} (read-only, nothing evicted):");
+            let mut evictable = 0;
+            for t in &targets {
+                if t.skip_reason.is_empty() {
+                    evictable += 1;
+                    println!("  [evict] {}/{}", t.namespace, t.name);
+                } else {
+                    println!("  [skip]  {}/{} — {}", t.namespace, t.name, t.skip_reason);
+                }
+            }
+            println!(
+                "total: {evictable} evictable, {} skipped",
+                targets.len() - evictable
+            );
             Ok(())
         }
     }

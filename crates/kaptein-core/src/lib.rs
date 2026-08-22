@@ -19,6 +19,7 @@ pub mod error;
 pub mod events;
 pub mod exec;
 pub mod guardrails;
+pub mod nodes;
 pub mod overview;
 pub mod pods;
 pub mod portforward;
