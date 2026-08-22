@@ -265,6 +265,15 @@ enum Command {
         #[arg(short = 'p', long)]
         name: String,
     },
+    /// Shell out to an external tool (krew/kustomize/helm); degrades gracefully if absent.
+    Krew {
+        /// tool to invoke: krew, kustomize, or helm
+        #[arg(short = 't', long, default_value = "krew")]
+        tool: String,
+        /// list plugins (for krew) or run arbitrary args (for kustomize/helm)
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -716,6 +725,47 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 targets.len() - evictable
             );
             Ok(())
+        }
+        Command::Krew { tool, args } => {
+            let tool = match tool.to_ascii_lowercase().as_str() {
+                "krew" => kaptein_core::external::Tool::Krew,
+                "kustomize" => kaptein_core::external::Tool::Kustomize,
+                "helm" => kaptein_core::external::Tool::Helm,
+                other => {
+                    return Err(kaptein_core::Error::Internal(format!(
+                        "unknown external tool '{other}' (supported: krew, kustomize, helm)"
+                    )));
+                }
+            };
+            if args.is_empty() && tool == kaptein_core::external::Tool::Krew {
+                // Default: list plugins.
+                let plugins = kaptein_core::external::list_krew_plugins();
+                if plugins.is_empty() {
+                    println!("krew not found or no plugins installed (degraded gracefully)");
+                } else {
+                    for p in plugins {
+                        println!("{p}");
+                    }
+                }
+                return Ok(());
+            }
+            // For krew, prefix with "krew"; for others, pass args directly.
+            let full_args: Vec<&str> = if tool == kaptein_core::external::Tool::Krew {
+                std::iter::once("krew")
+                    .chain(args.iter().map(|s| s.as_str()))
+                    .collect()
+            } else {
+                args.iter().map(|s| s.as_str()).collect()
+            };
+            match kaptein_core::external::run(tool, &full_args) {
+                Ok(stdout) => {
+                    if !stdout.is_empty() {
+                        println!("{stdout}");
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
         }
     }
 }

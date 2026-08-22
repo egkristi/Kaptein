@@ -18,6 +18,7 @@ pub mod discovery;
 pub mod error;
 pub mod events;
 pub mod exec;
+pub mod external;
 pub mod guardrails;
 pub mod nodes;
 pub mod overview;

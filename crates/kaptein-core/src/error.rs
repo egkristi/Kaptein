@@ -26,6 +26,9 @@ pub enum Error {
     #[error("kubernetes API error: {0}")]
     Api(#[from] kube::Error),
 
+    #[error("{tool} error: {message}")]
+    External { tool: String, message: String },
+
     #[error("internal error: {0}")]
     Internal(String),
 }
