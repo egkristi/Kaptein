@@ -54,6 +54,18 @@ enum Command {
         #[arg(short, long, default_value = "default")]
         namespace: String,
     },
+    /// Batch RBAC preflight: check the standard action set for a resource.
+    Preflight {
+        /// plural resource name, e.g. "pods", "deployments"
+        #[arg(short, long)]
+        resource: String,
+        /// API group (empty for core)
+        #[arg(short, long, default_value = "")]
+        group: String,
+        /// namespace to evaluate
+        #[arg(short, long, default_value = "default")]
+        namespace: String,
+    },
     /// Show the current context and its guardrail classification.
     Context,
     /// List all contexts in the kubeconfig (for context switching).
@@ -355,6 +367,18 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 "{group_prefix}{sep}{verb} {resource} in {namespace}: {}",
                 if perm.allowed { "ALLOWED" } else { "DENIED" }
             );
+            Ok(())
+        }
+        Command::Preflight {
+            resource,
+            group,
+            namespace,
+        } => {
+            let preflight =
+                kaptein_core::auth::preflight(&client, &resource, &group, &namespace).await?;
+            for (verb, allowed) in preflight.actions {
+                println!("{verb:18} {}", if allowed { "ALLOWED" } else { "DENIED" });
+            }
             Ok(())
         }
         Command::Context => {

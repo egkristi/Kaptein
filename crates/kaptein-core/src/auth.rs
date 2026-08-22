@@ -77,6 +77,67 @@ pub async fn can(
     })
 }
 
+/// A batch RBAC preflight: check a standard set of verbs against a resource in a
+/// namespace, so the frontend can grey out disallowed actions *before* the user tries
+/// them (the "RBAC-preflight-greyed actions" k9s-parity item).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preflight {
+    pub resource: String,
+    pub group: String,
+    pub namespace: String,
+    /// `(verb, allowed)` pairs in a stable order.
+    pub actions: Vec<(String, bool)>,
+}
+
+/// Check the standard action set (`get`, `list`, `watch`, `create`, `update`, `patch`,
+/// `delete`, `deletecollection`) for a resource. One `SelfSubjectRulesReview` call is
+/// made per namespace and reused across all verbs.
+pub async fn preflight(
+    client: &Client,
+    resource: &str,
+    group: &str,
+    namespace: &str,
+) -> Result<Preflight, Error> {
+    const VERBS: [&str; 8] = [
+        "get",
+        "list",
+        "watch",
+        "create",
+        "update",
+        "patch",
+        "delete",
+        "deletecollection",
+    ];
+
+    // Fetch the rules once.
+    let status = subject_rules(client, namespace).await?;
+
+    let mut actions = Vec::with_capacity(VERBS.len());
+    for verb in VERBS {
+        let allowed = status.resource_rules.iter().any(|rule| {
+            let group_ok = rule
+                .api_groups
+                .as_ref()
+                .is_none_or(|groups| groups.iter().any(|g| g == "*" || g == group));
+            let resource_ok = rule.resources.as_ref().is_none_or(|resources| {
+                resources
+                    .iter()
+                    .any(|r| r == "*" || r == resource || r == &format!("*/{resource}"))
+            });
+            let verb_ok = rule.verbs.iter().any(|v| v == "*" || v == verb);
+            group_ok && resource_ok && verb_ok
+        });
+        actions.push((verb.to_string(), allowed));
+    }
+
+    Ok(Preflight {
+        resource: resource.to_string(),
+        group: group.to_string(),
+        namespace: namespace.to_string(),
+        actions,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
