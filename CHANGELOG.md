@@ -4,6 +4,13 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-22
+
+### Added
+- MCP diagnostic moat tools (M1b.3, ADR-0013): `explain_pod_failure`,
+  `why_is_job_pending`, `blast_radius`, and `what_changed_between` — read-only
+  tools backed by the M1.6 rule engine + Events API. MCP surface now has 8 tools.
+
 ## [0.6.0] - 2026-08-22
 
 ### Added
