@@ -35,6 +35,9 @@ enum Command {
         /// case-insensitive substring filter on name/namespace/kind
         #[arg(short, long)]
         filter: Option<String>,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// RBAC preflight: check whether the current user may perform a verb.
     Can {
@@ -53,6 +56,8 @@ enum Command {
     },
     /// Show the current context and its guardrail classification.
     Context,
+    /// List all contexts in the kubeconfig (for context switching).
+    Contexts,
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
@@ -306,12 +311,18 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             sort,
             descending,
             filter,
+            context,
         } => {
             let gvk = parse_gvk(&gvk);
             let sort_key = sort
                 .as_deref()
                 .map(kaptein_core::discovery::SortKey::parse)
                 .unwrap_or(None);
+            // Use the context-specific client when --context is supplied.
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let items = kaptein_core::discovery::list_with(
                 &client,
                 &gvk,
@@ -352,6 +363,17 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             let class = config.guardrails.classify(&ctx);
             println!("context: {ctx}");
             println!("class: {class:?}");
+            Ok(())
+        }
+        Command::Contexts => {
+            let contexts = kaptein_core::discovery::list_contexts()?;
+            for c in contexts {
+                let marker = if c.current { "*" } else { " " };
+                println!(
+                    "{marker} {}\tcluster: {}\tuser: {}",
+                    c.name, c.cluster, c.user
+                );
+            }
             Ok(())
         }
         Command::Diagnose { name, namespace } => {

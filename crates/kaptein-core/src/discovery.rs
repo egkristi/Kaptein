@@ -29,11 +29,62 @@ pub async fn client() -> Result<Client, Error> {
     Ok(Client::try_from(config)?)
 }
 
+/// Build a Kubernetes client for a specific named context (k9s-parity context
+/// switching). Falls back to the default context when `context` is `None`.
+pub async fn client_for_context(context: Option<&str>) -> Result<Client, Error> {
+    let options = KubeConfigOptions {
+        context: context.map(|c| c.to_string()),
+        cluster: None,
+        user: None,
+    };
+    let config = Config::from_kubeconfig(&options).await?;
+    Ok(Client::try_from(config)?)
+}
+
 /// Read the current context name from the kubeconfig (for guardrail classification).
 pub fn current_context_name() -> Result<String, Error> {
     use kube::config::Kubeconfig;
     let kc = Kubeconfig::read()?;
     Ok(kc.current_context.unwrap_or_default())
+}
+
+/// List all contexts defined in the kubeconfig (name + cluster + user), for a
+/// context-switching picker (k9s-parity).
+pub fn list_contexts() -> Result<Vec<ContextSummary>, Error> {
+    use kube::config::Kubeconfig;
+    let kc = Kubeconfig::read()?;
+    let current = kc.current_context.unwrap_or_default();
+    let mut out = Vec::new();
+    for named in kc.contexts {
+        let cluster = named
+            .context
+            .as_ref()
+            .map(|c| c.cluster.clone())
+            .unwrap_or_default();
+        let user = named
+            .context
+            .as_ref()
+            .and_then(|c| c.user.clone())
+            .unwrap_or_default();
+        out.push(ContextSummary {
+            name: named.name.clone(),
+            cluster,
+            user,
+            current: named.name == current,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// A single kubeconfig context.
+#[derive(Debug, Clone)]
+pub struct ContextSummary {
+    pub name: String,
+    pub cluster: String,
+    pub user: String,
+    /// `true` if this is the active context.
+    pub current: bool,
 }
 
 /// List resources of a given `group/version/kind`, namespaced or cluster-scoped.
