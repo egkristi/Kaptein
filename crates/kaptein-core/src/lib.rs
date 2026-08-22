@@ -20,6 +20,7 @@ pub mod events;
 pub mod exec;
 pub mod external;
 pub mod guardrails;
+pub mod moat;
 pub mod nodes;
 pub mod overview;
 pub mod pods;

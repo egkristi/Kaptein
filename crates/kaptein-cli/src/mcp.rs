@@ -98,6 +98,58 @@ impl KapteinMcp {
                     "required": ["name", "namespace"]
                 })),
             ),
+            Tool::new(
+                "explain_pod_failure",
+                "Explain why a pod is failing: rule-engine findings + related warning events (evidence-based).",
+                schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "namespace": {"type": "string"},
+                        "minutes": {"type": "integer", "description": "event window in minutes (default 15)"}
+                    },
+                    "required": ["name", "namespace"]
+                })),
+            ),
+            Tool::new(
+                "why_is_job_pending",
+                "Analyze why a Job is pending or stuck (conditions + pod diagnostics).",
+                schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "namespace": {"type": "string"}
+                    },
+                    "required": ["name", "namespace"]
+                })),
+            ),
+            Tool::new(
+                "blast_radius",
+                "Report a resource's owners and its dependents (what cascade-delete would affect).",
+                schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "gvk": {"type": "string", "description": "group/version/kind"},
+                        "name": {"type": "string"},
+                        "namespace": {"type": "string"}
+                    },
+                    "required": ["gvk", "name", "namespace"]
+                })),
+            ),
+            Tool::new(
+                "what_changed_between",
+                "Events in a time window (or the last N minutes) for a namespace.",
+                schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": "string"},
+                        "minutes": {"type": "integer", "description": "look back N minutes (default 15)"},
+                        "from_ms": {"type": "integer", "description": "start unix millis (optional)"},
+                        "to_ms": {"type": "integer", "description": "end unix millis (optional)"}
+                    },
+                    "required": ["namespace"]
+                })),
+            ),
         ]
     }
 
@@ -174,6 +226,108 @@ impl KapteinMcp {
                         .collect::<Vec<_>>()
                         .join("\n"))
                 }
+            }
+            "explain_pod_failure" => {
+                let name = a("name").ok_or("missing 'name'")?;
+                let namespace = a("namespace").ok_or("missing 'namespace'")?;
+                let minutes = args
+                    .and_then(|m| m.get("minutes"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(15);
+                let expl = kaptein_core::moat::explain_pod_failure(
+                    &self.client,
+                    &namespace,
+                    &name,
+                    minutes,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                let mut out = Vec::new();
+                if expl.findings.is_empty() {
+                    out.push(format!(
+                        "{}/{}: ready (no findings)",
+                        expl.namespace, expl.name
+                    ));
+                } else {
+                    for f in &expl.findings {
+                        out.push(format!("{}: {}", f.code, f.summary));
+                    }
+                }
+                out.push(format!(
+                    "related warning events ({}):",
+                    expl.related_events.len()
+                ));
+                for e in &expl.related_events {
+                    out.push(format!("  {}: {}", e.reason, e.message));
+                }
+                Ok(out.join("\n"))
+            }
+            "why_is_job_pending" => {
+                let name = a("name").ok_or("missing 'name'")?;
+                let namespace = a("namespace").ok_or("missing 'namespace'")?;
+                let expl = kaptein_core::moat::why_is_job_pending(&self.client, &namespace, &name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let mut out = vec![format!(
+                    "{}/{}: failed={}, active={}, succeeded={}",
+                    expl.namespace, expl.name, expl.failed, expl.active, expl.succeeded
+                )];
+                for (ty, status, msg) in &expl.conditions {
+                    out.push(format!("  condition {ty}={status}: {msg}"));
+                }
+                out.push(format!("pods ({}):", expl.pods.len()));
+                for p in &expl.pods {
+                    out.push(format!("  {p}"));
+                }
+                Ok(out.join("\n"))
+            }
+            "blast_radius" => {
+                let gvk = a("gvk").ok_or("missing 'gvk'")?;
+                let name = a("name").ok_or("missing 'name'")?;
+                let namespace = a("namespace").ok_or("missing 'namespace'")?;
+                let gvk = parse_gvk(&gvk);
+                let br = kaptein_core::moat::blast_radius(&self.client, &namespace, &gvk, &name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let mut out = vec![format!("{}/{} ({})", br.namespace, br.kind, br.name)];
+                out.push(format!("owners ({}):", br.owners.len()));
+                for o in &br.owners {
+                    out.push(format!("  {o}"));
+                }
+                out.push(format!("dependents ({}):", br.dependents.len()));
+                for d in &br.dependents {
+                    out.push(format!("  {d}"));
+                }
+                Ok(out.join("\n"))
+            }
+            "what_changed_between" => {
+                let namespace = a("namespace").ok_or("missing 'namespace'")?;
+                let minutes = args.and_then(|m| m.get("minutes")).and_then(|v| v.as_i64());
+                let from_ms = args.and_then(|m| m.get("from_ms")).and_then(|v| v.as_i64());
+                let to_ms = args.and_then(|m| m.get("to_ms")).and_then(|v| v.as_i64());
+                let wc = kaptein_core::moat::what_changed_between(
+                    &self.client,
+                    &namespace,
+                    from_ms,
+                    to_ms,
+                    minutes,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                let mut out = vec![format!(
+                    "{}: {} events between {} and {}",
+                    wc.namespace,
+                    wc.events.len(),
+                    wc.from_ms,
+                    wc.to_ms
+                )];
+                for e in &wc.events {
+                    out.push(format!(
+                        "{} {} {}/{}: {}",
+                        e.type_, e.reason, e.kind, e.name, e.message
+                    ));
+                }
+                Ok(out.join("\n"))
             }
             other => Err(format!("unknown tool: {other}")),
         }
@@ -254,7 +408,11 @@ impl KapteinMcp {
             "list_resources" => Operation::List,
             "describe" => Operation::Describe,
             "logs" => Operation::Logs,
-            "diagnose" => Operation::Diagnose,
+            "diagnose"
+            | "explain_pod_failure"
+            | "why_is_job_pending"
+            | "blast_radius"
+            | "what_changed_between" => Operation::Diagnose,
             _ => return,
         };
         let now_ms = std::time::SystemTime::now()
