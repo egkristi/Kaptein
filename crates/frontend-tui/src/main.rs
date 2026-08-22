@@ -31,11 +31,19 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 enum Kind {
     Pods,
     Deployments,
+    Services,
+    Nodes,
     Namespaces,
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Pods, Kind::Deployments, Kind::Namespaces];
+    const ALL: [Kind; 5] = [
+        Kind::Pods,
+        Kind::Deployments,
+        Kind::Services,
+        Kind::Nodes,
+        Kind::Namespaces,
+    ];
 
     fn next(self) -> Kind {
         let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
@@ -46,6 +54,8 @@ impl Kind {
         match self {
             Kind::Pods => GroupVersionKind::gvk("", "v1", "Pod"),
             Kind::Deployments => GroupVersionKind::gvk("apps", "v1", "Deployment"),
+            Kind::Services => GroupVersionKind::gvk("", "v1", "Service"),
+            Kind::Nodes => GroupVersionKind::gvk("", "v1", "Node"),
             Kind::Namespaces => GroupVersionKind::gvk("", "v1", "Namespace"),
         }
     }
@@ -54,8 +64,15 @@ impl Kind {
         match self {
             Kind::Pods => "Pods",
             Kind::Deployments => "Deployments",
+            Kind::Services => "Services",
+            Kind::Nodes => "Nodes",
             Kind::Namespaces => "Namespaces",
         }
+    }
+
+    /// Whether the kind is cluster-scoped (has no namespace column).
+    fn cluster_scoped(self) -> bool {
+        matches!(self, Kind::Nodes | Kind::Namespaces)
     }
 }
 
@@ -324,8 +341,10 @@ fn next_sort_key(key: kaptein_core::discovery::SortKey) -> kaptein_core::discove
 fn status_for(kind: Kind) -> String {
     match kind {
         Kind::Namespaces => "Active".into(),
+        Kind::Nodes => "Ready".into(), // refined via node status in a later milestone
         Kind::Pods => "Running".into(), // refined via pod status in a later milestone
         Kind::Deployments => "Ready".into(),
+        Kind::Services => "Active".into(),
     }
 }
 
@@ -348,7 +367,7 @@ async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result
 
 async fn describe(client: &Client, kind: Kind, row: &TableRow) -> io::Result<String> {
     let gvk = kind.gvk();
-    let ns = if row.namespace.is_empty() {
+    let ns = if kind.cluster_scoped() || row.namespace.is_empty() {
         None
     } else {
         Some(row.namespace.as_str())
