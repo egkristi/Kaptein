@@ -144,6 +144,17 @@ enum Command {
         /// local bind port (0 = ephemeral)
         #[arg(long, default_value_t = 0)]
         local: u16,
+        /// name for a persistent forward (saved across runs)
+        #[arg(short = 'N', long)]
+        name: Option<String>,
+    },
+    /// List named (persistent) port-forwards.
+    PortForwardList,
+    /// Remove a named port-forward.
+    PortForwardRemove {
+        /// forward name
+        #[arg(short = 'N', long)]
+        name: String,
     },
     /// Run a one-shot command in a pod container (read-only).
     Exec {
@@ -512,19 +523,69 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             namespace,
             port,
             local,
+            name,
         } => {
-            let local_addr = format!("127.0.0.1:{local}")
-                .parse::<std::net::SocketAddr>()
-                .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
-            let bound =
-                kaptein_core::portforward::forward(&client, &namespace, &pod, port, local_addr)
-                    .await?;
-            println!("forwarding {namespace}/{pod}:{port} -> {bound} (Ctrl-C to stop)");
-            // Keep the process alive until Ctrl-C.
-            tokio::signal::ctrl_c()
-                .await
-                .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
-            println!("stopped");
+            if let Some(forward_name) = name {
+                // Named, persistent forward with auto-reconnect.
+                let spec = kaptein_core::portforward::ForwardSpec {
+                    name: forward_name.clone(),
+                    namespace: namespace.clone(),
+                    pod: pod.clone(),
+                    target_port: port,
+                    local_port: local,
+                };
+                // Persist the spec.
+                let path = kaptein_core::portforward::manager_path();
+                let mut manager = kaptein_core::portforward::ForwardManager::load(Some(&path));
+                manager.upsert(spec.clone())?;
+                let running =
+                    kaptein_core::portforward::start_named_forward(client.clone(), spec).await?;
+                println!(
+                    "forwarding [{forward_name}] {namespace}/{pod}:{port} -> {} (auto-reconnect; Ctrl-C to stop)",
+                    running.local_addr
+                );
+                tokio::signal::ctrl_c()
+                    .await
+                    .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+                let _ = running.cancel.send(true);
+                println!("stopped");
+                Ok(())
+            } else {
+                let local_addr = format!("127.0.0.1:{local}")
+                    .parse::<std::net::SocketAddr>()
+                    .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+                let bound =
+                    kaptein_core::portforward::forward(&client, &namespace, &pod, port, local_addr)
+                        .await?;
+                println!("forwarding {namespace}/{pod}:{port} -> {bound} (Ctrl-C to stop)");
+                tokio::signal::ctrl_c()
+                    .await
+                    .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
+                println!("stopped");
+                Ok(())
+            }
+        }
+        Command::PortForwardList => {
+            let path = kaptein_core::portforward::manager_path();
+            let manager = kaptein_core::portforward::ForwardManager::load(Some(&path));
+            let specs = manager.list();
+            if specs.is_empty() {
+                println!("no named port-forwards");
+            } else {
+                for s in specs {
+                    println!(
+                        "{}\t{}/{}\t:{}\t->\t:{}\t",
+                        s.name, s.namespace, s.pod, s.target_port, s.local_port
+                    );
+                }
+            }
+            Ok(())
+        }
+        Command::PortForwardRemove { name } => {
+            let path = kaptein_core::portforward::manager_path();
+            let mut manager = kaptein_core::portforward::ForwardManager::load(Some(&path));
+            manager.remove(&name)?;
+            println!("removed forward '{name}'");
             Ok(())
         }
         Command::Exec {
