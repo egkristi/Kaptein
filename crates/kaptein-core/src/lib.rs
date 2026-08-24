@@ -26,6 +26,7 @@ pub mod nodes;
 pub mod overview;
 pub mod pods;
 pub mod portforward;
+pub mod watchring;
 pub mod workloads;
 
 pub use error::Error;

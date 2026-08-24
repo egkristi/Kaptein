@@ -132,6 +132,18 @@ enum Command {
         #[arg(long, default_value_t = 15)]
         minutes: i64,
     },
+    /// Watch a resource kind and report changes (in-memory ring buffer, no persistence).
+    Watch {
+        /// group/version/kind, e.g. v1/Pod
+        #[arg(short, long, default_value = "v1/Pod")]
+        gvk: String,
+        /// namespace (omit for cluster-scoped)
+        #[arg(short, long)]
+        namespace: Option<String>,
+        /// stop after this many change events
+        #[arg(long, default_value_t = 20)]
+        max: usize,
+    },
     /// Server-side dry-run a YAML manifest (validate without mutating the cluster).
     Apply {
         /// path to a YAML manifest, or "-" for stdin
@@ -624,6 +636,30 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 println!(
                     "    [WARN] {}/{}\t{}\t{}",
                     w.kind, w.name, w.reason, w.message
+                );
+            }
+            Ok(())
+        }
+        Command::Watch {
+            gvk,
+            namespace,
+            max,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let ring = kaptein_core::watchring::WatchRing::new(max.max(1));
+            let pushed = kaptein_core::watchring::watch_into_ring(
+                &client,
+                &gvk,
+                namespace.as_deref(),
+                &ring,
+                max,
+            )
+            .await?;
+            println!("watched {gvk:?}: {pushed} changes");
+            for r in ring.snapshot() {
+                println!(
+                    "{} {}\t{}/{}\t({} ms)",
+                    r.event, r.kind, r.namespace, r.name, r.observed_at_ms
                 );
             }
             Ok(())
