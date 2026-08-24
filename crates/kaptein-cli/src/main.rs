@@ -305,6 +305,39 @@ enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// List ephemeral containers attached to a pod.
+    DebugContainers {
+        /// pod name
+        #[arg(short = 'p', long)]
+        pod: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+    },
+    /// Attach an ephemeral (debug) container to a running pod (requires --confirm).
+    Debug {
+        /// pod name
+        #[arg(short = 'p', long)]
+        pod: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default")]
+        namespace: String,
+        /// ephemeral container name
+        #[arg(long)]
+        name: String,
+        /// image (e.g. busybox)
+        #[arg(long, default_value = "busybox")]
+        image: String,
+        /// command (optional; e.g. -- sleep 3600)
+        #[arg(last = true)]
+        command: Vec<String>,
+        /// actually attach (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -900,6 +933,51 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 }
                 Err(e) => Err(e),
             }
+        }
+        Command::DebugContainers { pod, namespace } => {
+            let containers = kaptein_core::ephemeral::list(&client, &namespace, &pod).await?;
+            if containers.is_empty() {
+                println!("{namespace}/{pod}: no ephemeral containers");
+            } else {
+                for c in containers {
+                    let cmd = if c.command.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" cmd=[{}]", c.command.join(" "))
+                    };
+                    println!("{}  {} {cmd}", c.name, c.image);
+                }
+            }
+            Ok(())
+        }
+        Command::Debug {
+            pod,
+            namespace,
+            name,
+            image,
+            command,
+            confirm,
+            break_glass,
+        } => {
+            if confirm {
+                gate_write(break_glass.as_deref())?;
+            }
+            let outcome = kaptein_core::ephemeral::add(
+                &client, &namespace, &pod, &name, &image, &command, confirm,
+            )
+            .await?;
+            if confirm {
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::Exec,
+                    "Pod",
+                    &namespace,
+                    &pod,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    break_glass.as_deref(),
+                );
+            }
+            println!("{}", outcome.message);
+            Ok(())
         }
     }
 }

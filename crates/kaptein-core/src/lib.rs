@@ -15,6 +15,7 @@ pub mod delete;
 pub mod describe;
 pub mod diagnostics;
 pub mod discovery;
+pub mod ephemeral;
 pub mod error;
 pub mod events;
 pub mod exec;
