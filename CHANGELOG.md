@@ -4,6 +4,24 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-24
+
+### Added
+- MCP governance per tool call (M1b.4, ADR-0010): RBAC preflight + context guardrail
+  before every call; audit records the real outcome (Applied/Rejected), target, and
+  per-instance session id.
+
+### Fixed
+- Secret masking/redaction: `kaptein describe` and the MCP `describe` tool now mask
+  Secret `data`/`stringData` and sensitive-named fields before serialization.
+- Diagnostics: exit-0 Job no longer misreported as `crash_loop`; CrashLoopBackOff
+  detected via `last_state` (OOM forensics).
+- RBAC preflight fails closed on absent rules; correct `{resource}/*` subresource pattern.
+- `blast_radius` walks Deployment → ReplicaSet → Pod ownership.
+- Port-forward establishes a fresh stream per connection (connection 2+ no longer fails).
+- TUI: real pod status, fuzzy-jump backspace, `KeyEventKind::Press`, dynamic scroll,
+  raw-mode restore on every exit.
+
 ## [0.15.0] - 2026-08-24
 
 ### Added
