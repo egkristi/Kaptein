@@ -12,7 +12,9 @@ use crate::Error;
 /// Fetch a resource and serialize it to YAML for a "describe"-style dump.
 ///
 /// Uses `serde_yaml` for a human-readable representation. `DynamicObject` serializes to
-/// YAML directly, so any resource (built-in or CRD) is described uniformly.
+/// YAML directly, so any resource (built-in or CRD) is described uniformly. Secrets and
+/// sensitive-named fields are **masked** before serialization (see `redact`), so a plaintext
+/// secret can never reach a frontend, the MCP surface, or an audit log.
 pub async fn describe_dynamic(
     client: &Client,
     gvk: &kube::core::GroupVersionKind,
@@ -24,7 +26,8 @@ pub async fn describe_dynamic(
         Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
         None => Api::all_with(client.clone(), &ar),
     };
-    let obj = api.get(name).await.map_err(Error::Api)?;
+    let mut obj = api.get(name).await.map_err(Error::Api)?;
+    crate::redact::redact_object(&mut obj);
     serde_yaml::to_string(&obj).map_err(|e| Error::Internal(e.to_string()))
 }
 

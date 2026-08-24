@@ -26,6 +26,7 @@ pub mod nodes;
 pub mod overview;
 pub mod pods;
 pub mod portforward;
+pub mod redact;
 pub mod watchring;
 pub mod workloads;
 
