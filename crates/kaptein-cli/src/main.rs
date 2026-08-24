@@ -187,6 +187,9 @@ enum Command {
         /// command + args (e.g. -- cmd arg1 arg2)
         #[arg(last = true, required = true)]
         command: Vec<String>,
+        /// interactive TTY session (allocate a TTY and proxy stdin/stdout)
+        #[arg(short = 't', long)]
+        tty: bool,
     },
     /// Delete a resource (dry-run by default; requires --confirm).
     Delete {
@@ -639,11 +642,35 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             namespace,
             container,
             command,
+            tty,
         } => {
-            let output =
-                kaptein_core::exec::exec(&client, &namespace, &pod, &command, container.as_deref())
-                    .await?;
-            print!("{}", output.output);
+            if tty {
+                // Interactive TTY: allocate a TTY and proxy stdin/stdout. The CLI must
+                // run on a real terminal; tokio's stdio is used directly (raw-mode
+                // switching is the terminal's job in a full TUI, not the CLI's).
+                let stdin = tokio::io::stdin();
+                let stdout = tokio::io::stdout();
+                kaptein_core::exec::exec_tty(
+                    &client,
+                    &namespace,
+                    &pod,
+                    &command,
+                    container.as_deref(),
+                    stdin,
+                    stdout,
+                )
+                .await?;
+            } else {
+                let output = kaptein_core::exec::exec(
+                    &client,
+                    &namespace,
+                    &pod,
+                    &command,
+                    container.as_deref(),
+                )
+                .await?;
+                print!("{}", output.output);
+            }
             Ok(())
         }
         Command::Delete {
