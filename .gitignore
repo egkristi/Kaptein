@@ -15,6 +15,10 @@
 .DS_Store
 Thumbs.db
 
+# Core dumps (from crashed processes, not part of the source tree)
+core
+core.*
+
 # Local env / secrets
 .env
 .env.*
