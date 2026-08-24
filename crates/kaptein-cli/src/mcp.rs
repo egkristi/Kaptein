@@ -87,6 +87,18 @@ impl KapteinMcp {
                 })),
             ),
             Tool::new(
+                "get_events",
+                "Recent cluster events in a namespace (or all namespaces) within a time window.",
+                schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": {"type": ["string", "null"], "description": "namespace (omit for all)"},
+                        "minutes": {"type": "integer", "description": "look back N minutes (default 15)"}
+                    },
+                    "required": []
+                })),
+            ),
+            Tool::new(
                 "diagnose",
                 "Explain why a pod is not ready (evidence-based diagnostics).",
                 schema(json!({
@@ -207,6 +219,35 @@ impl KapteinMcp {
                 Ok(logs
                     .iter()
                     .map(|(c, l)| format!("[{c}] {l}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+            "get_events" => {
+                let namespace = ns("namespace");
+                let minutes = args
+                    .and_then(|m| m.get("minutes"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(15);
+                let since_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0)
+                    .saturating_sub(minutes * 60 * 1000);
+                let events = kaptein_core::events::recent_events(
+                    &self.client,
+                    namespace.as_deref(),
+                    Some(since_ms),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                Ok(events
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "{} {} {}/{}: {}",
+                            e.type_, e.reason, e.kind, e.name, e.message
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("\n"))
             }
@@ -407,7 +448,7 @@ impl KapteinMcp {
         let operation = match tool_name {
             "list_resources" => Operation::List,
             "describe" => Operation::Describe,
-            "logs" => Operation::Logs,
+            "logs" | "get_events" => Operation::Logs,
             "diagnose"
             | "explain_pod_failure"
             | "why_is_job_pending"
