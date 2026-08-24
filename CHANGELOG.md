@@ -4,6 +4,15 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-24
+
+### Added
+- `kaptein exec --tty` — interactive TTY exec: allocate a TTY and proxy
+  stdin/stdout between the local terminal and the pod process (M1.2).
+- Fuzzy jump (M1.2): a renderer-agnostic subsequence matcher
+  (`kaptein-viewmodel::fuzzy`) with fzf-style scoring, wired into the TUI as
+  `/` jump mode (type to re-rank rows, Enter to accept, Esc to cancel).
+
 ## [0.7.0] - 2026-08-22
 
 ### Added
