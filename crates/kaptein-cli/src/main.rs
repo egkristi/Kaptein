@@ -111,6 +111,9 @@ enum Command {
         /// follow the log stream until interrupted (only with --name)
         #[arg(short = 'f', long)]
         follow: bool,
+        /// parse JSON log lines into typed columns (M1.2 "JSON -> columns")
+        #[arg(long)]
+        json: bool,
     },
     /// Run the governed MCP server over stdio (read-only).
     Mcp,
@@ -471,7 +474,63 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             regex,
             tail,
             follow,
+            json,
         } => {
+            // JSON mode: parse JSON log lines into typed columns. Applies to both
+            // single-pod and multi-pod paths; plain lines fall back to `_raw`.
+            if json {
+                let raw_lines: Vec<String> = match name.as_deref() {
+                    Some(pod_name) => {
+                        let logs = kaptein_core::describe::pod_logs(
+                            &client,
+                            &namespace,
+                            pod_name,
+                            Some(tail),
+                        )
+                        .await?;
+                        logs.into_iter().map(|(_, line)| line).collect()
+                    }
+                    None => {
+                        let lines = kaptein_core::describe::multi_pod_logs(
+                            &client,
+                            &namespace,
+                            selector.as_deref(),
+                            regex.as_deref(),
+                            Some(tail),
+                        )
+                        .await?;
+                        lines.into_iter().map(|l| l.line).collect()
+                    }
+                };
+                let parsed = kaptein_viewmodel::parse_log_stream(raw_lines);
+                let columns = kaptein_viewmodel::infer_columns(&parsed);
+                if columns.is_empty() {
+                    println!("(no JSON log lines found)");
+                } else {
+                    // Header row.
+                    println!("{}", columns.join("\t"));
+                    for line in &parsed {
+                        if line.columns.is_empty() {
+                            println!("{}", line.raw);
+                            continue;
+                        }
+                        let cells: Vec<String> = columns
+                            .iter()
+                            .map(|c| match line.columns.get(c) {
+                                Some(kaptein_viewmodel::LogCell::Text(s)) => s.clone(),
+                                Some(kaptein_viewmodel::LogCell::Number(n)) => n.to_string(),
+                                Some(kaptein_viewmodel::LogCell::Float(f)) => f.to_string(),
+                                Some(kaptein_viewmodel::LogCell::Bool(b)) => b.to_string(),
+                                Some(kaptein_viewmodel::LogCell::Null) => "null".into(),
+                                None => String::new(),
+                            })
+                            .collect();
+                        println!("{}", cells.join("\t"));
+                    }
+                }
+                return Ok(());
+            }
+
             match name {
                 Some(pod_name) => {
                     if follow {

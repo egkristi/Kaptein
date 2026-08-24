@@ -12,6 +12,7 @@
 pub mod audit;
 pub mod error;
 pub mod fuzzy;
+pub mod logparse;
 pub mod render;
 pub mod semantic;
 pub mod sink;
@@ -20,6 +21,7 @@ pub mod surface;
 pub use audit::{Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source};
 pub use error::Error;
 pub use fuzzy::{FuzzyMatch, fuzzy_jump};
+pub use logparse::{LogCell, ParsedLogLine, infer_columns, parse_json_line, parse_log_stream};
 pub use render::{
     Cell, DataPlane, Filter, Page, Query, Revision, Row, RowId, RowPatch, SortSpec, StatusLevel,
 };
