@@ -388,17 +388,25 @@ LICENSE            # BUSL-1.1 (source-available; converts to MIT on Change Date)
 
 ## Status
 
-**MVP.** The Phase 1 core is functional against a live cluster: resource listing, RBAC
-preflight, context guardrails, diagnostics, describe, and logs — exposed through a CLI
-(`kaptein`) and a ratatui TUI (`kaptein-tui`). See [`ROADMAP.md`](./ROADMAP.md) for the
-full phased plan; Phases 1b–3b are tracked as GitHub issues (#3–#11).
+**MVP — Phase 1 functional against a live cluster.** The k9s-parity surface is
+implemented and cluster-verified: resource listing (built-ins + CRDs), RBAC preflight,
+context guardrails, diagnostics, describe (with secret redaction), logs, events,
+port-forward, exec, ephemeral containers, and the governed MCP server (`kaptein mcp`) —
+exposed through a CLI (`kaptein`) and a ratatui TUI (`kaptein-tui`).
 
-### Build & test the MVP
+Writes are **opt-in and gated**: `delete`, `scale`, `restart`, `cordon`, `uncordon`,
+`evict`, and `debug` default to dry-run, require an explicit `--confirm`, and (for
+prod/unknown contexts) a break-glass justification. Everything else is read-only.
+
+See [`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
+[`ISSUES.md`](./ISSUES.md) for known issues; Phases 1b–3b are tracked as GitHub issues.
+
+### Build & test
 
 ```bash
 cargo build --release
 
-# CLI (read-only against your current kubeconfig context)
+# Read path (read-only against your current kubeconfig context)
 ./target/release/kaptein get --gvk v1/Pod --namespace default
 ./target/release/kaptein get --gvk apps/v1/Deployment --namespace kube-system
 ./target/release/kaptein can --verb get --resource pods --namespace default
@@ -406,13 +414,23 @@ cargo build --release
 ./target/release/kaptein diagnose --name <pod> --namespace <ns>
 ./target/release/kaptein describe --gvk v1/Pod --name <pod> --namespace <ns>
 ./target/release/kaptein logs --name <pod> --namespace <ns> --tail 50
+./target/release/kaptein events --namespace default --minutes 15
+./target/release/kaptein overview --minutes 15
+./target/release/kaptein config-validate
+./target/release/kaptein config-explain-context --context <ctx>
+
+# Governed MCP server (read-only; same guardrails as the CLI)
+./target/release/kaptein mcp
+
+# Gated write path (dry-run by default; --confirm required, break-glass on prod)
+./target/release/kaptein scale --gvk apps/v1/Deployment --name <deploy> --replicas 3   # dry-run
+./target/release/kaptein scale --gvk apps/v1/Deployment --name <deploy> --replicas 3 --confirm
 
 # TUI (vim navigation; Tab switches kind, n cycles namespace, d describe, i diagnose)
 ./target/release/kaptein-tui
 ```
 
-All commands are read-only and never mutate the cluster. Point `KUBECONFIG` at any
-cluster to test.
+Point `KUBECONFIG` at any cluster to test; read-only commands never mutate the cluster.
 
 ---
 
