@@ -16,8 +16,15 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
 
 **Goal:** a compiling workspace with the layer boundaries enforced from day one.
 
+**Status: done.** ADR-0014 collapsed the Phase 0 crate list from nine to four crates
+(`kaptein-core`, `kaptein-viewmodel`, `frontend-tui`, `kaptein-cli`), later joined by
+`kaptein-integration` as the native integration layer. The remaining items below are
+kept for history; the crates that "have code" now are exactly those five.
+
 - Cargo workspace under `crates/`: `kaptein-core`, `kaptein-viewmodel`, `frontend-tui`,
-  `frontend-gui`, `headless`, `serve` (plus `plugins`, `viewdef`, `ext-sdk` stubs)
+  `kaptein-cli`, `kaptein-integration` (the `frontend-gui`, `headless`, `serve`,
+  `plugins`, `viewdef`, `ext-sdk` crates are split out only when they carry real code —
+  see ADR-0014)
 - `kaptein-core` skeleton: `kube-rs` + `tokio` client bootstrap, watcher/reflector store
   trait, CRD discovery (`DynamicObject`), protobuf content-type flag,
   `PartialObjectMetadata` for list-heavy views
@@ -29,7 +36,8 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
 - CI: `cargo fmt`, `clippy`, `test`, `cargo deny check licenses`, signed release + SBOM
   pipeline stub
 - Definition of Done: `cargo build --workspace` is green; layer deps are one-directional
-  (`frontend-*` → `viewmodel` → `core`); `cargo deny check licenses` passes on the skeleton
+  (`frontend-tui` → `kaptein-integration` → `kaptein-core`, with no frontend depending on
+  `kaptein-core` directly); `cargo deny check licenses` passes on the skeleton
 
 ## Phase 1 — Core + viewmodel + ratatui (k9s parity + RBAC preflight)
 
@@ -72,8 +80,26 @@ Milestones:
   - This single pack feeds **three consumers at once**: the landing view (M1.5), the
     TUI diagnostics, and the MCP moat tool in 1b — validating the engine's shape before
     3a builds out the rest (resolves the ADR-0013 vs Phase 1b contradiction)
-- Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight, and
-  guardrails. Read-only default for unknown contexts.
+  - **A canned pod-status fixture corpus** — JSON fixtures for the common failure shapes
+    (CrashLoopBackOff, exit-0 Job, ImagePullBackOff, unschedulable, probe failure) with
+    expected findings, so the engine is regression-tested as packs grow (see the review).
+- **M1.7 Secret masking & redaction — *blocking*** *(elevated from M3b.2 per review)*
+  - A single `kaptein-core` redaction choke point through which **every** serialized
+    resource passes before reaching a frontend, the MCP `describe` tool, or an audit log
+  - Kubernetes `Secret` `data`/`stringData` are masked; sensitive-named fields
+    (password/token/key/credential/…) are masked anywhere they appear
+  - `Cell::Redacted` is actually constructed (not just defined), and `Operation::SecretViewed`
+    is emitted when an operator unmasks a secret
+  - **DoD (falsifiable):** `kaptein describe --gvk v1/Secret` and the MCP `describe` tool
+    never emit a plaintext secret value — a test proves it.
+- **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
+  not aspirational)*
+  - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
+    cross-cutting performance budget; CI runs the benches and fails on regression
+  - Owns the p99 <16 ms, RSS <250 MB, cold-start <500 ms targets *in Phase 1*, while the
+    design can still change to meet them
+- Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
+  guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
   **k9s-parity checklist (all must be true):**
   - list pods / deployments / services / nodes; column sort and filter
@@ -101,9 +127,19 @@ GitOps write path, time machine, or fleet.
   `get_logs`, `get_events`) plus the diagnostic moat (`explain_pod_failure`,
   `what_changed_between`, `blast_radius`, `why_is_job_pending`), backed by the M1.6
   rule engine (the one pack ships in Phase 1; more packs in 3a).
+- **M1b.4 Governance conformance — *blocking*** *(elevated per review)*
+  - Every tool call actually runs **RBAC preflight + context classification + read-only
+    guardrail** *before* reaching the API server — not merely documented
+  - The audit record is governance-grade: `Outcome::Rejected` is emitted on refusal, the
+    `target` carries the real resource (not the tool name), `session_id` is a real
+    per-session value (not a constant), and the outcome is recorded **after** execution
+    (failed calls are not logged as `Applied`)
+  - **DoD (falsifiable):** a tool call the agent's ServiceAccount is not permitted to make
+    is refused before it reaches the API server, and the refusal appears in the audit log
+    as `Rejected` — with a test that proves it.
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
-  does not have.
+  does not have. The M1b.4 DoD holds, not just the happy path.
 
 ## Phase 2 — Browser UI + view definitions + GitOps + dry-run diff
 
@@ -113,6 +149,23 @@ critical path — it is the same egui code packaged later, after 3a validates th
 
 Milestones:
 
+- **M2.0 Wire the render contract + informer store — *blocking*** *(elevated per review:
+  two fully-specified ADRs have no implementing code)*
+  - `impl DataPlane` (ADR-0005): the `Surface`/`Column`/`Action`/`ActionState`/`Status`
+    types are actually constructed outside tests; sorting/filtering move out of
+    `discovery::list_with` into the view-model's data plane (the CLI/TUI consume the
+    same `Page`/`Row`/`Query`)
+  - An informer-backed store (ADR-0006): `discovery::list` becomes bounded
+    (`limit` + `continue` token + `PartialObjectMetadata` for list-heavy views); the TUI
+    stops re-listing the whole cluster per keystroke
+  - **DoD (falsifiable):** the TUI renders from a `DataPlane` subscription, not per-key
+    `api.list` calls — and there is at least one `#[tokio::test]` exercising the store.
+- **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
+  - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
+    every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
+    are unit-tested today
+  - CI runs on Windows and macOS (not just `ubuntu-latest`), plus a conformance check
+    against the latest three Kubernetes minors
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a
@@ -255,9 +308,25 @@ Milestones:
 - **Informer-based**, never polling.
 - **Same keymap** in TUI and GUI.
 - i18n + screen-reader-friendly GUI.
-- Signed releases with SBOM.
+- **Secrets are masked by default** (M1.7) — redaction runs in `kaptein-core` before any
+  serialization, not at the frontend.
+- **Signed releases + SBOM** — cosign signature, SLSA provenance, SBOM, and a
+  `SHA256SUMS` file on every release (elevated from the Phase 0 "stub" to a real DoD per
+  review; SECURITY.md already promises it).
+- **Redaction-aware error boundary** — `kaptein-viewmodel::Error` maps raw
+  `kube::Error`/subprocess failures to user-facing messages; `kaptein-integration` is
+  that boundary, not a `#[error("{0}")]` pass-through (elevated per review).
+- **Config schema, precedence, and validation** — a single config file (XDG, TOML,
+  schema-validated) with precedence config → CLI → env; a `kaptein config validate` /
+  `explain-context` command so a typo in a prod regex is surfaced, not silently ignored.
+- **Contract-version enforcement** — refuse to load a plugin, lens, or MCP client whose
+  version is unsupported (per `docs/versioning.md`); the MCP surface advertises a
+  version field and the compatibility gate is implemented (elevated per review).
+- **Distribution & release sync** — a Homebrew tap, Krew plugin, container image,
+  checksums, and install script, owned by a milestone; the site/README/docs stay in sync
+  with a tag (the review found five releases of drift).
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
-  pods, no kubelets) drives CI benchmarks. Falsifiable targets:
+  pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store
   - steady-state RSS < 250 MB at 50 000 objects
   - cold start to first usable frame < 500 ms
@@ -271,12 +340,14 @@ Milestones:
 
 ## Immediate next steps
 
-1. Scaffold the Cargo workspace under `crates/` (Phase 0): `kaptein-core`,
-   `kaptein-viewmodel`, `frontend-tui`, `frontend-gui`, `headless`, `serve`.
-2. Define the three-layer render contract (data plane, semantic layer, surface kinds)
-   and the `AuditEvent` type in `kaptein-viewmodel`, before any frontend code
-   (ADR-0005).
-3. Stand up the `kaptein-core` watcher/reflector store and CRD discovery, with informer
-   management (ADR-0006).
-4. Build the first ratatui `Table` surface on top of the data plane.
-5. Run `cargo deny check licenses` on the skeleton and fix allowlist collisions early.
+*(These were the Phase 0 next steps; they are all long done. The live next steps are the
+open blocking milestones — M1.7 (redaction), M1b.4 (MCP governance), M2.0 (data plane +
+informers), M2.0b (integration tests), and the cross-cutting supply-chain items.)*
+
+1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
+2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the
+   **implementing** `DataPlane` is M2.0.
+3. ~~Stand up the watcher/reflector store and CRD discovery~~ — CRD discovery done; the
+   informer-backed bounded store is M2.0.
+4. ~~Build the first ratatui `Table`~~ — done.
+5. ~~Run `cargo deny check licenses`~~ — done and gated in CI.

@@ -27,8 +27,11 @@ access** on an operator's workstation. Our mitigations:
 
 ### Secrets & credentials
 
-- Secrets are **masked by default**; ESO/Vault/SOPS integrations display the *source*,
-  never the value.
+- Secrets are **masked by default** — redaction runs in `kaptein-core` (`redact::redact_object`)
+  before any resource is serialized, so `kaptein describe` and the MCP `describe` tool
+  can never emit a plaintext secret value. Kubernetes `Secret` `data`/`stringData` and
+  sensitive-named fields (password/token/key/credential/…) are masked.
+- ESO/Vault/SOPS integrations display the *source*, never the value.
 - `kubeconfig` and exec-credential plugin output are never persisted by Kaptein beyond
   the user's own config.
 - The audit log records *operations*, not secret values.
@@ -87,6 +90,10 @@ plane, not a new one:
 
 ### Supply chain
 
-- Releases are **signed** and ship an **SBOM**.
+- Releases are **signed** (cosign) and ship an **SBOM**, with SLSA provenance and a
+  `SHA256SUMS` file. **Status: tracked in ROADMAP (cross-cutting) — the release workflow
+  produces tarballs today but not yet signatures/SBOM/provenance.** This is a
+  credibility item for a project whose pitch includes SBOM reconciliation, and it is
+  owned as a blocking cross-cutting commitment.
 - Dependencies are minimized and pinned; scanner integrations (Trivy/Grype, etc.) are
   shelled out to, never vendored.

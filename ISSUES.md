@@ -1,0 +1,71 @@
+# Issues & known limitations
+
+This file tracks **known issues and limitations** that are not yet fixed, plus the
+external-review backlog. GitHub issues are the source of truth for active work; this file
+is the durable, version-controlled summary for contributors who read the repo, not the
+tracker.
+
+> Convention: a bug that exists in the shipped artifact is a **GitHub issue** (numbered,
+> with a repro). A limitation by design is documented here with its owning milestone.
+
+---
+
+## Fixed in this review cycle
+
+| Area | Finding | Fix |
+|------|---------|-----|
+| Security | `kaptein describe`/MCP `describe` emitted plaintext Secret values | `kaptein-core::redact` masks `Secret` data + sensitive-named fields before serialization |
+| Diagnostics | exit-0 Job misreported as `crash_loop` | `container_crash_finding` skips exit 0 |
+| Diagnostics | CrashLoopBackOff pod reported as `container_not_ready` | new `crash_loop_backoff` reads `last_state.terminated` |
+| RBAC | fail-open on absent `api_groups`/`resources` | fail **closed** |
+| RBAC | subresource pattern `*/{resource}` backwards | `{resource}/*` |
+| Moat | `blast_radius` empty for Deployments | walks Deployment → ReplicaSet → Pod |
+| Port-forward | second connection half-closed (reused stream) | fresh upstream stream per connection |
+| TUI | fabricated status column | real pod phase from `ResourceSummary.status` |
+| TUI | fuzzy jump destroyed filtered rows on backspace | master list preserved |
+| TUI | double keystrokes on Windows | `KeyEventKind::Press` filter |
+| TUI | hardcoded 10-row scroll | scroll follows terminal height |
+| TUI | raw mode left broken on error | cleanup on every exit path |
+
+## Remaining review backlog (owned by milestones)
+
+The external review ranked these; they are now **milestones in `ROADMAP.md`** rather than
+unowned debt:
+
+1. **M1b.4 — MCP governance conformance** (blocking): RBAC preflight + context
+   classification + read-only guardrail actually run per tool call; audit emits
+   `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
+2. **M2.0 — wire `DataPlane` + informer store** (blocking): the render contract and the
+   informer-backed bounded store are implemented, not just specified.
+3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
+   latest-three-minors conformance.
+4. **M1.8 — kwok performance harness**: the performance budget is measured, not
+   aspirational.
+5. **Signed releases + SBOM** (cross-cutting): cosign + SLSA + SBOM + SHA256SUMS.
+6. **Config schema/precedence/validation** (cross-cutting): `kaptein config validate` /
+   `explain-context`.
+7. **Redaction-aware error boundary** (cross-cutting): `kaptein-integration` maps core
+   errors instead of passing through.
+8. **Distribution & release sync** (cross-cutting): Homebrew/Krew/container/checksums +
+   site/docs/tag sync.
+9. **Contract-version enforcement** (cross-cutting): MCP version field + compatibility gate.
+10. **Events API v1 + scoped queries**: `events.k8s.io/v1` `eventTime`/`series` support and
+    field-selector scoping (the `lastTimestamp`-only path silently drops v1 events).
+11. **Diagnostics fixture corpus**: canned pod JSONs with expected findings (owned by M1.6).
+
+## By-design limitations
+
+- **PVC-binding diagnostics** need the PVC resources themselves — deferred to a Phase 3a
+  rule pack (the scheduler's `PodScheduled` message is the Phase 1 signal).
+- **`blast_radius`** walks the Pod ownership chain; a full cross-kind topology scan is a
+  Phase 3a fleet feature.
+- **`dry_run_apply_patch` uses `force: true`** — correct for dry-run, but the Phase 2
+  write path must **not** carry `force` forward (it would silently steal field ownership
+  from Flux/Argo).
+- **OIDC token forwarding** (ADR-0007 mode 1) is a `serve`/hub-mode concern (Phase 2),
+  not the MCP stdio server.
+
+## Hygiene notes
+
+- `core` / `core.*` dumps are git-ignored; if a process crashes to a core dump in the
+  working tree, find and fix the crashing process rather than committing around it.
