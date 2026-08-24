@@ -56,13 +56,20 @@ pub async fn edit_in_editor(
         return Ok("no changes made (edited document matches the live object)".into());
     }
 
+    // 4a. Show the diff (before/after) — the M1.3 "diff before apply" step.
+    let diff = kaptein_viewmodel::unified_diff(&current, &edited, 3);
+    let diff_text = kaptein_viewmodel::render_unified(&diff, "live", "edited");
+
     let dry_run = kaptein_core::apply::dry_run_apply_patch(client, &edited).await?;
     let verdict = if dry_run.accepted {
         "dry-run accepted (no changes applied)"
     } else {
         "dry-run REJECTED (no changes applied)"
     };
-    Ok(format!("{verdict}:\n{}", dry_run.response_yaml))
+    Ok(format!(
+        "diff ({}+/{}-):\n{diff_text}\n\n{verdict}:\n{}",
+        diff.added, diff.removed, dry_run.response_yaml
+    ))
 }
 
 /// A stable temp-file name for the edit session.

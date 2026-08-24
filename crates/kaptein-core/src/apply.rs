@@ -110,6 +110,9 @@ pub async fn dry_run_apply_patch(client: &Client, manifest: &str) -> Result<DryR
     let pp = PatchParams {
         dry_run: true,
         field_manager: Some("kaptein".into()),
+        // Force ownership of fields previously managed by other clients (e.g.
+        // `kubectl create`) so edits don't fail with FieldManagerConflict.
+        force: true,
         ..PatchParams::default()
     };
     let patch = Patch::Apply(&obj);
