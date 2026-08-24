@@ -43,6 +43,71 @@ pub fn load() -> Config {
     load_from(&config_path())
 }
 
+/// Validate a config, returning a list of problems (empty = valid). A config that fails
+/// to parse, or whose guardrail regexes are invalid, is surfaced here rather than
+/// silently degrading to read-only (a typo in a prod regex must not silently vanish).
+pub fn validate(config: &Config) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (which, patterns) in [
+        ("prod", &config.guardrails.prod),
+        ("staging", &config.guardrails.staging),
+    ] {
+        for pat in patterns {
+            if regex::Regex::new(pat).is_err() {
+                problems.push(format!("guardrails.{which}: invalid regex '{pat}'"));
+            }
+        }
+    }
+    problems
+}
+
+/// Validate the config **file** at `path`: parse it and report parse errors and invalid
+/// regexes. Returns `Ok(())` if the file is valid (or absent), and a list of problems
+/// otherwise. This is the `kaptein config validate` primitive.
+pub fn validate_file(path: &std::path::Path) -> Result<(), Vec<String>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Ok(()), // absent config is valid (defaults)
+    };
+    let config: Config = toml::from_str(&text).map_err(|e| vec![format!("parse error: {e}")])?;
+    let problems = validate(&config);
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems)
+    }
+}
+
+/// Explain the guardrail classification for a context name: the class, and why (which
+/// regex matched). This is the `kaptein config explain-context` primitive — it turns a
+/// "why is my context read-only" mystery into a concrete answer.
+pub fn explain_context(config: &Config, context_name: &str) -> String {
+    let class = config.guardrails.classify(context_name);
+    let matched_prod = config.guardrails.prod.iter().find(|p| {
+        regex::Regex::new(p)
+            .map(|re| re.is_match(context_name))
+            .unwrap_or(false)
+    });
+    let matched_staging = config.guardrails.staging.iter().find(|p| {
+        regex::Regex::new(p)
+            .map(|re| re.is_match(context_name))
+            .unwrap_or(false)
+    });
+    match class {
+        crate::guardrails::ContextClass::Prod => format!(
+            "context '{context_name}' is classified PROD (matched prod regex {:?}); writes require --break-glass",
+            matched_prod
+        ),
+        crate::guardrails::ContextClass::Staging => format!(
+            "context '{context_name}' is classified STAGING (matched staging regex {:?}); writes allowed",
+            matched_staging
+        ),
+        crate::guardrails::ContextClass::Unknown => format!(
+            "context '{context_name}' is UNKNOWN (no prod/staging regex matched); read-only by default"
+        ),
+    }
+}
+
 /// Load from an explicit path (used by tests to avoid mutating process env).
 fn load_from(path: &std::path::Path) -> Config {
     let Ok(text) = std::fs::read_to_string(path) else {
@@ -91,5 +156,42 @@ prod = ["webtop"]
         assert_eq!(c.guardrails.prod, vec!["webtop"]);
         assert!(c.guardrails.staging.is_empty());
         std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn validate_flags_invalid_regex() {
+        let c = Config {
+            guardrails: Guardrails {
+                prod: vec!["(".into()], // invalid regex
+                staging: vec![],
+            },
+        };
+        let problems = validate(&c);
+        assert!(!problems.is_empty());
+        assert!(problems[0].contains("invalid regex"));
+    }
+
+    #[test]
+    fn validate_accepts_valid_config() {
+        let c = Config {
+            guardrails: Guardrails {
+                prod: vec!["^prod-".into()],
+                staging: vec![],
+            },
+        };
+        assert!(validate(&c).is_empty());
+    }
+
+    #[test]
+    fn explain_context_reports_classification() {
+        let c = Config {
+            guardrails: Guardrails {
+                prod: vec!["^prod-".into()],
+                staging: vec!["^stag-".into()],
+            },
+        };
+        assert!(explain_context(&c, "prod-eu").contains("PROD"));
+        assert!(explain_context(&c, "stag-eu").contains("STAGING"));
+        assert!(explain_context(&c, "random").contains("UNKNOWN"));
     }
 }

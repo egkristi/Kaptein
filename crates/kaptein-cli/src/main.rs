@@ -70,6 +70,14 @@ enum Command {
     Context,
     /// List all contexts in the kubeconfig (for context switching).
     Contexts,
+    /// Validate the config file (parse errors + invalid guardrail regexes).
+    ConfigValidate,
+    /// Explain why a context is classified the way it is.
+    ConfigExplainContext {
+        /// context name
+        #[arg(long)]
+        context: String,
+    },
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
@@ -449,6 +457,33 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     c.name, c.cluster, c.user
                 );
             }
+            Ok(())
+        }
+        Command::ConfigValidate => {
+            let path = kaptein_core::config::config_path();
+            match kaptein_core::config::validate_file(&path) {
+                Ok(()) => {
+                    println!("config at {} is valid", path.display());
+                    Ok(())
+                }
+                Err(problems) => {
+                    let count = problems.len();
+                    for p in &problems {
+                        eprintln!("error: {p}");
+                    }
+                    Err(kaptein_core::Error::Internal(format!(
+                        "config at {} is invalid ({count} problem(s))",
+                        path.display()
+                    )))
+                }
+            }
+        }
+        Command::ConfigExplainContext { context } => {
+            let config = kaptein_core::config::load();
+            println!(
+                "{}",
+                kaptein_core::config::explain_context(&config, &context)
+            );
             Ok(())
         }
         Command::Diagnose { name, namespace } => {
