@@ -340,9 +340,10 @@ Milestones:
 
 ## Immediate next steps
 
-*(These were the Phase 0 next steps; they are all long done. The live next steps are the
-open blocking milestones — M1.7 (redaction), M1b.4 (MCP governance), M2.0 (data plane +
-informers), M2.0b (integration tests), and the cross-cutting supply-chain items.)*
+*(Phase 0 is long done. The live next steps are the open milestones below — the blocking
+**M2.0** (data plane + informer store) and **M2.0b** (integration tests + platform CI),
+plus the cross-cutting supply-chain items: **M1.8 kwok harness**, **signed releases +
+SBOM**, **distribution & release sync**, and **contract-version enforcement**.)*
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the
