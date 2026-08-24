@@ -94,14 +94,18 @@ jobs:
           import json
           meta = json.load(open("/tmp/meta.json"))
           packages = {p["name"]: p for p in meta["packages"]}
-          consumers = ["frontend-tui", "frontend-gui", "serve", "headless", "plugins", "viewdef"]
-          for name in consumers:
-              if name not in packages:
-                  continue
+          # Enforce the one-directional dependency rule (ADR / AGENTS.md): no
+          # frontend (renderer) may depend on kaptein-core directly — they reach
+          # it only through kaptein-integration, which owns and re-exports core.
+          # The list is derived from workspace metadata (not hardcoded), so a new
+          # `frontend-*` crate is covered automatically. `kaptein-cli` is exempt:
+          # it is a thin CLI projection that drives core directly, not a renderer.
+          frontends = [p["name"] for p in meta["packages"] if p["name"].startswith("frontend-")]
+          for name in frontends:
               deps = {d["name"] for d in packages[name].get("dependencies", [])}
               if "kaptein-core" in deps:
                   raise SystemExit(f"{name} must not depend on kaptein-core directly")
-          print("Layer dependency rule satisfied")
+          print(f"Layer dependency rule satisfied ({len(frontends)} frontend crate(s))")
           PY
 
   deny:
