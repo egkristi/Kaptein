@@ -52,7 +52,9 @@ unowned debt. Done items are struck through.
 10. ~~**Events API v1 + scoped queries**~~ (done, commit 98a39cc): `recent_events` reads
     `events.k8s.io/v1` `eventTime`/`series` and merges with `core/v1`. (Field-selector
     scoping for list-heavy views remains part of M2.0.)
-11. **Diagnostics fixture corpus**: canned pod JSONs with expected findings (owned by M1.6).
+11. ~~**Diagnostics fixture corpus**~~ (done, commit 1ab7e6b): canonical pod JSONs
+    (crashloop_backoff, exit_zero_job, image_pull_backoff, unschedulable,
+    readiness_probe, ready) with expected findings as integration tests.
 
 ## By-design limitations
 
