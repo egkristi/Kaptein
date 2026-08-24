@@ -4,6 +4,18 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-24
+
+### Added
+- Diff before apply (M1.3): `kaptein edit` now shows a unified diff (live vs
+  edited) before the dry-run result, via the dependency-free
+  `kaptein-viewmodel::diff` module.
+
+### Fixed
+- `dry_run_apply_patch` now uses `force = true` so edits to resources created by
+  other field managers (e.g. `kubectl create`) no longer fail with
+  `FieldManagerConflict`.
+
 ## [0.11.0] - 2026-08-24
 
 ### Added
