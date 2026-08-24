@@ -4,6 +4,31 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-24
+
+### Added
+- Config validation (`kaptein config-validate`) and `kaptein config-explain-context`:
+  a typo in a prod guardrail regex is surfaced, not silently swallowed, and the operator
+  can see why a context is classified the way it is (review #9).
+- Diagnostics fixture corpus (review #11): canonical API-server pod JSONs
+  (CrashLoopBackOff, exit-0 Job, ImagePullBackOff, unschedulable, probe failure, ready)
+  fed through the rule engine as integration tests.
+- MCP contract-version enforcement (review #12): the server refuses a client whose
+  declared `_meta["io.kaptein/apiVersion"]` has a different major; the rule lives in
+  `kaptein-viewmodel::versioned` (wasm-pure).
+- Release supply-chain hardening (review #5): cosign keyless signing, a CycloneDX SBOM,
+  and `SHA256SUMS` attached to every release.
+
+### Changed
+- CI layer-rule check now derives the frontend list from cargo metadata instead of a
+  stale hardcoded list.
+
+### Fixed
+- README "Status" section corrected: the CLI has a gated write path (delete/scale/
+  restart/cordon/uncordon/evict/debug), not "all commands read-only".
+- ROADMAP "Immediate next steps" refreshed (M1.7 redaction and M1b.4 MCP governance are
+  done; the open work is M2.0/M2.0b and the supply-chain items).
+
 ## [0.16.0] - 2026-08-24
 
 ### Added

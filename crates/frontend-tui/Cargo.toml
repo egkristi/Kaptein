@@ -13,8 +13,8 @@ name = "kaptein-tui"
 path = "src/main.rs"
 
 [dependencies]
-kaptein-viewmodel = { version = "0.16.0", path = "../kaptein-viewmodel" }
-kaptein-integration = { version = "0.16.0", path = "../kaptein-integration" }
+kaptein-viewmodel = { version = "0.17.0", path = "../kaptein-viewmodel" }
+kaptein-integration = { version = "0.17.0", path = "../kaptein-integration" }
 kube = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ratatui = "0.30"
