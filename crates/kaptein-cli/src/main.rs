@@ -624,7 +624,20 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         }
         Command::Overview { minutes } => {
             let since_ms = now_ms().saturating_sub(minutes * 60 * 1000);
-            let overview = kaptein_core::overview::overview(&client, None, since_ms).await?;
+            // Feed a small watch ring of pod changes (M1.4) so "what changed" is the
+            // informer's view, then compose the landing view from events + ring.
+            let ring = kaptein_core::watchring::WatchRing::new(50);
+            let pod_gvk = kube::core::GroupVersionKind::gvk("", "v1", "Pod");
+            let _ = kaptein_core::watchring::snapshot_into_ring(&client, &pod_gvk, None, &ring, 50)
+                .await;
+
+            let overview = kaptein_core::overview::overview_with_ring(
+                &client,
+                None,
+                since_ms,
+                ring.snapshot(),
+            )
+            .await?;
             println!("Kaptein overview (last {minutes} minutes)");
             println!("  total events: {}", overview.total_events);
             println!(
@@ -637,6 +650,13 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     "    [WARN] {}/{}\t{}\t{}",
                     w.kind, w.name, w.reason, w.message
                 );
+            }
+            println!(
+                "  recent changes (watch): {}",
+                overview.recent_changes.len()
+            );
+            for c in overview.recent_changes.iter().take(10) {
+                println!("    [{}] {}/{}\t{}", c.event, c.kind, c.namespace, c.name);
             }
             Ok(())
         }

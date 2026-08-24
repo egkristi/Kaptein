@@ -188,6 +188,46 @@ pub async fn watch_into_ring(
     Ok(pushed)
 }
 
+/// Capture the current state of a resource kind into the ring **without** waiting on the
+/// watch stream — the non-blocking "snapshot now" form. Useful for the landing view,
+/// which wants "what exists now" immediately rather than a blocking watch.
+pub async fn snapshot_into_ring(
+    client: &Client,
+    gvk: &kube::core::GroupVersionKind,
+    namespace: Option<&str>,
+    ring: &WatchRing,
+    max_events: usize,
+) -> Result<usize, Error> {
+    let ar = kube::core::ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let list = api.list(&Default::default()).await.map_err(Error::Api)?;
+    let observed_at_ms = now_ms();
+    let mut pushed = 0usize;
+    for obj in list.items {
+        let record = ChangeRecord {
+            event: "Added".to_string(),
+            kind: obj
+                .types
+                .as_ref()
+                .map(|t| t.kind.clone())
+                .unwrap_or_else(|| gvk.kind.clone()),
+            namespace: obj.namespace().unwrap_or_default(),
+            name: obj.name_any(),
+            observed_at_ms,
+        };
+        ring.push(record);
+        pushed += 1;
+        if pushed >= max_events {
+            break;
+        }
+    }
+    Ok(pushed)
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
