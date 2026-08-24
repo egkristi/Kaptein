@@ -24,6 +24,9 @@ pub struct KapteinMcp {
     agent_name: String,
     /// The current context name (for the audit `context` field).
     context_name: String,
+    /// A per-session identifier (a fresh, non-constant value per server instance), so the
+    /// incident-timeline can group related events (ADR-0010).
+    session_id: String,
 }
 
 impl KapteinMcp {
@@ -33,11 +36,30 @@ impl KapteinMcp {
         // kubeconfig when no agent identity is configured.
         let agent_name = discovery::agent_identity_name();
         let context_name = discovery::current_context_name().unwrap_or_default();
+        let session_id = format!("mcp-{}", now_ms_hex());
         Ok(Self {
             client: discovery::agent_client().await?,
             agent_name,
             context_name,
+            session_id,
         })
+    }
+
+    /// The tool's (verb, plural resource, api group) for RBAC preflight — used to refuse a
+    /// call the agent's identity is not permitted to make **before** it reaches the API
+    /// server (M1b.4 / ADR-0010). Returns `None` for tools with no RBAC-relevant resource.
+    fn preflight_target(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
+        match name {
+            "list_resources" | "get_events" => Some(("list", "pods", "")),
+            "describe" => Some(("get", "pods", "")),
+            "logs" => Some(("get", "pods/log", "")),
+            "diagnose"
+            | "explain_pod_failure"
+            | "why_is_job_pending"
+            | "blast_radius"
+            | "what_changed_between" => Some(("get", "pods", "")),
+            _ => None,
+        }
     }
 
     /// The tool definitions advertised to MCP clients.
@@ -385,6 +407,16 @@ fn parse_gvk(s: &str) -> GroupVersionKind {
     }
 }
 
+/// A per-instance, non-constant session id: unix millis rendered as lowercase hex (not a
+/// secret, just a cheap uniqueness source for audit grouping).
+fn now_ms_hex() -> String {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("{ms:x}")
+}
+
 /// Serve the MCP protocol over stdio until the client closes.
 pub async fn serve() -> Result<(), CoreError> {
     let server = KapteinMcp::new().await?;
@@ -425,25 +457,89 @@ impl ServerHandler for KapteinMcp {
     ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
         async move {
             let args = request.arguments.as_ref();
-            self.audit(&request.name);
-            match self.exec_tool(&request.name, args).await {
-                Ok(text) => Ok(CallToolResponse::Complete(CallToolResult::success(vec![
-                    ContentBlock::text(text),
-                ]))),
-                Err(msg) => Ok(CallToolResponse::Complete(CallToolResult::error(vec![
-                    ContentBlock::text(msg),
-                ]))),
+            let name = request.name.clone();
+
+            // Governance gate (M1b.4): refuse the call before it reaches the API server
+            // when RBAC preflight denies it (or the context is read-only). Refusals are
+            // audited as `Outcome::Rejected`, not silently dropped.
+            if let Some((verb, resource, group)) = Self::preflight_target(&name) {
+                match self.governance_check(verb, resource, group).await {
+                    Ok(()) => {}
+                    Err(msg) => {
+                        self.audit(&name, args, kaptein_viewmodel::audit::Outcome::Rejected);
+                        return Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                            ContentBlock::text(msg),
+                        ])));
+                    }
+                }
+            }
+
+            match self.exec_tool(&name, args).await {
+                Ok(text) => {
+                    self.audit(&name, args, kaptein_viewmodel::audit::Outcome::Applied);
+                    Ok(CallToolResponse::Complete(CallToolResult::success(vec![
+                        ContentBlock::text(text),
+                    ])))
+                }
+                Err(msg) => {
+                    // A failed tool call is a rejection, not a success.
+                    self.audit(&name, args, kaptein_viewmodel::audit::Outcome::Rejected);
+                    Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                        ContentBlock::text(msg),
+                    ])))
+                }
             }
         }
     }
 }
 
 impl KapteinMcp {
-    /// Emit a best-effort audit event for an MCP tool call. Audit is a governance
-    /// requirement (ADR-0010), but an audit-write failure must not block the tool.
-    fn audit(&self, tool_name: &str) {
+    /// RBAC preflight + context guardrail, enforced *before* a tool call reaches the API
+    /// server (M1b.4 / ADR-0010). Returns `Err` with a user-facing reason to refuse.
+    async fn governance_check(
+        &self,
+        verb: &str,
+        resource: &str,
+        group: &str,
+    ) -> Result<(), String> {
+        // Context classification + read-only default: the MCP surface is read-only, so a
+        // prod/unknown context must not permit any write verb. (All current tools are
+        // reads; this gate is the control that would refuse a write if one were added.)
+        let config = kaptein_core::config::load();
+        let class = config.guardrails.classify(&self.context_name);
+        if verb != "get"
+            && verb != "list"
+            && verb != "watch"
+            && let Err(msg) = kaptein_core::guardrails::gate_write(class, None)
+        {
+            return Err(format!("governance: {msg}"));
+        }
+
+        // RBAC preflight: refuse a call the agent's own identity cannot make.
+        let namespace = "default";
+        let perm = kaptein_core::auth::can(&self.client, verb, resource, group, namespace)
+            .await
+            .map_err(|e| format!("governance: RBAC preflight failed: {e}"))?;
+        if !perm.allowed {
+            return Err(format!(
+                "governance: agent '{agent}' is not permitted to {verb} {resource} in {namespace}",
+                agent = self.agent_name
+            ));
+        }
+        Ok(())
+    }
+
+    /// Emit a best-effort audit event for an MCP tool call, recorded **after** execution
+    /// with the real outcome (Applied/Rejected), a real resource target, and the server's
+    /// per-instance session id (ADR-0010). An audit-write failure must not block the tool.
+    fn audit(
+        &self,
+        tool_name: &str,
+        args: Option<&serde_json::Map<String, serde_json::Value>>,
+        outcome: kaptein_viewmodel::audit::Outcome,
+    ) {
         use kaptein_viewmodel::audit::{
-            Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source,
+            Actor, ActorKind, AuditEvent, Operation, ResourceRef, Source,
         };
         let operation = match tool_name {
             "list_resources" => Operation::List,
@@ -455,6 +551,27 @@ impl KapteinMcp {
             | "blast_radius"
             | "what_changed_between" => Operation::Diagnose,
             _ => return,
+        };
+        // Extract the real target resource from the call args (not the tool name).
+        let get = |k: &str| -> String {
+            args.and_then(|m| m.get(k))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        };
+        let namespace = get("namespace");
+        let name = if tool_name == "list_resources" {
+            String::new() // a list has no single target name
+        } else {
+            get("name")
+        };
+        let kind = match tool_name {
+            "describe" | "list_resources" => get("gvk"),
+            "logs" | "diagnose" | "explain_pod_failure" => "Pod".to_string(),
+            "why_is_job_pending" => "Job".to_string(),
+            "blast_radius" => get("gvk"),
+            "get_events" | "what_changed_between" => "Event".to_string(),
+            _ => tool_name.to_string(),
         };
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -470,13 +587,13 @@ impl KapteinMcp {
             operation,
             target: ResourceRef {
                 group: "".into(),
-                kind: tool_name.into(),
-                namespace: "".into(),
-                name: "".into(),
+                kind,
+                namespace,
+                name,
             },
-            outcome: Outcome::Applied,
+            outcome,
             source: Source::Mcp,
-            session_id: "mcp".into(),
+            session_id: self.session_id.clone(),
             reason: None,
             on_behalf_of: None,
         };
