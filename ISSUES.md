@@ -38,7 +38,8 @@ unowned debt. Done items are struck through.
 2. **M2.0 — wire `DataPlane` + informer store** (blocking): the render contract and the
    informer-backed bounded store are implemented, not just specified.
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
-   latest-three-minors conformance.
+   latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
+   kind/envtest tier and Kubernetes-minor conformance remain open.*
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
    aspirational.
 5. **Signed releases + SBOM** (cross-cutting): cosign + SLSA + SBOM + SHA256SUMS.
