@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/kaptein-core",
     "crates/kaptein-viewmodel",
+    "crates/kaptein-integration",
     "crates/frontend-tui",
     "crates/kaptein-cli",
 ]

@@ -20,6 +20,9 @@ use crossterm::terminal::{
 };
 use kube::Client;
 use kube::core::GroupVersionKind;
+// The TUI reaches `kaptein-core` only through the integration layer (layer
+// dependency rule: frontend → integration → core, never frontend → core).
+use kaptein_integration::kaptein_core;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};

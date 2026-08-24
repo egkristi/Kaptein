@@ -7,7 +7,19 @@
 # Note: unicode-ident is licensed "Unicode-3.0" (not Unicode-DFS-2016); add it
 # when it appears. option-ext (MPL-2.0) is pulled in via dirs/directories and is
 # intentionally NOT allowed — see CONTRIBUTING for the XDG-path plan.
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-DFS-2016", "Unicode-3.0"]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    # Kaptein's own license (the four workspace crates).
+    "BUSL-1.1",
+    # webpki-root-certs (via rustls-platform-verifier -> kube-client).
+    "CDLA-Permissive-2.0",
+]
 confidence-threshold = 0.8
 
 [advisories]
@@ -20,6 +32,26 @@ yanked = "deny"
 multiple-versions = "deny"
 wildcards = "deny"
 highlight = "all"
+# Unavoidable duplicate versions: different major lines required by different
+# transitive dependencies. Re-review at each `cargo update`.
+skip = [
+    # 0.22 (k8s-openapi/kube) vs 0.23 (rmcp)
+    "base64",
+    # 0.2 (ring) vs 0.3 (ahash) vs 0.4
+    "getrandom",
+    "hashbrown",
+    "linux-raw-sys",
+    "rustix",
+    "serde_core",
+    "serde_json",
+    # 0.26 (workspace pin) vs 0.28 (ratatui 0.30's derive)
+    "strum",
+    "strum_macros",
+    "syn",
+    "unicode-width",
+    "windows-sys",
+    "r-efi",
+]
 
 [sources]
 unknown-registry = "deny"

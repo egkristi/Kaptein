@@ -1,0 +1,14 @@
+[package]
+name = "kaptein-integration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Kaptein integration layer: binds kaptein-core to frontends, mapping core errors to a user-facing form"
+
+[dependencies]
+kaptein-core = { version = "0.8.0", path = "../kaptein-core" }
+kube = { workspace = true }
+thiserror = { workspace = true }

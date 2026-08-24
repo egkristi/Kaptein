@@ -31,6 +31,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          # Pin to the toolchain from rust-toolchain.toml so the cross-compile
+          # target's std is installed for the *pinned* toolchain, avoiding E0463
+          # "can't find crate for std" from the toolchain mismatch.
+          toolchain: 1.97.1
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2

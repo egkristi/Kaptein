@@ -38,6 +38,11 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+      - name: Publish kaptein-integration
+        run: cargo publish -p kaptein-integration --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
       - name: Publish kaptein (CLI)
         run: cargo publish -p kaptein --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
         env:
