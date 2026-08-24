@@ -1,0 +1,29 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": { "name": "job-exit0", "namespace": "default" },
+  "spec": {
+    "containers": [{ "name": "worker", "image": "busybox" }]
+  },
+  "status": {
+    "phase": "Succeeded",
+    "conditions": [
+      { "type": "Ready", "status": "False", "reason": "PodCompleted", "message": "The pod has completed successfully." }
+    ],
+    "containerStatuses": [
+      {
+        "name": "worker",
+        "ready": false,
+        "restartCount": 0,
+        "state": {
+          "terminated": {
+            "exitCode": 0,
+            "reason": "Completed",
+            "startedAt": "2025-01-01T00:00:00Z",
+            "finishedAt": "2025-01-01T00:00:30Z"
+          }
+        }
+      }
+    ]
+  }
+}
