@@ -77,6 +77,7 @@ impl Kind {
 }
 
 /// A tabular row (geometry-local, mirrors `kaptein_core::discovery::ResourceSummary`).
+#[derive(Clone)]
 struct TableRow {
     name: String,
     namespace: String,
@@ -114,15 +115,24 @@ async fn run_ui(client: &Client) -> io::Result<()> {
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
+    // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query.
+    let mut jump_query: Option<String> = None;
 
     loop {
-        let status_line = format!(
-            " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  d:describe  i:diagnose  q:quit ",
-            kind.label(),
-            namespace.as_deref().unwrap_or("all"),
-            sort_label(sort_key, sort_descending),
-            rows.len()
-        );
+        let status_line = if let Some(q) = jump_query.as_deref() {
+            format!(
+                " jump:/{q} — {} rows (Enter:accept  Esc:cancel) ",
+                rows.len()
+            )
+        } else {
+            format!(
+                " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  d:describe  i:diagnose  q:quit ",
+                kind.label(),
+                namespace.as_deref().unwrap_or("all"),
+                sort_label(sort_key, sort_descending),
+                rows.len()
+            )
+        };
 
         terminal.draw(|frame| {
             let area = frame.area();
@@ -187,6 +197,20 @@ async fn run_ui(client: &Client) -> io::Result<()> {
             && let Event::Key(key) = event::read()?
         {
             match key.code {
+                KeyCode::Esc if jump_query.is_some() => {
+                    // Cancel jump mode: restore the unfiltered list.
+                    jump_query = None;
+                    rows = fetch(
+                        client,
+                        kind,
+                        namespace.as_deref(),
+                        sort_key,
+                        sort_descending,
+                    )
+                    .await?;
+                    selected = 0;
+                    scroll = 0;
+                }
                 KeyCode::Esc => break,
                 KeyCode::Char('q') => break,
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
@@ -278,6 +302,35 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                         detail = Some("Diagnostics are available for pods only.".into());
                     }
                 }
+                KeyCode::Char('/') => {
+                    // Enter fuzzy-jump mode (empty query = show all).
+                    jump_query = Some(String::new());
+                }
+                KeyCode::Char(c) if jump_query.is_some() && c != '/' => {
+                    // In jump mode: append typed chars to the query and re-rank rows.
+                    if let Some(q) = jump_query.as_mut() {
+                        q.push(c);
+                    }
+                    if let Some(q) = jump_query.as_deref() {
+                        rows = fuzzy_rerank(rows.clone(), q);
+                        selected = 0;
+                        scroll = 0;
+                    }
+                }
+                KeyCode::Backspace if jump_query.is_some() => {
+                    if let Some(q) = jump_query.as_mut() {
+                        q.pop();
+                    }
+                    if let Some(q) = jump_query.as_deref() {
+                        rows = fuzzy_rerank(rows.clone(), q);
+                        selected = 0;
+                        scroll = 0;
+                    }
+                }
+                KeyCode::Enter if jump_query.is_some() => {
+                    // Exit jump mode, keeping the current (fuzzy-ranked) selection.
+                    jump_query = None;
+                }
                 _ => {}
             }
         }
@@ -326,6 +379,24 @@ fn sort_label(key: kaptein_core::discovery::SortKey, descending: bool) -> String
         kaptein_core::discovery::SortKey::Created => "created",
     };
     format!("{name}{dir}")
+}
+
+/// Re-rank rows by fuzzy-jump score against `query`, dropping non-matches. Uses the
+/// shared view-model matcher (renderer-agnostic semantic, ADR-0005).
+fn fuzzy_rerank(rows: Vec<TableRow>, query: &str) -> Vec<TableRow> {
+    let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+    let ranked = kaptein_viewmodel::fuzzy_jump(names, query);
+    let order: std::collections::HashMap<&str, usize> = ranked
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.candidate.as_str(), i))
+        .collect();
+    let mut out: Vec<TableRow> = rows
+        .into_iter()
+        .filter(|r| order.contains_key(r.name.as_str()))
+        .collect();
+    out.sort_by_key(|r| order.get(r.name.as_str()).copied().unwrap_or(usize::MAX));
+    out
 }
 
 fn next_sort_key(key: kaptein_core::discovery::SortKey) -> kaptein_core::discovery::SortKey {
