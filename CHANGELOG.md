@@ -4,6 +4,13 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-24
+
+### Added
+- Dedicated agent ServiceAccount identity for MCP (ADR-0007 mode 3):
+  `kaptein-core::discovery::agent_client` prefers in-cluster SA, then
+  `$KAPTEIN_SA_TOKEN`, then kubeconfig. Audit records carry the agent identity.
+
 ## [0.14.0] - 2026-08-24
 
 ### Added
