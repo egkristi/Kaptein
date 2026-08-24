@@ -4,6 +4,20 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-24
+
+### Added
+- Ephemeral containers (M1.2): `kaptein debug-containers` (list) and `kaptein debug`
+  (attach, dry-run by default, break-glass gated) — kubectl debug-style profiling.
+- Readiness-probe diagnostics rule (M1.6): a `Ready=False` condition with a
+  `last_probe_time` surfaces as a `readiness_probe` finding.
+
+### Changed
+- (CI) Added `kaptein-integration` crate as the integration layer; `frontend-tui` now
+  reaches `kaptein-core` through it (layer rule).
+- (CI) `deny.toml` license allowlist + duplicate-version skip list updated; ratatui
+  0.29→0.30 (drops unmaintained `paste`), crossterm 0.28→0.29.
+
 ## [0.8.0] - 2026-08-24
 
 ### Added
