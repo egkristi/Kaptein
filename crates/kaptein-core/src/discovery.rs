@@ -41,6 +41,40 @@ pub async fn client_for_context(context: Option<&str>) -> Result<Client, Error> 
     Ok(Client::try_from(config)?)
 }
 
+/// Build a Kubernetes client for a **dedicated agent identity** (ADR-0007 mode 3):
+/// prefer an in-cluster ServiceAccount (the pod's mounted token, the agent's own narrow
+/// RBAC), then fall back to a `KAPTEIN_SA_TOKEN` bearer token, then the default
+/// kubeconfig. This gives each MCP agent its own identity in the cluster rather than a
+/// shared human credential.
+pub async fn agent_client() -> Result<Client, Error> {
+    // 1. In-cluster ServiceAccount (default for MCP running as a pod).
+    if let Ok(config) = Config::incluster() {
+        return Ok(Client::try_from(config)?);
+    }
+    // 2. Explicit bearer token (`KAPTEIN_SA_TOKEN`) as the agent's identity.
+    if let Ok(token) = std::env::var("KAPTEIN_SA_TOKEN")
+        && !token.trim().is_empty()
+        && let Ok(mut config) = Config::from_kubeconfig(&KubeConfigOptions::default()).await
+    {
+        config.auth_info.token = Some(secrecy::SecretString::new(token.into_boxed_str()));
+        return Ok(Client::try_from(config)?);
+    }
+    // 3. Fall back to the default kubeconfig (best-effort; still audited as an agent).
+    client().await
+}
+
+/// Resolve the agent identity name for the audit log: `$KAPTEIN_AGENT`, else the
+/// current ServiceAccount (from `KAPTEIN_SA_TOKEN` is not available; in-cluster pods
+/// expose the SA via the token), else a stable `mcp-client` default.
+pub fn agent_identity_name() -> String {
+    if let Ok(name) = std::env::var("KAPTEIN_AGENT")
+        && !name.trim().is_empty()
+    {
+        return name;
+    }
+    "mcp-client".to_string()
+}
+
 /// Read the current context name from the kubeconfig (for guardrail classification).
 pub fn current_context_name() -> Result<String, Error> {
     use kube::config::Kubeconfig;

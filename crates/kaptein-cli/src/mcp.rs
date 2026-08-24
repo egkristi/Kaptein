@@ -28,13 +28,13 @@ pub struct KapteinMcp {
 
 impl KapteinMcp {
     pub async fn new() -> Result<Self, CoreError> {
-        let agent_name = std::env::var("KAPTEIN_AGENT")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "mcp-client".to_string());
+        // Dedicated agent identity (ADR-0007 mode 3): the MCP server runs with its own
+        // ServiceAccount/token, not a shared human credential. Falls back to the default
+        // kubeconfig when no agent identity is configured.
+        let agent_name = discovery::agent_identity_name();
         let context_name = discovery::current_context_name().unwrap_or_default();
         Ok(Self {
-            client: discovery::client().await?,
+            client: discovery::agent_client().await?,
             agent_name,
             context_name,
         })

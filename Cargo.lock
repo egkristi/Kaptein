@@ -1192,6 +1192,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "regex",
+ "secrecy",
  "serde",
  "serde_json",
  "serde_yaml",
