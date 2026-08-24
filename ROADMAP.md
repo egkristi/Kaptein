@@ -312,7 +312,9 @@ Milestones:
   serialization, not at the frontend.
 - **Signed releases + SBOM** — cosign signature, SLSA provenance, SBOM, and a
   `SHA256SUMS` file on every release (elevated from the Phase 0 "stub" to a real DoD per
-  review; SECURITY.md already promises it).
+  review; SECURITY.md already promises it). *Cosign keyless + CycloneDX SBOM +
+  `SHA256SUMS` are implemented in `.github/workflows/release.yml`; SLSA provenance
+  generation is the remaining piece.*
 - **Redaction-aware error boundary** — `kaptein-viewmodel::Error` maps raw
   `kube::Error`/subprocess failures to user-facing messages; `kaptein-integration` is
   that boundary, not a `#[error("{0}")]` pass-through (elevated per review).

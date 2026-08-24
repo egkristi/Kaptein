@@ -90,10 +90,10 @@ plane, not a new one:
 
 ### Supply chain
 
-- Releases are **signed** (cosign) and ship an **SBOM**, with SLSA provenance and a
-  `SHA256SUMS` file. **Status: tracked in ROADMAP (cross-cutting) — the release workflow
-  produces tarballs today but not yet signatures/SBOM/provenance.** This is a
-  credibility item for a project whose pitch includes SBOM reconciliation, and it is
-  owned as a blocking cross-cutting commitment.
+- Releases are **signed** (cosign, keyless via the GitHub Actions OIDC identity) and ship
+  an **SBOM** (CycloneDX, generated from the Rust dependency graph) plus a `SHA256SUMS`
+  file, with a Rekor transparency log entry per signature. **Status: implemented in
+  `.github/workflows/release.yml` (review item #5).** SLSA provenance generation is the
+  remaining piece of the supply-chain commitment and is tracked in ROADMAP.
 - Dependencies are minimized and pinned; scanner integrations (Trivy/Grype, etc.) are
   shelled out to, never vendored.
