@@ -13,7 +13,7 @@
 
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -103,6 +103,18 @@ async fn run_ui(client: &Client) -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Run the event loop; restore the terminal on *every* exit path (including `?`
+    // errors), so a broken terminal is never left behind.
+    let result = run_event_loop(client, &mut terminal).await;
+    let _ = disable_raw_mode();
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    result
+}
+
+async fn run_event_loop(
+    client: &Client,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> io::Result<()> {
     let mut kind = Kind::Pods;
     let mut namespace: Option<String> = None; // None = all namespaces
     let mut sort_key: kaptein_core::discovery::SortKey = kaptein_core::discovery::SortKey::Name;
@@ -118,8 +130,13 @@ async fn run_ui(client: &Client) -> io::Result<()> {
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
-    // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query.
+    // Number of table rows visible in the current terminal (set each frame; drives the
+    // scroll window instead of a hardcoded constant).
+    let mut page_height: usize = 10;
+    // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query. The
+    // unfiltered list is preserved in `jump_master` so backspace can restore rows.
     let mut jump_query: Option<String> = None;
+    let mut jump_master: Vec<TableRow> = Vec::new();
     // Command-palette mode: Some(query) means the palette is open (vim-style ':').
     let mut palette_query: Option<String> = None;
 
@@ -153,6 +170,11 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                 Constraint::Min(0),
             ])
             .split(area);
+
+            // The table body is `chunks[1]`; its height (minus the header row + borders)
+            // is the number of rows we can show — drive scrolling from the real terminal.
+            let body_height = chunks[1].height.saturating_sub(3);
+            page_height = (body_height as usize).max(1);
 
             let header = Block::default().title(status_line).borders(Borders::ALL);
             frame.render_widget(header, chunks[0]);
@@ -207,6 +229,11 @@ async fn run_ui(client: &Client) -> io::Result<()> {
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
+            // Only react to press events — on Windows, crossterm delivers both press and
+            // release, and acting on both would double every keystroke.
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
             match key.code {
                 KeyCode::Esc if palette_query.is_some() => {
                     palette_query = None;
@@ -214,14 +241,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                 KeyCode::Esc if jump_query.is_some() => {
                     // Cancel jump mode: restore the unfiltered list.
                     jump_query = None;
-                    rows = fetch(
-                        client,
-                        kind,
-                        namespace.as_deref(),
-                        sort_key,
-                        sort_descending,
-                    )
-                    .await?;
+                    rows = jump_master.clone();
                     selected = 0;
                     scroll = 0;
                 }
@@ -271,7 +291,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                 }
                 KeyCode::Char('j') | KeyCode::Down if palette_query.is_none() => {
                     selected = (selected + 1).min(rows.len().saturating_sub(1));
-                    if selected >= scroll + 10 {
+                    if selected >= scroll + page_height {
                         scroll += 1;
                     }
                 }
@@ -287,7 +307,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                 }
                 KeyCode::Char('G') if palette_query.is_none() => {
                     selected = rows.len().saturating_sub(1);
-                    scroll = selected.saturating_sub(10);
+                    scroll = selected.saturating_sub(page_height);
                 }
                 KeyCode::Tab if palette_query.is_none() => {
                     kind = kind.next();
@@ -358,16 +378,19 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                     }
                 }
                 KeyCode::Char('/') if palette_query.is_none() => {
-                    // Enter fuzzy-jump mode (empty query = show all).
+                    // Enter fuzzy-jump mode (empty query = show all). Snapshot the
+                    // unfiltered list so backspace can restore filtered-out rows.
+                    jump_master = rows.clone();
                     jump_query = Some(String::new());
                 }
                 KeyCode::Char(c) if jump_query.is_some() && c != '/' => {
-                    // In jump mode: append typed chars to the query and re-rank rows.
+                    // In jump mode: append typed chars to the query and re-rank rows from
+                    // the *master* list (not the already-filtered one), so backspace works.
                     if let Some(q) = jump_query.as_mut() {
                         q.push(c);
                     }
                     if let Some(q) = jump_query.as_deref() {
-                        rows = fuzzy_rerank(rows.clone(), q);
+                        rows = fuzzy_rerank(jump_master.clone(), q);
                         selected = 0;
                         scroll = 0;
                     }
@@ -377,7 +400,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                         q.pop();
                     }
                     if let Some(q) = jump_query.as_deref() {
-                        rows = fuzzy_rerank(rows.clone(), q);
+                        rows = fuzzy_rerank(jump_master.clone(), q);
                         selected = 0;
                         scroll = 0;
                     }
@@ -391,8 +414,6 @@ async fn run_ui(client: &Client) -> io::Result<()> {
         }
     }
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     Ok(())
 }
 
@@ -419,7 +440,13 @@ async fn fetch(
         .map(|r| TableRow {
             name: r.name,
             namespace: r.namespace,
-            status: status_for(kind),
+            // Real status from the resource (pod phase, etc.), falling back to a
+            // kind-appropriate placeholder only when the kind has no well-known status.
+            status: if r.status.is_empty() {
+                status_for(kind)
+            } else {
+                r.status
+            },
             created: r.created.map(|t| t.0.to_string()).unwrap_or_default(),
         })
         .collect())

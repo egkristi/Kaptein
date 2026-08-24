@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
 
-use kube::api::Portforwarder;
 use kube::{Api, Client};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -31,11 +30,12 @@ pub struct ForwardSpec {
     pub local_port: u16,
 }
 
-/// Bridge a single upstream `Portforwarder` port to a local TCP listener.
+/// Bridge a pod port to a local TCP listener.
 ///
-/// Binds `local_addr` and, for each accepted connection, pipes bytes both ways between
-/// the local socket and the pod stream. Returns the bound address (useful when binding
-/// port 0 to request an ephemeral port).
+/// Binds `local_addr` and, for each accepted connection, establishes a **fresh**
+/// `Portforwarder` (a pod stream is single-use — reusing it across connections leaves the
+/// second connection half-closed). Returns the bound address (useful when binding port 0
+/// to request an ephemeral port).
 pub async fn forward(
     client: &Client,
     namespace: &str,
@@ -44,10 +44,6 @@ pub async fn forward(
     local_addr: SocketAddr,
 ) -> Result<SocketAddr, Error> {
     let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), namespace);
-    let mut pf: Portforwarder = pods.portforward(pod, &[target_port]).await?;
-    let stream = pf
-        .take_stream(target_port)
-        .ok_or_else(|| Error::Internal(format!("port {target_port} not forwarded")))?;
 
     let listener = TcpListener::bind(local_addr)
         .await
@@ -56,14 +52,33 @@ pub async fn forward(
         .local_addr()
         .map_err(|e| Error::Internal(e.to_string()))?;
 
-    // Serve one connection at a time (sufficient for MVP; multi-connection mux later).
+    // Owned copies for the `'static` spawned task (the upstream pod identity).
+    let pod_owned = pod.to_string();
+
     tokio::spawn(async move {
-        let (mut upstream_r, mut upstream_w) = tokio::io::split(stream);
         loop {
             let Ok((socket, _)) = listener.accept().await else {
                 break;
             };
+
+            // Establish a fresh upstream stream per connection (a port-forward duplex
+            // stream is consumed by the first connection and cannot be reused).
+            let stream = match pods.portforward(&pod_owned, &[target_port]).await {
+                Ok(mut pf) => match pf.take_stream(target_port) {
+                    Some(s) => s,
+                    None => {
+                        drop(socket);
+                        continue;
+                    }
+                },
+                Err(_) => {
+                    drop(socket);
+                    continue;
+                }
+            };
+
             let (mut local_r, mut local_w) = socket.into_split();
+            let (mut upstream_r, mut upstream_w) = tokio::io::split(stream);
             let mut up_buf = vec![0u8; 64 * 1024];
             let mut down_buf = vec![0u8; 64 * 1024];
             let _ = copy_bidi(

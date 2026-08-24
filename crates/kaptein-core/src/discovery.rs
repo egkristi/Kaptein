@@ -21,6 +21,28 @@ pub struct ResourceSummary {
     pub kind: String,
     /// The resource's creation time (Rust-native), for the frontend to format.
     pub created: Option<Time>,
+    /// A best-effort human-readable status (pod phase, etc.), or empty when the kind has
+    /// no well-known status.
+    pub status: String,
+}
+
+/// Extract a display status from a `DynamicObject`'s `status` sub-object, falling back to
+/// the kind-appropriate default. Pods use `status.phase`; everything else is left for a
+/// lens (Phase 2).
+fn status_of(kind: &str, obj: &DynamicObject) -> String {
+    // Pod phase is the one status every operator looks at first.
+    if kind == "Pod" {
+        if let Some(phase) = obj
+            .data
+            .get("status")
+            .and_then(|s| s.get("phase"))
+            .and_then(|p| p.as_str())
+        {
+            return phase.to_string();
+        }
+        return "Unknown".to_string();
+    }
+    String::new()
 }
 
 /// Build a Kubernetes client from the default kubeconfig.
@@ -140,15 +162,20 @@ pub async fn list(
 
     Ok(list
         .into_iter()
-        .map(|obj| ResourceSummary {
-            name: obj.name_any(),
-            namespace: obj.namespace().unwrap_or_default(),
-            kind: obj
+        .map(|obj| {
+            let kind = obj
                 .types
                 .as_ref()
                 .map(|t| t.kind.clone())
-                .unwrap_or_else(|| gvk.kind.clone()),
-            created: obj.metadata.creation_timestamp,
+                .unwrap_or_else(|| gvk.kind.clone());
+            let status = status_of(&kind, &obj);
+            ResourceSummary {
+                name: obj.name_any(),
+                namespace: obj.namespace().unwrap_or_default(),
+                kind,
+                created: obj.metadata.creation_timestamp,
+                status,
+            }
         })
         .collect())
 }
@@ -246,6 +273,7 @@ mod tests {
             namespace: ns.into(),
             kind: kind.into(),
             created: None,
+            status: String::new(),
         }
     }
 

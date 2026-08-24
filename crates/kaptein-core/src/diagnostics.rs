@@ -45,6 +45,12 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
     // Running/other: check container readiness and restarts.
     let mut findings = Vec::new();
     for cs in status.container_statuses.as_ref().into_iter().flatten() {
+        // CrashLoopBackOff (current waiting + last_state.terminated) is the strongest
+        // signal — report it first and skip the weaker "not ready" fallback.
+        if let Some(f) = crash_loop_backoff_finding(cs) {
+            findings.push(f);
+            continue;
+        }
         if let Some(f) = container_crash_finding(cs) {
             findings.push(f);
         }
@@ -134,13 +140,43 @@ fn readiness_probe_finding(status: &PodStatus) -> Option<Finding> {
 }
 
 fn container_crash_finding(cs: &ContainerStatus) -> Option<Finding> {
+    // A crash is a **terminated** container with a non-zero exit code, OR a restart that
+    // was previously terminated non-zero (`last_state`). A Job that completed with exit 0
+    // is *not* a crash, and a CrashLoopBackOff pod is caught via `last_state` when its
+    // current `state` is `waiting`.
     let terminated = cs.state.as_ref()?.terminated.as_ref()?;
+    if terminated.exit_code == 0 {
+        return None;
+    }
     let reason = terminated.reason.as_deref().unwrap_or("Error");
     Some(Finding {
         code: "crash_loop".into(),
         summary: format!(
-            "Container '{}' terminated with exit code {:?} ({reason}) and restart count {}.",
+            "Container '{}' terminated with exit code {} ({reason}) and restart count {}.",
             cs.name, terminated.exit_code, cs.restart_count
+        ),
+    })
+}
+
+/// A container in CrashLoopBackOff has a current `waiting` state (reason
+/// `CrashLoopBackOff`) and a `last_state.terminated` with a non-zero exit — the actual
+/// evidence of the crash. This is the "OOM forensics via lastTerminatedState" path the
+/// README promises.
+fn crash_loop_backoff_finding(cs: &ContainerStatus) -> Option<Finding> {
+    let waiting = cs.state.as_ref()?.waiting.as_ref()?;
+    let reason = waiting.reason.as_deref()?;
+    if !reason.contains("CrashLoopBackOff") && !reason.contains("BackOff") {
+        return None;
+    }
+    let last_terminated = cs.last_state.as_ref()?.terminated.as_ref()?;
+    Some(Finding {
+        code: "crash_loop_backoff".into(),
+        summary: format!(
+            "Container '{}' is in {} — last terminated with exit code {:?} ({}).",
+            cs.name,
+            reason,
+            last_terminated.exit_code,
+            last_terminated.reason.as_deref().unwrap_or("Error")
         ),
     })
 }
@@ -265,6 +301,65 @@ mod tests {
         assert!(
             findings.iter().any(|f| f.code == "readiness_probe"),
             "expected readiness_probe finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn exit_zero_job_is_not_a_crash() {
+        let mut pod = pod_with("Succeeded", false);
+        if let Some(status) = &mut pod.status {
+            status.container_statuses = Some(vec![ContainerStatus {
+                name: "app".into(),
+                ready: false,
+                restart_count: 0,
+                state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 0,
+                        reason: Some("Completed".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            !findings.iter().any(|f| f.code == "crash_loop"),
+            "exit-0 job must not be a crash, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn crash_loop_backoff_uses_last_state() {
+        let mut pod = pod_with("Running", false);
+        if let Some(status) = &mut pod.status {
+            status.container_statuses = Some(vec![ContainerStatus {
+                name: "app".into(),
+                ready: false,
+                restart_count: 7,
+                state: Some(ContainerState {
+                    waiting: Some(ContainerStateWaiting {
+                        reason: Some("CrashLoopBackOff".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                last_state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 137,
+                        reason: Some("OOMKilled".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "crash_loop_backoff"),
+            "expected crash_loop_backoff finding, got {findings:?}"
         );
     }
 }

@@ -163,10 +163,48 @@ pub async fn blast_radius(
         .map(|o| format!("{}/{}", o.kind, o.name))
         .collect::<Vec<_>>();
 
-    // Find dependents by listing pods (the common case) with ownerRef to this uid.
-    // A full scan over all resource kinds is a Phase 3a fleet feature; pods cover the
-    // dominant cascade case (Deployment -> ReplicaSet -> Pod).
+    // Find dependents by walking the ownership chain. A Deployment owns ReplicaSets,
+    // which own Pods — so a Deployment's blast radius must traverse two levels, not just
+    // match the direct `ownerRef.uid`.
     let mut dependents = Vec::new();
+
+    // Collect the set of UIDs transitively owned by this resource, plus the resource's
+    // own uid (for direct children).
+    let mut owned_uids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    owned_uids.insert(uid.clone());
+
+    // Walk ReplicaSets owned by this resource, then their Pods.
+    if gvk.kind == "Deployment" {
+        let replicasets: Api<kube::api::DynamicObject> = Api::namespaced_with(
+            client.clone(),
+            namespace,
+            &kube::core::ApiResource::from_gvk(&kube::core::GroupVersionKind::gvk(
+                "apps",
+                "v1",
+                "ReplicaSet",
+            )),
+        );
+        if let Ok(rs_list) = replicasets.list(&ListParams::default()).await {
+            for rs in rs_list.items {
+                let owned_by_this = rs
+                    .metadata
+                    .owner_references
+                    .as_ref()
+                    .is_some_and(|ors| ors.iter().any(|o| o.uid == uid));
+                if owned_by_this {
+                    dependents.push(format!(
+                        "ReplicaSet/{}",
+                        rs.metadata.name.clone().unwrap_or_default()
+                    ));
+                    if let Some(rs_uid) = rs.metadata.uid.clone() {
+                        owned_uids.insert(rs_uid);
+                    }
+                }
+            }
+        }
+    }
+
+    // Match Pods against any transitively-owned uid.
     let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pod_list = pods
         .list(&ListParams::default())
@@ -177,7 +215,7 @@ pub async fn blast_radius(
             .metadata
             .owner_references
             .as_ref()
-            .is_some_and(|ors| ors.iter().any(|o| o.uid == uid));
+            .is_some_and(|ors| ors.iter().any(|o| owned_uids.contains(&o.uid)));
         if has_owner {
             dependents.push(format!("Pod/{}", pod.name_any()));
         }

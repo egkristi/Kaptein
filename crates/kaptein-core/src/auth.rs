@@ -56,14 +56,17 @@ pub async fn can(
 ) -> Result<Permission, Error> {
     let status = subject_rules(client, namespace).await?;
     let allowed = status.resource_rules.iter().any(|rule| {
+        // Fail **closed**: an absent `api_groups` or `resources` list means the rule
+        // grants nothing (Kubernetes RBAC requires an explicit list; `None` is a
+        // degenerate rule, not a wildcard). Only an explicit `*` matches everything.
         let group_ok = rule
             .api_groups
             .as_ref()
-            .is_none_or(|groups| groups.iter().any(|g| g == "*" || g == group));
-        let resource_ok = rule.resources.as_ref().is_none_or(|resources| {
+            .is_some_and(|groups| groups.iter().any(|g| g == "*" || g == group));
+        let resource_ok = rule.resources.as_ref().is_some_and(|resources| {
             resources
                 .iter()
-                .any(|r| r == "*" || r == resource || r == &format!("*/{resource}"))
+                .any(|r| r == "*" || r == resource || r == &format!("{resource}/*"))
         });
         let verb_ok = rule.verbs.iter().any(|v| v == "*" || v == verb);
         group_ok && resource_ok && verb_ok
@@ -118,11 +121,11 @@ pub async fn preflight(
             let group_ok = rule
                 .api_groups
                 .as_ref()
-                .is_none_or(|groups| groups.iter().any(|g| g == "*" || g == group));
-            let resource_ok = rule.resources.as_ref().is_none_or(|resources| {
+                .is_some_and(|groups| groups.iter().any(|g| g == "*" || g == group));
+            let resource_ok = rule.resources.as_ref().is_some_and(|resources| {
                 resources
                     .iter()
-                    .any(|r| r == "*" || r == resource || r == &format!("*/{resource}"))
+                    .any(|r| r == "*" || r == resource || r == &format!("{resource}/*"))
             });
             let verb_ok = rule.verbs.iter().any(|v| v == "*" || v == verb);
             group_ok && resource_ok && verb_ok
