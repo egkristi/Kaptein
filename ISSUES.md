@@ -48,7 +48,10 @@ unowned debt. Done items are struck through.
    maps core errors into a real enum instead of passing through.
 8. **Distribution & release sync** (cross-cutting): Homebrew/Krew/container/checksums +
    site/docs/tag sync.
-9. **Contract-version enforcement** (cross-cutting): MCP version field + compatibility gate.
+9. ~~**Contract-version enforcement**~~ (done, commit 485045c): MCP server advertises the
+   contract version and refuses a client whose declared `_meta["io.kaptein/apiVersion"]`
+   has a different major; rule in `kaptein-viewmodel::versioned` (lens/WIT gates land
+   with their engines in M2.2/M2.6).
 10. ~~**Events API v1 + scoped queries**~~ (done, commit 98a39cc): `recent_events` reads
     `events.k8s.io/v1` `eventTime`/`series` and merges with `core/v1`. (Field-selector
     scoping for list-heavy views remains part of M2.0.)

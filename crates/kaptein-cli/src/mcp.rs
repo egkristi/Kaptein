@@ -417,6 +417,41 @@ fn now_ms_hex() -> String {
     format!("{ms:x}")
 }
 
+/// Contract-version compatibility gate (review item #12, `docs/versioning.md`).
+///
+/// A client that declares a Kaptein tool-schema version (`_meta["io.kaptein/apiVersion"]`)
+/// is refused when its major differs from the one this server implements — a clear
+/// migration error, never a silent break. Clients that omit the field are accepted for
+/// backward compatibility (the pre-versioning surface has no declaration).
+fn check_client_contract_version(context: &RequestContext<RoleServer>) -> Result<(), String> {
+    let declared = context
+        .meta
+        .get(kaptein_viewmodel::MCP_VERSION_META_KEY)
+        .and_then(|v| v.as_str());
+    check_declared_version(declared)
+}
+
+/// The pure version-check, separated from `RequestContext` so it is unit-testable.
+fn check_declared_version(declared: Option<&str>) -> Result<(), String> {
+    let Some(declared) = declared else {
+        return Ok(());
+    };
+    let Some(requested) = kaptein_viewmodel::parse_api_version(declared) else {
+        return Err(format!(
+            "contract: client declared an unparseable Kaptein api version {declared:?}"
+        ));
+    };
+    if !kaptein_viewmodel::is_compatible(kaptein_viewmodel::MCP_API_VERSION, requested) {
+        return Err(format!(
+            "contract: this server implements Kaptein MCP schema {}, which is incompatible \
+             with the client's {} — upgrade the client or the server (docs/versioning.md)",
+            kaptein_viewmodel::MCP_API_VERSION,
+            requested
+        ));
+    }
+    Ok(())
+}
+
 /// Serve the MCP protocol over stdio until the client closes.
 pub async fn serve() -> Result<(), CoreError> {
     let server = KapteinMcp::new().await?;
@@ -453,11 +488,21 @@ impl ServerHandler for KapteinMcp {
     fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
         async move {
             let args = request.arguments.as_ref();
             let name = request.name.clone();
+
+            // Contract-version gate (docs/versioning.md): refuse a client whose declared
+            // Kaptein tool-schema version we do not support — a clear migration error,
+            // never a silent break. Absent declaration is accepted (backward-compatible).
+            if let Err(msg) = check_client_contract_version(&context) {
+                self.audit(&name, args, kaptein_viewmodel::audit::Outcome::Rejected);
+                return Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                    ContentBlock::text(msg),
+                ])));
+            }
 
             // Governance gate (M1b.4): refuse the call before it reaches the API server
             // when RBAC preflight denies it (or the context is read-only). Refusals are
@@ -598,5 +643,34 @@ impl KapteinMcp {
             on_behalf_of: None,
         };
         let _ = crate::audit::append(&event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_declared_version;
+
+    #[test]
+    fn absent_version_is_accepted() {
+        assert!(check_declared_version(None).is_ok());
+    }
+
+    #[test]
+    fn same_major_is_accepted() {
+        assert!(check_declared_version(Some("v1")).is_ok());
+        assert!(check_declared_version(Some("1")).is_ok());
+        assert!(check_declared_version(Some("1.5")).is_ok());
+    }
+
+    #[test]
+    fn different_major_is_refused() {
+        let err = check_declared_version(Some("v2")).unwrap_err();
+        assert!(err.contains("incompatible"), "got {err:?}");
+    }
+
+    #[test]
+    fn unparseable_version_is_refused() {
+        let err = check_declared_version(Some("banana")).unwrap_err();
+        assert!(err.contains("unparseable"), "got {err:?}");
     }
 }

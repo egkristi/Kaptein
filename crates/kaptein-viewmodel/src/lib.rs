@@ -18,6 +18,7 @@ pub mod render;
 pub mod semantic;
 pub mod sink;
 pub mod surface;
+pub mod versioned;
 
 pub use audit::{Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source};
 pub use diff::{DiffLine, UnifiedDiff, render_unified, unified_diff};
@@ -32,6 +33,9 @@ pub use sink::{AuditConfig, AuditSink};
 pub use surface::{
     Column, ColumnKind, EditorMode, Field, FieldKind, Projection, SupportLevel, Surface,
     SurfaceKind, support_level,
+};
+pub use versioned::{
+    ApiVersion, MCP_API_VERSION, MCP_VERSION_META_KEY, is_compatible, parse_api_version,
 };
 
 #[cfg(test)]

@@ -321,7 +321,9 @@ Milestones:
   `explain-context` command so a typo in a prod regex is surfaced, not silently ignored.
 - **Contract-version enforcement** — refuse to load a plugin, lens, or MCP client whose
   version is unsupported (per `docs/versioning.md`); the MCP surface advertises a
-  version field and the compatibility gate is implemented (elevated per review).
+  version field and the compatibility gate is implemented (elevated per review). *MCP
+  gate: done — `kaptein-viewmodel::versioned` + `mcp.rs` refuse a client with an
+  incompatible major. Lens (M2.2) and WIT (M2.6) gates land with their engines.*
 - **Distribution & release sync** — a Homebrew tap, Krew plugin, container image,
   checksums, and install script, owned by a milestone; the site/README/docs stay in sync
   with a tag (the review found five releases of drift).
