@@ -4,6 +4,12 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-24
+
+### Added
+- Composed landing view (M1.5): `kaptein overview` now combines warning events
+  (is anything broken) with the M1.4 watch-ring snapshot (what changed).
+
 ## [0.12.0] - 2026-08-24
 
 ### Added
