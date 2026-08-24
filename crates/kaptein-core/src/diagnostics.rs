@@ -52,6 +52,11 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
             findings.push(f);
         }
     }
+    // Readiness-probe failures surface on the Ready condition with a `last_probe_time`
+    // and a reason like `Unhealthy`/`ReadinessProbeFailed` (the "probes" rule of M1.6).
+    if let Some(f) = readiness_probe_finding(status) {
+        findings.push(f);
+    }
     if findings.is_empty() && !is_ready(status) {
         findings.push(Finding {
             code: "not_ready".into(),
@@ -109,6 +114,22 @@ fn pvc_binding_finding(_status: &PodStatus) -> Option<Finding> {
     // found") in the PodScheduled condition message, so this is a fallback for when the
     // scheduler hasn't recorded a reason. We return None here; full PVC analysis needs
     // the PVC resources themselves (a later rule pack).
+    None
+}
+
+/// The "probes" rule (M1.6): a `Ready=False` condition with a `last_probe_time` indicates
+/// a readiness-probe failure. Surface the probe reason/message so the operator knows it
+/// is a probe, not a crash.
+fn readiness_probe_finding(status: &PodStatus) -> Option<Finding> {
+    let ready = condition(status, "Ready")?;
+    if ready.status == "False" && ready.last_probe_time.is_some() {
+        let reason = ready.reason.as_deref().unwrap_or("ReadinessProbeFailed");
+        let msg = ready.message.as_deref().unwrap_or("no message");
+        return Some(Finding {
+            code: "readiness_probe".into(),
+            summary: format!("Readiness probe failing: {reason} — {msg}"),
+        });
+    }
     None
 }
 
@@ -225,6 +246,25 @@ mod tests {
         assert!(
             findings.iter().any(|f| f.code == "crash_loop"),
             "expected crash_loop finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn readiness_probe_failure_is_detected() {
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+        let mut pod = pod_with("Running", false);
+        if let Some(status) = &mut pod.status {
+            // A Ready=False condition with a last_probe_time signals a probe failure.
+            if let Some(cond) = status.conditions.as_mut().and_then(|c| c.first_mut()) {
+                cond.reason = Some("Unhealthy".into());
+                cond.message = Some("readiness probe failed: connection refused".into());
+                cond.last_probe_time = Some(Time(k8s_openapi::jiff::Timestamp::now()));
+            }
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "readiness_probe"),
+            "expected readiness_probe finding, got {findings:?}"
         );
     }
 }
