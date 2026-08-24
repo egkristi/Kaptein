@@ -9,6 +9,6 @@ authors.workspace = true
 description = "Kaptein integration layer: binds kaptein-core to frontends, mapping core errors to a user-facing form"
 
 [dependencies]
-kaptein-core = { version = "0.10.0", path = "../kaptein-core" }
+kaptein-core = { version = "0.11.0", path = "../kaptein-core" }
 kube = { workspace = true }
 thiserror = { workspace = true }
