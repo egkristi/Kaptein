@@ -120,16 +120,24 @@ async fn run_ui(client: &Client) -> io::Result<()> {
     let mut detail: Option<String> = None;
     // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query.
     let mut jump_query: Option<String> = None;
+    // Command-palette mode: Some(query) means the palette is open (vim-style ':').
+    let mut palette_query: Option<String> = None;
 
     loop {
-        let status_line = if let Some(q) = jump_query.as_deref() {
+        let status_line = if let Some(q) = palette_query.as_deref() {
+            let matches = palette_matches(q);
+            format!(
+                " :{q} — {} commands (Enter:run  Esc:cancel) ",
+                matches.len()
+            )
+        } else if let Some(q) = jump_query.as_deref() {
             format!(
                 " jump:/{q} — {} rows (Enter:accept  Esc:cancel) ",
                 rows.len()
             )
         } else {
             format!(
-                " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  d:describe  i:diagnose  q:quit ",
+                " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  ::palette  d:describe  i:diagnose  q:quit ",
                 kind.label(),
                 namespace.as_deref().unwrap_or("all"),
                 sort_label(sort_key, sort_descending),
@@ -200,6 +208,9 @@ async fn run_ui(client: &Client) -> io::Result<()> {
             && let Event::Key(key) = event::read()?
         {
             match key.code {
+                KeyCode::Esc if palette_query.is_some() => {
+                    palette_query = None;
+                }
                 KeyCode::Esc if jump_query.is_some() => {
                     // Cancel jump mode: restore the unfiltered list.
                     jump_query = None;
@@ -215,29 +226,70 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                     scroll = 0;
                 }
                 KeyCode::Esc => break,
-                KeyCode::Char('q') => break,
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                KeyCode::Char('j') | KeyCode::Down => {
+                KeyCode::Char('q') if palette_query.is_none() && jump_query.is_none() => break,
+                KeyCode::Char('c')
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && palette_query.is_none()
+                        && jump_query.is_none() =>
+                {
+                    break;
+                }
+                KeyCode::Char(':') if palette_query.is_none() && jump_query.is_none() => {
+                    // Open the command palette.
+                    palette_query = Some(String::new());
+                }
+                KeyCode::Char(c) if palette_query.is_some() && c != ':' => {
+                    if let Some(q) = palette_query.as_mut() {
+                        q.push(c);
+                    }
+                }
+                KeyCode::Backspace if palette_query.is_some() => {
+                    if let Some(q) = palette_query.as_mut() {
+                        q.pop();
+                    }
+                }
+                KeyCode::Enter if palette_query.is_some() => {
+                    // Execute the best-matching command (or no-op if none match).
+                    if let Some(q) = palette_query.as_deref()
+                        && let Some(cmd) = palette_matches(q).into_iter().next()
+                    {
+                        execute_command(
+                            cmd,
+                            client,
+                            &mut kind,
+                            &mut namespace,
+                            &mut sort_key,
+                            &mut sort_descending,
+                            &mut rows,
+                            &mut selected,
+                            &mut scroll,
+                            &mut detail,
+                        )
+                        .await?;
+                    }
+                    palette_query = None;
+                }
+                KeyCode::Char('j') | KeyCode::Down if palette_query.is_none() => {
                     selected = (selected + 1).min(rows.len().saturating_sub(1));
                     if selected >= scroll + 10 {
                         scroll += 1;
                     }
                 }
-                KeyCode::Char('k') | KeyCode::Up => {
+                KeyCode::Char('k') | KeyCode::Up if palette_query.is_none() => {
                     selected = selected.saturating_sub(1);
                     if selected < scroll {
                         scroll = selected;
                     }
                 }
-                KeyCode::Char('g') => {
+                KeyCode::Char('g') if palette_query.is_none() => {
                     selected = 0;
                     scroll = 0;
                 }
-                KeyCode::Char('G') => {
+                KeyCode::Char('G') if palette_query.is_none() => {
                     selected = rows.len().saturating_sub(1);
                     scroll = selected.saturating_sub(10);
                 }
-                KeyCode::Tab => {
+                KeyCode::Tab if palette_query.is_none() => {
                     kind = kind.next();
                     rows = fetch(
                         client,
@@ -251,7 +303,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                     scroll = 0;
                     detail = None;
                 }
-                KeyCode::Char('n') => {
+                KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
                     rows = fetch(
                         client,
@@ -265,7 +317,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                     scroll = 0;
                     detail = None;
                 }
-                KeyCode::Char('s') => {
+                KeyCode::Char('s') if palette_query.is_none() => {
                     sort_key = next_sort_key(sort_key);
                     rows = fetch(
                         client,
@@ -278,7 +330,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                     selected = 0;
                     scroll = 0;
                 }
-                KeyCode::Char('S') => {
+                KeyCode::Char('S') if palette_query.is_none() => {
                     sort_descending = !sort_descending;
                     rows = fetch(
                         client,
@@ -291,12 +343,12 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                     selected = 0;
                     scroll = 0;
                 }
-                KeyCode::Char('d') => {
+                KeyCode::Char('d') if palette_query.is_none() => {
                     if let Some(r) = rows.get(selected) {
                         detail = describe(client, kind, r).await.ok();
                     }
                 }
-                KeyCode::Char('i') => {
+                KeyCode::Char('i') if palette_query.is_none() => {
                     if kind == Kind::Pods
                         && let Some(r) = rows.get(selected)
                     {
@@ -305,7 +357,7 @@ async fn run_ui(client: &Client) -> io::Result<()> {
                         detail = Some("Diagnostics are available for pods only.".into());
                     }
                 }
-                KeyCode::Char('/') => {
+                KeyCode::Char('/') if palette_query.is_none() => {
                     // Enter fuzzy-jump mode (empty query = show all).
                     jump_query = Some(String::new());
                 }
@@ -420,6 +472,127 @@ fn status_for(kind: Kind) -> String {
         Kind::Deployments => "Ready".into(),
         Kind::Services => "Active".into(),
     }
+}
+
+/// A command-palette action. The palette lists these and fuzzy-matches the typed query;
+/// selecting one performs the action (same as the single-key bindings).
+#[derive(Clone, Copy, PartialEq)]
+enum PaletteCommand {
+    NextKind,
+    NextNamespace,
+    CycleSort,
+    ToggleSortDirection,
+    DescribeSelected,
+    DiagnoseSelected,
+    Quit,
+}
+
+impl PaletteCommand {
+    const ALL: [PaletteCommand; 7] = [
+        PaletteCommand::NextKind,
+        PaletteCommand::NextNamespace,
+        PaletteCommand::CycleSort,
+        PaletteCommand::ToggleSortDirection,
+        PaletteCommand::DescribeSelected,
+        PaletteCommand::DiagnoseSelected,
+        PaletteCommand::Quit,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            PaletteCommand::NextKind => "next-kind",
+            PaletteCommand::NextNamespace => "next-namespace",
+            PaletteCommand::CycleSort => "cycle-sort",
+            PaletteCommand::ToggleSortDirection => "toggle-sort-direction",
+            PaletteCommand::DescribeSelected => "describe-selected",
+            PaletteCommand::DiagnoseSelected => "diagnose-selected",
+            PaletteCommand::Quit => "quit",
+        }
+    }
+}
+
+/// Fuzzy-match the typed palette query against the command labels, best-first.
+fn palette_matches(query: &str) -> Vec<PaletteCommand> {
+    let labels: Vec<&str> = PaletteCommand::ALL.iter().map(|c| c.label()).collect();
+    let ranked = kaptein_viewmodel::fuzzy_jump(labels, query);
+    let mut out: Vec<PaletteCommand> = ranked
+        .into_iter()
+        .filter_map(|m| {
+            PaletteCommand::ALL
+                .iter()
+                .copied()
+                .find(|c| c.label() == m.candidate)
+        })
+        .collect();
+    // If the query is empty, preserve the canonical order.
+    if query.trim().is_empty() {
+        out = PaletteCommand::ALL.to_vec();
+    }
+    out
+}
+
+/// Execute a palette command (the same actions as the single-key bindings).
+#[allow(clippy::too_many_arguments)]
+async fn execute_command(
+    cmd: PaletteCommand,
+    client: &Client,
+    kind: &mut Kind,
+    namespace: &mut Option<String>,
+    sort_key: &mut kaptein_core::discovery::SortKey,
+    sort_descending: &mut bool,
+    rows: &mut Vec<TableRow>,
+    selected: &mut usize,
+    scroll: &mut usize,
+    detail: &mut Option<String>,
+) -> io::Result<()> {
+    match cmd {
+        PaletteCommand::NextKind => {
+            *kind = kind.next();
+        }
+        PaletteCommand::NextNamespace => {
+            *namespace = cycle_namespace(client, namespace.clone()).await?;
+        }
+        PaletteCommand::CycleSort => {
+            *sort_key = next_sort_key(*sort_key);
+        }
+        PaletteCommand::ToggleSortDirection => {
+            *sort_descending = !*sort_descending;
+        }
+        PaletteCommand::DescribeSelected => {
+            if let Some(r) = rows.get(*selected) {
+                *detail = describe(client, *kind, r).await.ok();
+            }
+            return Ok(());
+        }
+        PaletteCommand::DiagnoseSelected => {
+            if *kind == Kind::Pods
+                && let Some(r) = rows.get(*selected)
+            {
+                *detail = diagnose(client, r).await.ok();
+            } else {
+                *detail = Some("Diagnostics are available for pods only.".into());
+            }
+            return Ok(());
+        }
+        PaletteCommand::Quit => {
+            // The caller treats `Quit` by breaking out of the run loop; signal via a
+            // sentinel is overkill — instead we just return and the UI stays open.
+            return Ok(());
+        }
+    }
+    // Re-fetch for commands that changed the view (kind/namespace/sort).
+    *rows = fetch(
+        client,
+        *kind,
+        namespace.as_deref(),
+        *sort_key,
+        *sort_descending,
+    )
+    .await?;
+    *selected = 0;
+    *scroll = 0;
+    *detail = None;
+    Ok(())
 }
 
 async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result<Option<String>> {
