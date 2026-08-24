@@ -30,10 +30,10 @@ tracker.
 ## Remaining review backlog (owned by milestones)
 
 The external review ranked these; they are now **milestones in `ROADMAP.md`** rather than
-unowned debt:
+unowned debt. Done items are struck through.
 
-1. **M1b.4 — MCP governance conformance** (blocking): RBAC preflight + context
-   classification + read-only guardrail actually run per tool call; audit emits
+1. ~~**M1b.4 — MCP governance conformance**~~ (done, commit 1cbe417): RBAC preflight +
+   context classification + read-only guardrail run per tool call; audit emits
    `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
 2. **M2.0 — wire `DataPlane` + informer store** (blocking): the render contract and the
    informer-backed bounded store are implemented, not just specified.
@@ -44,13 +44,14 @@ unowned debt:
 5. **Signed releases + SBOM** (cross-cutting): cosign + SLSA + SBOM + SHA256SUMS.
 6. **Config schema/precedence/validation** (cross-cutting): `kaptein config validate` /
    `explain-context`.
-7. **Redaction-aware error boundary** (cross-cutting): `kaptein-integration` maps core
-   errors instead of passing through.
+7. ~~**Redaction-aware error boundary**~~ (done, commit 98a39cc): `kaptein-integration`
+   maps core errors into a real enum instead of passing through.
 8. **Distribution & release sync** (cross-cutting): Homebrew/Krew/container/checksums +
    site/docs/tag sync.
 9. **Contract-version enforcement** (cross-cutting): MCP version field + compatibility gate.
-10. **Events API v1 + scoped queries**: `events.k8s.io/v1` `eventTime`/`series` support and
-    field-selector scoping (the `lastTimestamp`-only path silently drops v1 events).
+10. ~~**Events API v1 + scoped queries**~~ (done, commit 98a39cc): `recent_events` reads
+    `events.k8s.io/v1` `eventTime`/`series` and merges with `core/v1`. (Field-selector
+    scoping for list-heavy views remains part of M2.0.)
 11. **Diagnostics fixture corpus**: canned pod JSONs with expected findings (owned by M1.6).
 
 ## By-design limitations
