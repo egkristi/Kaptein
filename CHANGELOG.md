@@ -4,6 +4,13 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-24
+
+### Added
+- JSON log parsing (`kaptein logs --json`): structured log lines parse into typed,
+  inferred columns (M1.2 "JSON → columns") via the renderer-agnostic
+  `kaptein-viewmodel::logparse` module.
+
 ## [0.9.0] - 2026-08-24
 
 ### Added
