@@ -152,15 +152,15 @@ fn row_key(obj: &DynamicObject) -> RowKey {
 /// Run the list-then-watch loop for a resource kind into the store, until the watch ends
 /// (caller drives this with a timeout or Ctrl-C). This is the informer-backed form of
 /// `watchring::watch_into_ring`: it seeds the store from a bounded, **metadata-only**
-/// list (ADR-0006 `PartialObjectMetadata`), then applies watch deltas. Returns the
-/// number of watch events applied (the seed is not counted).
+/// list (ADR-0006 `PartialObjectMetadata`), then applies watch deltas — **reconnecting
+/// with backoff and relisting on watch expiry/410**, so the store never goes stale.
 pub async fn run_informer(
     client: &Client,
     gvk: &GroupVersionKind,
     namespace: Option<&str>,
     store: &InformerStore,
     limit: u32,
-) -> Result<usize, Error> {
+) -> Result<(), Error> {
     let ar = ApiResource::from_gvk(gvk);
     let api: Api<DynamicObject> = match namespace {
         Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
@@ -199,9 +199,10 @@ pub async fn run_informer(
         match next {
             Some(next) => continue_token = Some(next),
             None => {
-                // Watch from the last page's resource version.
+                // Watch from the last page's resource version (and reconnect forever).
                 let rv = rv.unwrap_or_else(|| "0".to_string());
-                return watch_from(client, gvk, namespace, store, &rv).await;
+                watch_from(client, gvk, namespace, store, &rv).await;
+                return Ok(());
             }
         }
     }
@@ -213,26 +214,54 @@ async fn watch_from(
     namespace: Option<&str>,
     store: &InformerStore,
     resource_version: &str,
-) -> Result<usize, Error> {
+) {
     let ar = ApiResource::from_gvk(gvk);
     let api: Api<DynamicObject> = match namespace {
         Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
         None => Api::all_with(client.clone(), &ar),
     };
-    let wp = WatchParams::default();
-    let mut stream = Box::pin(api.watch(&wp, resource_version).await.map_err(Error::Api)?);
-    let mut applied = 0usize;
+    let mut backoff_ms: u64 = 100;
+    let mut current_rv = resource_version.to_string();
     use futures_util::StreamExt;
-    while let Some(event) = stream.next().await {
-        match event {
-            Ok(ev) => {
-                store.apply(&ev, gvk);
-                applied += 1;
+
+    loop {
+        let stream = match api.watch(&WatchParams::default(), &current_rv).await {
+            Ok(s) => s,
+            Err(_) => {
+                // Relist-on-410 / transient error: back off, then re-fetch the
+                // resource version and retry — the store never goes silently stale.
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(5_000);
+                // Re-fetch the resource version so a 410 Gone ("too old resource
+                // version") is recovered by relisting, not by retrying the same RV.
+                if let Ok(list) = api.list_metadata(&ListParams::default().limit(1)).await
+                    && let Some(rv) = list.metadata.resource_version
+                {
+                    current_rv = rv;
+                }
+                continue;
             }
-            Err(_) => break,
+        };
+        let mut stream = Box::pin(stream);
+
+        let mut errored = false;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(ev) => {
+                    backoff_ms = 100; // healthy stream resets backoff
+                    store.apply(&ev, gvk);
+                }
+                Err(_) => {
+                    errored = true;
+                    break;
+                }
+            }
+        }
+        if errored {
+            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            backoff_ms = (backoff_ms * 2).min(5_000);
         }
     }
-    Ok(applied)
 }
 
 #[cfg(test)]

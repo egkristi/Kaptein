@@ -170,6 +170,18 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         max: usize,
     },
+    /// Run the informer-backed bounded store (ADR-0006) for a resource kind.
+    WatchStore {
+        /// group/version/kind, e.g. v1/Pod
+        #[arg(short, long, default_value = "v1/Pod")]
+        gvk: String,
+        /// namespace (omit for cluster-scoped)
+        #[arg(short, long)]
+        namespace: Option<String>,
+        /// page size for the bounded (continue-token) seed
+        #[arg(long, default_value_t = 500)]
+        limit: u32,
+    },
     /// Server-side dry-run a YAML manifest (validate without mutating the cluster).
     Apply {
         /// path to a YAML manifest, or "-" for stdin
@@ -894,6 +906,24 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     "{} {}\t{}/{}\t({} ms)",
                     r.event, r.kind, r.namespace, r.name, r.observed_at_ms
                 );
+            }
+            Ok(())
+        }
+        Command::WatchStore {
+            gvk,
+            namespace,
+            limit,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let store = kaptein_core::store::InformerStore::new();
+            // The bounded, metadata-only informer store (ADR-0006) — this is the caller
+            // that proves `run_informer` is reachable outside its own tests (issue #18).
+            kaptein_core::store::run_informer(&client, &gvk, namespace.as_deref(), &store, limit)
+                .await?;
+            let snap = store.snapshot();
+            println!("watch-store {gvk:?}: {} objects in store", snap.len());
+            for s in snap {
+                println!("{}\t{}\t{}", s.namespace, s.kind, s.name);
             }
             Ok(())
         }
