@@ -19,6 +19,7 @@ pub mod ephemeral;
 pub mod error;
 pub mod events;
 pub mod exec;
+pub mod extension;
 pub mod external;
 pub mod guardrails;
 pub mod moat;

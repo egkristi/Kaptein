@@ -186,9 +186,11 @@ Milestones:
     defines the versioned lens data model (`ViewDefinition`, `GroupVersionKind`,
     `StatusRule`/`RuleOp`, `LensAction`) and `validate_viewdef` (id/api_version/columns/
     status/actions); `kaptein viewdef validate -f` parses a lens (YAML/JSON) and reports
-    problems; an example CNPG lens ships under `extensions/` (MIT/Apache-2.0). Remaining:
-    the JSON Schema artifact, status-rule *evaluation* against live objects, and the
-    `kaptein extension {list,enable,disable}` lifecycle.
+    problems; an example CNPG lens ships under `extensions/` (MIT/Apache-2.0). Also
+    shipped: the JSON Schema (`extensions/viewdef.schema.json` + `kaptein viewdef schema`),
+    `evaluate_status` (field-path resolution + rule evaluation), and the `extension.yaml`
+    manifest + `kaptein extension {list,validate}` lifecycle (ADR-0004). Remaining:
+    status-rule *rendering* in a frontend and the enable/disable state store.
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile

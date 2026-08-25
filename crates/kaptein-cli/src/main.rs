@@ -89,6 +89,12 @@ enum Command {
     },
     /// Print the versioned JSON Schema for view definitions (for CI/PR review).
     ViewdefSchema,
+    /// Discover + validate extensions (`extension.yaml` manifests) in a directory.
+    Extension {
+        /// list discovered extensions, or validate their manifests
+        #[command(subcommand)]
+        command: ExtensionCommand,
+    },
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
@@ -374,6 +380,23 @@ enum Command {
     },
 }
 
+/// Subcommands of `kaptein extension` (ADR-0004 lifecycle).
+#[derive(Subcommand)]
+enum ExtensionCommand {
+    /// List discovered extensions (id, name, version, kind) in a directory.
+    List {
+        /// directory to search recursively for extension.yaml (default: ./extensions)
+        #[arg(short = 'd', long, default_value = "extensions")]
+        dir: String,
+    },
+    /// Validate the extension.yaml manifests in a directory.
+    Validate {
+        /// directory to search recursively for extension.yaml (default: ./extensions)
+        #[arg(short = 'd', long, default_value = "extensions")]
+        dir: String,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -568,6 +591,37 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 "{}",
                 include_str!("../../../extensions/viewdef.schema.json")
             );
+            Ok(())
+        }
+        Command::Extension { command } => {
+            let (dir, list) = match command {
+                ExtensionCommand::List { dir } => (dir, true),
+                ExtensionCommand::Validate { dir } => (dir, false),
+            };
+            let (found, problems) = kaptein_core::extension::discover(std::path::Path::new(&dir));
+            if list {
+                for ext in &found {
+                    println!(
+                        "{:<30} {:<20} v{:<8} {:?}",
+                        ext.manifest.id, ext.manifest.name, ext.manifest.version, ext.manifest.kind
+                    );
+                }
+                if found.is_empty() {
+                    println!("no extensions found in {dir}");
+                }
+            } else {
+                for p in &problems {
+                    eprintln!("error: {p}");
+                }
+                if problems.is_empty() {
+                    println!("{} extension(s) valid in {dir}", found.len());
+                } else {
+                    return Err(kaptein_core::Error::Internal(format!(
+                        "{} invalid extension manifest(s)",
+                        problems.len()
+                    )));
+                }
+            }
             Ok(())
         }
         Command::Diagnose { name, namespace } => {
@@ -1310,7 +1364,7 @@ mod tests {
     /// "reviewable in PRs" acceptance test from ADR-0012).
     #[test]
     fn example_cnpg_lens_validates_cleanly() {
-        let yaml = include_str!("../../../extensions/example-cnpg-lens.yaml");
+        let yaml = include_str!("../../../extensions/lens.cnpg.yaml");
         let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
         let vd: kaptein_viewmodel::ViewDefinition =
             serde_json::from_value(value).expect("lens deserializes");

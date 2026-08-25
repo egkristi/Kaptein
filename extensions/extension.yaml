@@ -1,0 +1,10 @@
+# CNPG lens extension manifest — the shared `extension.yaml` declaration (ADR-0004).
+# MIT/Apache-2.0 (extension surface). The lens itself is lens.cnpg.yaml.
+
+id: com.example.cnpg-lens
+name: CNPG lens
+version: 1.2.0
+api_version: 1
+kind: lens
+entrypoint: lens.cnpg.yaml
+permissions: []
