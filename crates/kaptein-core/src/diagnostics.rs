@@ -58,6 +58,11 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
             findings.push(f);
         }
     }
+    // A Running pod whose container enters ImagePullBackOff after an image update is
+    // not Pending — surface the pull failure here too (the Pending branch already does).
+    if let Some(f) = image_pull_finding(status) {
+        findings.push(f);
+    }
     // Readiness-probe failures surface on the Ready condition with a `last_probe_time`
     // and a reason like `Unhealthy`/`ReadinessProbeFailed` (the "probes" rule of M1.6).
     if let Some(f) = readiness_probe_finding(status) {
@@ -165,7 +170,10 @@ fn container_crash_finding(cs: &ContainerStatus) -> Option<Finding> {
 fn crash_loop_backoff_finding(cs: &ContainerStatus) -> Option<Finding> {
     let waiting = cs.state.as_ref()?.waiting.as_ref()?;
     let reason = waiting.reason.as_deref()?;
-    if !reason.contains("CrashLoopBackOff") && !reason.contains("BackOff") {
+    // Only `CrashLoopBackOff` (or a bare `BackOff`) is the crash-loop signal. A naive
+    // `contains("BackOff")` would also match `ImagePullBackOff`, which is an image-pull
+    // failure, not a crash.
+    if !reason.eq_ignore_ascii_case("CrashLoopBackOff") && !reason.eq_ignore_ascii_case("BackOff") {
         return None;
     }
     let last_terminated = cs.last_state.as_ref()?.terminated.as_ref()?;
@@ -360,6 +368,45 @@ mod tests {
         assert!(
             findings.iter().any(|f| f.code == "crash_loop_backoff"),
             "expected crash_loop_backoff finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn image_pull_backoff_is_not_a_crash_loop() {
+        // ImagePullBackOff must NOT be misreported as crash_loop_backoff (it is an
+        // image-pull failure, not a crash). It should surface as image_pull.
+        let mut pod = pod_with("Running", false);
+        if let Some(status) = &mut pod.status {
+            status.container_statuses = Some(vec![ContainerStatus {
+                name: "app".into(),
+                ready: false,
+                restart_count: 0,
+                state: Some(ContainerState {
+                    waiting: Some(ContainerStateWaiting {
+                        reason: Some("ImagePullBackOff".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                last_state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 137,
+                        reason: Some("OOMKilled".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            !findings.iter().any(|f| f.code == "crash_loop_backoff"),
+            "ImagePullBackOff must not be crash_loop_backoff, got {findings:?}"
+        );
+        assert!(
+            findings.iter().any(|f| f.code == "image_pull"),
+            "expected image_pull finding for a Running pod, got {findings:?}"
         );
     }
 }

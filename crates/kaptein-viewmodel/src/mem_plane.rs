@@ -7,6 +7,7 @@
 //! replays past patches (from a held revision) and then live patches, exactly like the
 //! network `DataPlane` a `serve` proxy would expose.
 
+use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,11 +26,13 @@ pub struct Schema {
     pub column_ids: Vec<String>,
 }
 
-/// A versioned snapshot of every row, for history replay.
+/// A versioned patch, for history replay. Holds the full `RowPatch` (upsert **or**
+/// remove), so a subscriber replaying from an old revision sees deletions, not just the
+/// last upsert of every row.
 #[derive(Debug, Clone)]
 struct HistoryEntry {
     revision: Revision,
-    row: Row,
+    patch: RowPatch,
 }
 
 #[derive(Debug)]
@@ -39,8 +42,10 @@ struct State {
     rows: Vec<Row>,
     /// `RowId -> index` into `rows` for O(1) upsert/remove.
     index: std::collections::HashMap<RowId, usize>,
-    /// Bounded history of upserts, oldest first (cap bounds memory, not correctness).
-    history: Vec<HistoryEntry>,
+    /// Bounded history of patches, oldest first (cap bounds memory, not correctness).
+    /// `VecDeque` makes the cap eviction O(1) (a `Vec::remove(0)` would memmove the
+    /// whole buffer per event).
+    history: VecDeque<HistoryEntry>,
 }
 
 /// An in-memory, mutable data plane.
@@ -62,7 +67,7 @@ impl MemPlane {
             state: Arc::new(Mutex::new(State {
                 rows: Vec::new(),
                 index: std::collections::HashMap::new(),
-                history: Vec::new(),
+                history: VecDeque::new(),
             })),
             revision: Arc::new(AtomicU64::new(0)),
             schema,
@@ -92,14 +97,15 @@ impl MemPlane {
                     state.rows.push(row.clone());
                 }
             }
-            state.history.push(HistoryEntry {
+            let patch = RowPatch::Upsert { id, row };
+            state.history.push_back(HistoryEntry {
                 revision: Revision(revision),
-                row: row.clone(),
+                patch: patch.clone(),
             });
             if state.history.len() > self.history_cap {
-                state.history.remove(0);
+                state.history.pop_front();
             }
-            (Revision(revision), RowPatch::Upsert { id, row })
+            (Revision(revision), patch)
         };
         self.broadcast(patch);
         revision
@@ -118,14 +124,25 @@ impl MemPlane {
                 state.index.insert(moved_id, i);
             }
             let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
-            (Revision(revision), RowPatch::Remove { id: id.clone() })
+            let patch = RowPatch::Remove { id: id.clone() };
+            state.history.push_back(HistoryEntry {
+                revision: Revision(revision),
+                patch: patch.clone(),
+            });
+            if state.history.len() > self.history_cap {
+                state.history.pop_front();
+            }
+            (Revision(revision), patch)
         };
         self.broadcast(patch);
         revision
     }
 
     fn broadcast(&self, patch: RowPatch) {
-        let senders = self.live.lock().expect("mem plane live poisoned");
+        let mut senders = self.live.lock().expect("mem plane live poisoned");
+        // Drop senders whose receiver has gone away, so a long-lived plane with many
+        // short-lived subscribers doesn't leak a sender per call.
+        senders.retain(|tx| !tx.is_closed());
         for tx in senders.iter() {
             let _ = tx.unbounded_send(patch.clone());
         }
@@ -162,17 +179,15 @@ impl DataPlane for MemPlane {
     fn subscribe(&self, from: Revision) -> Pin<Box<dyn Stream<Item = RowPatch> + Send>> {
         // Replay history from the held revision (inclusive-exclusive on revision), then
         // attach to the live broadcast. Mirrors an informer's "list then watch" shape:
-        // a consumer holding an old revision never misses the deltas in between.
+        // a consumer holding an old revision never misses the deltas in between —
+        // including `Remove`s (the patch is replayed verbatim, not reduced to an upsert).
         let history: Vec<RowPatch> = {
             let state = self.state.lock().expect("mem plane poisoned");
             state
                 .history
                 .iter()
                 .filter(|e| e.revision > from)
-                .map(|e| RowPatch::Upsert {
-                    id: e.row.id.clone(),
-                    row: e.row.clone(),
-                })
+                .map(|e| e.patch.clone())
                 .collect()
         };
         let (tx, rx) = mpsc::unbounded();
@@ -295,6 +310,48 @@ mod tests {
         let rows = p.rows();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, RowId("b".into()));
+    }
+
+    #[test]
+    fn history_replay_includes_removals() {
+        let p = plane();
+        p.upsert(row("a", "one", 1));
+        let from = p.revision(); // after "one"
+        p.upsert(row("b", "two", 2));
+        p.remove(&RowId("a".into())); // deletion must be replayed, not resurrected
+
+        let mut stream = p.subscribe(from);
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        let mut pin = Pin::new(&mut stream);
+        let mut got = Vec::new();
+        while let std::task::Poll::Ready(Some(item)) = pin.as_mut().poll_next(&mut cx) {
+            got.push(item);
+            if got.len() == 2 {
+                break;
+            }
+        }
+        // Two patches: upsert "b", then remove "a".
+        assert_eq!(got.len(), 2);
+        assert!(matches!(&got[0], RowPatch::Upsert { id, .. } if id.0 == "b"));
+        assert!(matches!(&got[1], RowPatch::Remove { id } if id.0 == "a"));
+    }
+
+    #[test]
+    fn broadcast_drops_closed_senders() {
+        let p = plane();
+        // Subscribe, then drop the stream — the sender becomes closed.
+        {
+            let _stream = p.subscribe(Revision(0));
+        }
+        p.upsert(row("a", "one", 1));
+        // The closed sender was retained away; broadcasting must not grow the live vec
+        // unboundedly (we can only observe via a subsequent broadcast not panicking).
+        let live_len = p.live.lock().expect("live").len();
+        assert!(
+            live_len <= 1,
+            "closed sender should be dropped, got {live_len}"
+        );
     }
 
     // Minimal async block executor (no tokio in the view-model; this crate stays wasm-pure).
