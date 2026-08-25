@@ -452,3 +452,8 @@ Kaptein is **source-available** under the [Business Source License 1.1](./LICENS
 
 The exact thresholds and terms are in the [Additional Use Grant](./LICENSE) and are
 easy to adjust as the project evolves.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the architecture rules and workflow, and
+our [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) for community standards.

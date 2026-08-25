@@ -5,6 +5,9 @@ Thanks for your interest. Kaptein's core rule is simple and applies to every cha
 > **The domain layer is the product.** All logic lives in `kaptein-viewmodel`; the TUI,
 > GUI, and headless agent are thin projections and must never own business logic.
 
+All participation is governed by our [Code of Conduct](./CODE_OF_CONDUCT.md) — please
+read it before contributing.
+
 ## Architecture at a glance
 
 ```
