@@ -105,9 +105,30 @@ pub async fn recent_events(
         }));
     }
 
-    // Newest first.
+    // Newest first, then dedup.
     summaries.sort_by_key(|e| std::cmp::Reverse(e.last_timestamp_ms));
-    Ok(summaries)
+    Ok(dedup(summaries))
+}
+
+/// Deduplicate events across the two APIs. On clusters ≥1.19, `core/v1` and
+/// `events.k8s.io/v1` are two views over the *same* storage, so the same event appears
+/// in both lists. Dedup on the full identity `(namespace, kind, name, reason,
+/// last_timestamp_ms)` — preferring the entry with a real message (the modern API's
+/// `note`, vs the legacy `message` which is often the same). This prevents "always
+/// double" counting.
+fn dedup(mut events: Vec<EventSummary>) -> Vec<EventSummary> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<(String, String, String, String, i64)> = HashSet::new();
+    events.retain(|e| {
+        seen.insert((
+            e.namespace.clone(),
+            e.kind.clone(),
+            e.name.clone(),
+            e.reason.clone(),
+            e.last_timestamp_ms,
+        ))
+    });
+    events
 }
 
 /// Whether an event with `ts_ms` should be kept given the `since_ms` window: a missing
@@ -158,5 +179,41 @@ mod tests {
         v.sort_by_key(|e| std::cmp::Reverse(e.last_timestamp_ms));
         assert_eq!(v[0].name, "p2");
         assert_eq!(v[1].name, "p1");
+    }
+
+    fn ev(name: &str, reason: &str, ts: i64) -> EventSummary {
+        EventSummary {
+            namespace: "a".into(),
+            kind: "Pod".into(),
+            name: name.into(),
+            type_: "Normal".into(),
+            reason: reason.into(),
+            message: String::new(),
+            count: 1,
+            last_timestamp_ms: ts,
+        }
+    }
+
+    #[test]
+    fn dedup_removes_duplicate_events_across_apis() {
+        // The same event as seen via core/v1 and events.k8s.io/v1.
+        let v = vec![
+            ev("p1", "Started", 100),
+            ev("p1", "Started", 100),
+            ev("p2", "Started", 200),
+        ];
+        let d = dedup(v);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d.iter().filter(|e| e.name == "p1").count(), 1);
+    }
+
+    #[test]
+    fn dedup_keeps_distinct_reasons_and_timestamps() {
+        let v = vec![
+            ev("p1", "Started", 100),
+            ev("p1", "Pulled", 100),  // different reason
+            ev("p1", "Started", 101), // different timestamp
+        ];
+        assert_eq!(dedup(v).len(), 3);
     }
 }

@@ -45,19 +45,64 @@ impl KapteinMcp {
         })
     }
 
-    /// The tool's (verb, plural resource, api group) for RBAC preflight — used to refuse a
-    /// call the agent's identity is not permitted to make **before** it reaches the API
-    /// server (M1b.4 / ADR-0010). Returns `None` for tools with no RBAC-relevant resource.
-    fn preflight_target(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    /// The tool's RBAC preflight target — **derived from the call's own arguments**, not
+    /// hardcoded (M1b.4 / ADR-0010). Returns `(verb, plural_resource, api_group,
+    /// namespace)` or `None` for tools with no RBAC-relevant resource. The `gvk`
+    /// argument (group/version/kind) is mapped to its plural resource + group, and the
+    /// `namespace` argument is honored, so a `describe(gvk=v1/Secret, ns=kube-system)`
+    /// is preflighted as `get secrets` in `kube-system` — not `get pods` in `default`.
+    fn preflight_target(
+        name: &str,
+        args: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Option<(String, String, String, Option<String>)> {
+        let get = |k: &str| -> Option<String> {
+            args.and_then(|m| m.get(k))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        };
+        let namespace = get("namespace");
+
         match name {
-            "list_resources" | "get_events" => Some(("list", "pods", "")),
-            "describe" => Some(("get", "pods", "")),
-            "logs" => Some(("get", "pods/log", "")),
-            "diagnose"
-            | "explain_pod_failure"
-            | "why_is_job_pending"
-            | "blast_radius"
-            | "what_changed_between" => Some(("get", "pods", "")),
+            // list_resources / describe take an explicit `gvk`; preflight the *actual*
+            // resource and group, not a hardcoded "pods".
+            "list_resources" | "describe" | "blast_radius" => {
+                let gvk = get("gvk")?;
+                let (group, _version, kind) = parse_gvk_parts(&gvk);
+                let (plural, group) = resource_from_kind(&kind, &group);
+                let verb = if name == "list_resources" {
+                    "list"
+                } else {
+                    "get"
+                };
+                Some((verb.to_string(), plural, group, namespace))
+            }
+            // Logs: pods/log subresource, namespaced.
+            "logs" => {
+                let ns = namespace?;
+                Some((
+                    "get".to_string(),
+                    "pods/log".to_string(),
+                    String::new(),
+                    Some(ns),
+                ))
+            }
+            // Diagnostic tools are pod-scoped reads.
+            "diagnose" | "explain_pod_failure" | "why_is_job_pending" | "what_changed_between" => {
+                let ns = namespace.unwrap_or_default();
+                Some((
+                    "get".to_string(),
+                    "pods".to_string(),
+                    String::new(),
+                    Some(ns),
+                ))
+            }
+            // Events: preflight list on the events resource (namespaced).
+            "get_events" => Some((
+                "list".to_string(),
+                "events".to_string(),
+                String::new(),
+                namespace,
+            )),
             _ => None,
         }
     }
@@ -407,6 +452,60 @@ fn parse_gvk(s: &str) -> GroupVersionKind {
     }
 }
 
+/// Split a `group/version/kind` string into `(group, version, kind)` — the inverse of
+/// `parse_gvk`. Used by the RBAC preflight to map a caller's `gvk` argument to the
+/// (plural resource, api group) the `SelfSubjectRulesReview` should check.
+fn parse_gvk_parts(s: &str) -> (String, String, String) {
+    let parts: Vec<&str> = s.split('/').collect();
+    match parts.as_slice() {
+        [kind] => (String::new(), "v1".to_string(), kind.to_string()),
+        [version, kind] => (String::new(), version.to_string(), kind.to_string()),
+        [group, version, kind] => (group.to_string(), version.to_string(), kind.to_string()),
+        _ => (String::new(), "v1".to_string(), s.to_string()),
+    }
+}
+
+/// Map a resource `kind` (and group) to its RBAC `(plural_resource, api_group)`. Built-in
+/// kinds use Kubernetes' standard pluralization; anything unrecognized falls back to the
+/// lowercase kind + "s" (a conservative guess that errs toward refusing, since a wrong
+/// plural fails the preflight rather than passing).
+fn resource_from_kind(kind: &str, group: &str) -> (String, String) {
+    let plural = match kind {
+        "Pod" => "pods",
+        "Deployment" => "deployments",
+        "Service" => "services",
+        "Node" => "nodes",
+        "Namespace" => "namespaces",
+        "Secret" => "secrets",
+        "ConfigMap" => "configmaps",
+        "Job" => "jobs",
+        "CronJob" => "cronjobs",
+        "ReplicaSet" => "replicasets",
+        "DaemonSet" => "daemonsets",
+        "StatefulSet" => "statefulsets",
+        "Ingress" => "ingresses",
+        "PersistentVolumeClaim" => "persistentvolumeclaims",
+        "PersistentVolume" => "persistentvolumes",
+        "ServiceAccount" => "serviceaccounts",
+        "Role" => "roles",
+        "RoleBinding" => "rolebindings",
+        "ClusterRole" => "clusterroles",
+        "ClusterRoleBinding" => "clusterrolebindings",
+        "Event" => "events",
+        _ => {
+            // Unknown/CRD kind: naive pluralization (lowercase + "s"). CRDs define their
+            // own plural in discovery; a conservative guess still fails closed.
+            let mut s = kind.to_string();
+            if let Some(c) = s.chars().next() {
+                s.replace_range(..c.len_utf8(), &c.to_lowercase().to_string());
+            }
+            s.push('s');
+            return (s, group.to_string());
+        }
+    };
+    (plural.to_string(), group.to_string())
+}
+
 /// A per-instance, non-constant session id: unix millis rendered as lowercase hex (not a
 /// secret, just a cheap uniqueness source for audit grouping).
 fn now_ms_hex() -> String {
@@ -506,9 +605,13 @@ impl ServerHandler for KapteinMcp {
 
             // Governance gate (M1b.4): refuse the call before it reaches the API server
             // when RBAC preflight denies it (or the context is read-only). Refusals are
-            // audited as `Outcome::Rejected`, not silently dropped.
-            if let Some((verb, resource, group)) = Self::preflight_target(&name) {
-                match self.governance_check(verb, resource, group).await {
+            // audited as `Outcome::Rejected`, not silently dropped. The preflight target
+            // is derived from the call's own arguments (gvk/namespace), not hardcoded.
+            if let Some((verb, resource, group, namespace)) = Self::preflight_target(&name, args) {
+                match self
+                    .governance_check(&verb, &resource, &group, namespace.as_deref())
+                    .await
+                {
                     Ok(()) => {}
                     Err(msg) => {
                         self.audit(&name, args, kaptein_viewmodel::audit::Outcome::Rejected);
@@ -546,6 +649,7 @@ impl KapteinMcp {
         verb: &str,
         resource: &str,
         group: &str,
+        namespace: Option<&str>,
     ) -> Result<(), String> {
         // Context classification + read-only default: the MCP surface is read-only, so a
         // prod/unknown context must not permit any write verb. (All current tools are
@@ -560,8 +664,9 @@ impl KapteinMcp {
             return Err(format!("governance: {msg}"));
         }
 
-        // RBAC preflight: refuse a call the agent's own identity cannot make.
-        let namespace = "default";
+        // RBAC preflight: refuse a call the agent's own identity cannot make. The
+        // namespace comes from the call's own arguments (not a hardcoded "default").
+        let namespace = namespace.unwrap_or("default");
         let perm = kaptein_core::auth::can(&self.client, verb, resource, group, namespace)
             .await
             .map_err(|e| format!("governance: RBAC preflight failed: {e}"))?;
@@ -648,7 +753,7 @@ impl KapteinMcp {
 
 #[cfg(test)]
 mod tests {
-    use super::check_declared_version;
+    use super::{KapteinMcp, check_declared_version, parse_gvk_parts, resource_from_kind};
 
     #[test]
     fn absent_version_is_accepted() {
@@ -672,5 +777,68 @@ mod tests {
     fn unparseable_version_is_refused() {
         let err = check_declared_version(Some("banana")).unwrap_err();
         assert!(err.contains("unparseable"), "got {err:?}");
+    }
+
+    fn args(pairs: &[(&str, &str)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+            .collect()
+    }
+
+    #[test]
+    fn preflight_derives_resource_and_namespace_from_args() {
+        // describe(gvk=v1/Secret, ns=kube-system) must preflight get secrets in
+        // kube-system — not get pods in default.
+        let a = args(&[
+            ("gvk", "v1/Secret"),
+            ("namespace", "kube-system"),
+            ("name", "s1"),
+        ]);
+        let (verb, resource, group, ns) =
+            KapteinMcp::preflight_target("describe", Some(&a)).unwrap();
+        assert_eq!(verb, "get");
+        assert_eq!(resource, "secrets");
+        assert_eq!(group, "");
+        assert_eq!(ns.as_deref(), Some("kube-system"));
+    }
+
+    #[test]
+    fn preflight_maps_deployment_group() {
+        let a = args(&[("gvk", "apps/v1/Deployment"), ("namespace", "default")]);
+        let (verb, resource, group, _) =
+            KapteinMcp::preflight_target("list_resources", Some(&a)).unwrap();
+        assert_eq!(verb, "list");
+        assert_eq!(resource, "deployments");
+        assert_eq!(group, "apps");
+    }
+
+    #[test]
+    fn parse_gvk_parts_splits_all_forms() {
+        assert_eq!(
+            parse_gvk_parts("Pod"),
+            ("".into(), "v1".into(), "Pod".into())
+        );
+        assert_eq!(
+            parse_gvk_parts("v1/Secret"),
+            ("".into(), "v1".into(), "Secret".into())
+        );
+        assert_eq!(
+            parse_gvk_parts("apps/v1/Deployment"),
+            ("apps".into(), "v1".into(), "Deployment".into())
+        );
+    }
+
+    #[test]
+    fn resource_from_kind_pluralizes_builtins() {
+        assert_eq!(resource_from_kind("Pod", ""), ("pods".into(), "".into()));
+        assert_eq!(
+            resource_from_kind("Secret", ""),
+            ("secrets".into(), "".into())
+        );
+        assert_eq!(
+            resource_from_kind("Deployment", "apps"),
+            ("deployments".into(), "apps".into())
+        );
     }
 }

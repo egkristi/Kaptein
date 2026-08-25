@@ -42,7 +42,6 @@ const SENSITIVE_KEYS: &[&str] = &[
     "jwt",
     "ssh_key",
     "tls.key",
-    "ca.crt",
 ];
 
 /// Whether a resource kind holds secret data by definition.
@@ -77,6 +76,15 @@ pub fn redact_object(obj: &mut DynamicObject) {
         {
             for value in data.values_mut() {
                 *value = serde_json::Value::String(REDACTED.to_string());
+            }
+        }
+        // A Secret's metadata annotations (notably `last-applied-configuration`, which
+        // `kubectl apply` embeds as a full plaintext copy of the object) must be masked
+        // too — otherwise the plaintext leaks through `describe`/MCP even though `data`
+        // is redacted. Mask the whole annotations map value, not just its keys.
+        if let Some(annotations) = obj.metadata.annotations.as_mut() {
+            for value in annotations.values_mut() {
+                *value = REDACTED.to_string();
             }
         }
     }
@@ -193,5 +201,42 @@ mod tests {
         redact_object(&mut o);
         let s = serde_json::to_string(&o.data).unwrap();
         assert!(!s.contains("\"v\""));
+    }
+
+    #[test]
+    fn secret_annotations_are_masked() {
+        // `kubectl apply` stores the full plaintext object in the
+        // `kubectl.kubernetes.io/last-applied-configuration` annotation. A Secret
+        // described via redact must not leak it.
+        let mut o = obj(
+            "Secret",
+            json!({ "data": { "password": "c3VwZXJzZWNyZXQ=" } }),
+        );
+        o.metadata.annotations = Some(
+            [(
+                "kubectl.kubernetes.io/last-applied-configuration".to_string(),
+                "{\"kind\":\"Secret\",\"data\":{\"password\":\"c3VwZXJzZWNyZXQ=\"}}".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        redact_object(&mut o);
+        let s = serde_yaml::to_string(&o).unwrap();
+        assert!(!s.contains("c3VwZXJzZWNyZXQ"));
+        assert!(s.contains(REDACTED));
+    }
+
+    #[test]
+    fn ca_crt_is_not_masked() {
+        // A CA certificate is public; masking it is noise and makes ConfigMap describes
+        // less useful. `ca.crt` is deliberately NOT a sensitive key.
+        let mut o = obj(
+            "ConfigMap",
+            json!({ "data": { "ca.crt": "-----BEGIN CERTIFICATE-----..." } }),
+        );
+        redact_object(&mut o);
+        let s = serde_json::to_string(&o.data).unwrap();
+        assert!(s.contains("BEGIN CERTIFICATE"));
+        assert!(!s.contains(REDACTED));
     }
 }
