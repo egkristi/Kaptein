@@ -82,7 +82,7 @@ jobs:
           cp target/${{ matrix.target }}/release/kaptein-tui.exe dist/
           cd dist && 7z a ../kaptein-${{ matrix.target }}.zip kaptein.exe kaptein-tui.exe
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kaptein-${{ matrix.target }}
           path: |
@@ -103,7 +103,7 @@ jobs:
       # directory) and the tag context.
       - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
 
