@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/egkristi/Kaptein/security/advisories/new
+    about: "Do not open a public issue for security issues. Use GitHub private vulnerability reporting (see SECURITY.md)."
+  - name: Ask a question or discuss
+    url: https://github.com/egkristi/Kaptein/discussions
+    about: "Questions, ideas, and general discussion belong here rather than the issue tracker."
