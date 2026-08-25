@@ -15,10 +15,16 @@ tracker.
 | Area | Finding | Fix |
 |------|---------|-----|
 | Security | `kaptein describe`/MCP `describe` emitted plaintext Secret values | `kaptein-core::redact` masks `Secret` data + sensitive-named fields before serialization |
+| Security | Secret `metadata.annotations` (incl. `last-applied-configuration`) leaked plaintext | `redact_object` masks a Secret's annotations map |
 | Diagnostics | exit-0 Job misreported as `crash_loop` | `container_crash_finding` skips exit 0 |
 | Diagnostics | CrashLoopBackOff pod reported as `container_not_ready` | new `crash_loop_backoff` reads `last_state.terminated` |
+| Diagnostics | `ImagePullBackOff` misreported as `crash_loop_backoff` (substring) | matches only `CrashLoopBackOff`/`BackOff`; `image_pull` also fires for Running pods |
+| Events | every event reported twice (core/v1 + events.k8s.io/v1) | dedup on `(namespace, kind, name, reason, ts)` |
 | RBAC | fail-open on absent `api_groups`/`resources` | fail **closed** |
 | RBAC | subresource pattern `*/{resource}` backwards | `{resource}/*` |
+| MCP | preflight hardcoded `pods`/`default` (ignored the caller's `gvk`/`namespace`) | preflight derives (verb, resource, group, ns) from the call's own args |
+| MCP | `get_events` audited as `Operation::Logs`; `target.group` always empty | `List` op; gvk split into (group, kind) |
+| MCP | agent identity silently fell back to the operator's kubeconfig | `agent_identity_resolution()` + startup warning |
 | Moat | `blast_radius` empty for Deployments | walks Deployment → ReplicaSet → Pod |
 | Port-forward | second connection half-closed (reused stream) | fresh upstream stream per connection |
 | TUI | fabricated status column | real pod phase from `ResourceSummary.status` |
@@ -26,6 +32,22 @@ tracker.
 | TUI | double keystrokes on Windows | `KeyEventKind::Press` filter |
 | TUI | hardcoded 10-row scroll | scroll follows terminal height |
 | TUI | raw mode left broken on error | cleanup on every exit path |
+| TUI | materialized every row (50k) per frame | only the visible window is materialized |
+| TUI | command palette `quit` didn't quit | returns a signal that breaks the loop |
+| MemPlane | history replay lost deletions (resurrected removed rows) | history records full `RowPatch` |
+| MemPlane | `Vec::remove(0)` O(n) at cap | `VecDeque` |
+| MemPlane | sender leak per subscribe | closed senders dropped |
+
+## Known issues (live bugs)
+
+Per the convention above, live bugs are GitHub issues. Currently open:
+
+- **#16** `dry_run_apply_patch force:true` must not carry into the Phase 2 write path.
+- **#17** `kaptein edit` will corrupt Secrets once the write path lands (redacted values
+  round-trip as `[REDACTED]`); needs a redaction policy + `SecretViewed` audit.
+- **#18** watch reconnect: the bounded `store::watch_from` path is still unreferenced
+  (dead code) and lacks relist-on-410; `LivePlane` reconnects but the ADR-0006 store
+  does not.
 
 ## Remaining review backlog (owned by milestones)
 
@@ -69,8 +91,9 @@ unowned debt. Done items are struck through.
 
 - **PVC-binding diagnostics** need the PVC resources themselves — deferred to a Phase 3a
   rule pack (the scheduler's `PodScheduled` message is the Phase 1 signal).
-- **`blast_radius`** walks the Pod ownership chain; a full cross-kind topology scan is a
-  Phase 3a fleet feature.
+- **`blast_radius`** walks the Pod ownership chain only when `gvk.kind == "Deployment"`
+  (Deployment → ReplicaSet → Pod). StatefulSet, DaemonSet, and CronJob → Job → Pod
+  chains are **not** covered; a full cross-kind topology scan is a Phase 3a fleet feature.
 - **`dry_run_apply_patch` uses `force: true`** — correct for dry-run, but the Phase 2
   write path must **not** carry `force` forward (it would silently steal field ownership
   from Flux/Argo).

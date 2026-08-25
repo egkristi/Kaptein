@@ -91,7 +91,11 @@ Milestones:
   - `Cell::Redacted` is actually constructed (not just defined), and `Operation::SecretViewed`
     is emitted when an operator unmasks a secret
   - **DoD (falsifiable):** `kaptein describe --gvk v1/Secret` and the MCP `describe` tool
-    never emit a plaintext secret value — a test proves it.
+    never emit a plaintext secret value — a test proves it. **Redaction covers
+    `metadata.annotations` (incl. `last-applied-configuration`) and log streams** — a test
+    proves a `kubectl apply`-created Secret does not leak via its annotation, and the
+    `logs` path is redaction-aware. The `Cell::Redacted` / `SecretViewed` bullets stay
+    **open** until they have a real unmask path, not an implicit "done".
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
@@ -136,7 +140,10 @@ GitOps write path, time machine, or fleet.
     (failed calls are not logged as `Applied`)
   - **DoD (falsifiable):** a tool call the agent's ServiceAccount is not permitted to make
     is refused before it reaches the API server, and the refusal appears in the audit log
-    as `Rejected` — with a test that proves it.
+    as `Rejected` — with a test that proves it. **The preflight resource and namespace
+    are derived from the tool call's own arguments** — a test asserts
+    `describe(gvk=v1/Secret, ns=kube-system)` is refused for an agent scoped to pods in
+    `default`, and that `describe` of a pod in `default` is allowed.
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
   does not have. The M1b.4 DoD holds, not just the happy path.
@@ -160,6 +167,8 @@ Milestones:
     stops re-listing the whole cluster per keystroke
   - **DoD (falsifiable):** the TUI renders from a `DataPlane` subscription, not per-key
     `api.list` calls — and there is at least one `#[tokio::test]` exercising the store.
+    **The shipped frontend path uses the bounded/`PartialObjectMetadata` store;
+    `run_informer` has a caller outside tests** — close only when both hold.
   - **Status: done.** The render contract + informer store are fully wired.
     `kaptein-viewmodel::mem_plane::MemPlane` is a concrete `DataPlane`;
     `kaptein-viewmodel::table` owns sorting/filtering; `kaptein-core::store::InformerStore`
@@ -167,7 +176,17 @@ Milestones:
     is the `PartialObjectMetadata` path; `kaptein-integration::LivePlane` is an
     informer-backed `DataPlane` with a real `subscribe`, and the TUI renders from it
     (a background watch task applies deltas; no per-key `api.list`). A live `#[tokio::test]`
-    exercises the store/client against a cluster when `KUBECONFIG` is present.
+    exercises the store/client against a cluster when `KUBECONFIG` is present. **Note:
+    the bounded `InformerStore`/`run_informer` is still unreferenced outside tests (issue
+    #18) — the shipped TUI uses `LivePlane`, which reconnects with backoff but does not
+    use the bounded store.**
+- **M2.0c Watch resilience & informer lifecycle** *(new per re-audit — ADR-0006 is ~30 %
+  implemented)*
+  - Relist-on-410, reconnect with backoff, `WatchEvent::Error` handling, and bookmark
+    handling (partly done: `LivePlane::watch_loop` reconnects; the bounded
+    `store::watch_from` does not).
+  - The ADR-0006 subjects that have no code: lazy-per-view informers, LRU + TTL eviction,
+    and a hard cap on concurrent watches with degradation to on-demand list.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -334,7 +353,13 @@ Milestones:
   `SHA256SUMS` file on every release (elevated from the Phase 0 "stub" to a real DoD per
   review; SECURITY.md already promises it). *Cosign keyless + CycloneDX SBOM +
   `SHA256SUMS` are implemented in `.github/workflows/release.yml`; SLSA provenance
-  generation is the remaining piece.*
+  generation is the remaining piece. Open: **verifiability** — nothing documents how a
+  user verifies a signature (`cosign verify-blob --certificate-identity …
+  --certificate-oidc-issuer …`), and the SBOM job lacks `id-token: write` so it is
+  unsigned/unattested (`cosign attest` would link it to the binaries).*
+- **Release-gate hygiene** — neither `release.yml` nor `publish.yml` runs `cargo test`
+  before shipping; `publish.yml` pushes five crates on a raw tag with no `needs:` on
+  anything. Add `needs: test` to each.
 - **Redaction-aware error boundary** — `kaptein-viewmodel::Error` maps raw
   `kube::Error`/subprocess failures to user-facing messages; `kaptein-integration` is
   that boundary, not a `#[error("{0}")]` pass-through (elevated per review).
@@ -348,7 +373,10 @@ Milestones:
   incompatible major. Lens (M2.2) and WIT (M2.6) gates land with their engines.*
 - **Distribution & release sync** — a Homebrew tap, Krew plugin, container image,
   checksums, and install script, owned by a milestone; the site/README/docs stay in sync
-  with a tag (the review found five releases of drift).
+  with a tag (the review found five releases of drift). **The milestone must name the
+  artifact: a release-triggered site/README version bump** (kaptein.io currently shows
+  v0.17.0 against the repo, and offers build-from-source only despite signed binaries
+  existing).
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
   pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store

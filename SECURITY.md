@@ -95,5 +95,17 @@ plane, not a new one:
   file, with a Rekor transparency log entry per signature. **Status: implemented in
   `.github/workflows/release.yml` (review item #5).** SLSA provenance generation is the
   remaining piece of the supply-chain commitment and is tracked in ROADMAP.
+- **Verifying a release.** Each artifact ships a `.sig` (signature), `.pem` (certificate),
+  and `.bundle` (Rekor bundle). Verify against the GitHub Actions OIDC identity:
+
+  ```bash
+  cosign verify-blob <file> \
+    --signature <file>.sig \
+    --certificate <file>.pem \
+    --certificate-identity 'https://github.com/egkristi/Kaptein/.github/workflows/release.yml@refs/tags/<tag>' \
+    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+  ```
+
+  Then check the checksum: `sha256sum -c SHA256SUMS`.
 - Dependencies are minimized and pinned; scanner integrations (Trivy/Grype, etc.) are
   shelled out to, never vendored.
