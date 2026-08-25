@@ -408,6 +408,27 @@ prod/unknown contexts) a break-glass justification. Everything else is read-only
 See [`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
 [`ISSUES.md`](./ISSUES.md) for known issues; Phases 1b–3b are tracked as GitHub issues.
 
+### Install
+
+Prebuilt, signed binaries ship on every release. The fastest path is the install
+script (no `cargo` required — it downloads the binary, verifies its SHA-256 checksum
+against the release's `SHA256SUMS`, and installs to `~/.local/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
+# pick a version / install dir:
+KAPTEIN_VERSION=v0.27.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+```
+
+Alternatives:
+
+- **kubectl plugin**: `kubectl krew install kaptein` (see `krew/kaptein.yaml`).
+- **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod` (see `Dockerfile`).
+- **From source**: see *Build & test* below.
+
+Verify a downloaded artifact with cosign and checksums as described in
+[`SECURITY.md`](./SECURITY.md#verifying-a-release).
+
 ### Build & test
 
 ```bash

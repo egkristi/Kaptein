@@ -7,6 +7,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.27.0] - 2026-08-25
 
 ### Added
+- **Distribution & release sync (cross-cutting)**:
+  - `install.sh` — checksum-verified install of the signed release binaries (no `cargo`
+    required).
+  - `krew/kaptein.yaml` — Krew plugin manifest for `kubectl krew install kaptein`.
+  - `Dockerfile` — distroless static image built from the verified release tarball.
+
+### Added
 - **M2.2 — status-rule rendering (lens → render contract)**:
   - `kaptein-viewmodel::lens::render_row` maps a `ViewDefinition` + a resource into the
     render contract's `Row`/`Cell` — the "status-rule rendering" half of M2.2, shared by

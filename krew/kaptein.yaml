@@ -1,0 +1,62 @@
+# Krew plugin manifest for Kaptein — the `kubectl krew install kaptein` entry
+# point (Distribution & release sync, ROADMAP.md).
+#
+# Krew installs a *single* binary named after the plugin into
+# ~/.krew/bin/kubectl-kaptein. We ship the `kaptein` CLI (the TUI is not a kubectl
+# subcommand, so it is distributed via install.sh, not Krew).
+apiVersion: krew.googlecontainers.com/v1alpha2
+kind: Plugin
+metadata:
+  name: kaptein
+spec:
+  version: PLACEHOLDER_VERSION
+  homepage: https://kaptein.io
+  shortDescription: >-
+    A Kubernetes workbench: governed read-only access, diagnostics, and lens-driven
+    views for any CRD.
+  description: >-
+    Kaptein is a unified Kubernetes workbench — terminal UI, GUI, and headless
+    agent over one renderer-agnostic domain layer. This plugin exposes the CLI
+    (governed MCP server, diagnostics, describe/list/logs, RBAC preflight, and the
+    dry-run gated write path).
+  platforms:
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/egkristi/Kaptein/releases/download/PLACEHOLDER_VERSION/kaptein-x86_64-unknown-linux-gnu.tar.gz
+      sha256: PLACEHOLDER_LINUX_AMD64_SHA256
+      bin: kaptein
+      files:
+        - from: kaptein
+          to: .
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/egkristi/Kaptein/releases/download/PLACEHOLDER_VERSION/kaptein-aarch64-unknown-linux-gnu.tar.gz
+      sha256: PLACEHOLDER_LINUX_ARM64_SHA256
+      bin: kaptein
+      files:
+        - from: kaptein
+          to: .
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/egkristi/Kaptein/releases/download/PLACEHOLDER_VERSION/kaptein-x86_64-apple-darwin.tar.gz
+      sha256: PLACEHOLDER_DARWIN_AMD64_SHA256
+      bin: kaptein
+      files:
+        - from: kaptein
+          to: .
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/egkristi/Kaptein/releases/download/PLACEHOLDER_VERSION/kaptein-aarch64-apple-darwin.tar.gz
+      sha256: PLACEHOLDER_DARWIN_ARM64_SHA256
+      bin: kaptein
+      files:
+        - from: kaptein
+          to: .

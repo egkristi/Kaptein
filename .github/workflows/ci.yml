@@ -123,3 +123,31 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses advisories bans sources
+
+  dist:
+    name: Distribution artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          set -euo pipefail
+          # The install script must be valid bash and executable.
+          bash -n install.sh
+          test -x install.sh || { echo "install.sh must be executable"; exit 1; }
+          # The Krew plugin manifest must be valid YAML with a version + one
+          # platform entry per release target.
+          python3 - <<'PY'
+          import yaml
+          m = yaml.safe_load(open("krew/kaptein.yaml"))
+          assert m["apiVersion"].startswith("krew.googlecontainers.com"), "Krew apiVersion"
+          assert m["kind"] == "Plugin", "Krew kind"
+          assert m["spec"]["version"], "Krew version"
+          platforms = m["spec"]["platforms"]
+          assert len(platforms) == 4, f"expected 4 platforms, got {len(platforms)}"
+          for p in platforms:
+              assert p["uri"] and p["sha256"] and p["bin"], "platform uri/sha256/bin"
+          print(f"Krew manifest valid ({len(platforms)} platforms)")
+          PY
+          # The Dockerfile must be present and pin a version arg.
+          grep -q "ARG KAPTEIN_VERSION" Dockerfile || { echo "Dockerfile missing version arg"; exit 1; }
+          echo "Distribution artifacts OK"

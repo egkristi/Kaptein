@@ -75,7 +75,8 @@ unowned debt. Done items are struck through.
 7. ~~**Redaction-aware error boundary**~~ (done, commit 98a39cc): `kaptein-integration`
    maps core errors into a real enum instead of passing through.
 8. **Distribution & release sync** (cross-cutting): Homebrew/Krew/container/checksums +
-   site/docs/tag sync.
+   site/docs/tag sync. *Landed: `install.sh`, `krew/kaptein.yaml`, and `Dockerfile`; the
+   Homebrew tap and the release-triggered site/README version bump remain open.*
 9. ~~**Contract-version enforcement**~~ (done, commit 485045c): MCP server advertises the
    contract version and refuses a client whose declared `_meta["io.kaptein/apiVersion"]`
    has a different major; rule in `kaptein-viewmodel::versioned` (lens/WIT gates land

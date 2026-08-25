@@ -381,7 +381,11 @@ Milestones:
   with a tag (the review found five releases of drift). **The milestone must name the
   artifact: a release-triggered site/README version bump** (kaptein.io currently shows
   v0.17.0 against the repo, and offers build-from-source only despite signed binaries
-  existing).
+  existing). *Landed (2026-08-25): `install.sh` (checksum-verified install from the
+  signed release binaries), `krew/kaptein.yaml` (Krew plugin manifest), and a `Dockerfile`
+  (distroless static image built from the verified release tarball). Remaining: a
+  Homebrew tap, a release-triggered site/README version bump, and wiring the Krew
+  manifest into a CI publish step.*
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
   pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store
