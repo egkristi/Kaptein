@@ -5,6 +5,7 @@
 mod audit;
 mod edit;
 mod mcp;
+mod schema;
 
 use clap::{Parser, Subcommand};
 use kube::core::GroupVersionKind;
@@ -598,11 +599,9 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         Command::ViewdefSchema => {
             // The lens schema is the MIT/Apache-2.0 extension surface (ADR-0004). Emit it
             // so CI and contributors can validate lenses against the exact schema the
-            // release implements.
-            print!(
-                "{}",
-                include_str!("../../../extensions/viewdef.schema.json")
-            );
+            // release implements. Embedded (not `include_str!`) so `cargo publish`
+            // packages it correctly.
+            print!("{}", schema::VIEWDEF_SCHEMA);
             Ok(())
         }
         Command::Extension { command } => match command {
@@ -1388,7 +1387,7 @@ mod tests {
     /// validate against one version and be refused by the other. This test catches that.
     #[test]
     fn bundled_schema_api_version_matches_lens_schema_version() {
-        let schema = include_str!("../../../extensions/viewdef.schema.json");
+        let schema = crate::schema::VIEWDEF_SCHEMA;
         let value: serde_json::Value = serde_json::from_str(schema).expect("schema is valid JSON");
         let const_version = value
             .pointer("/properties/api_version/const")
@@ -1405,7 +1404,9 @@ mod tests {
     /// "reviewable in PRs" acceptance test from ADR-0012).
     #[test]
     fn example_cnpg_lens_validates_cleanly() {
-        let yaml = include_str!("../../../extensions/lens.cnpg.yaml");
+        // A minimal in-repo fixture (the canonical lens lives under `extensions/`, which
+        // `cargo publish` does not package — so the test uses an inline document).
+        let yaml = "id: com.example.cnpg-lens\napi_version: 1\ntarget: {group: postgresql.cnpg.io, version: v1, kind: Cluster}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true}]\nstatus: [{field: status.phase, op: eq, value: ClusterIsReady, level: ok}]\nactions: [{id: describe, label_key: action.describe, state: allowed}]\n";
         let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
         let vd: kaptein_viewmodel::ViewDefinition =
             serde_json::from_value(value).expect("lens deserializes");

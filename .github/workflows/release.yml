@@ -5,12 +5,25 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  test:
+    name: Test (release gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
   build:
     name: Build (${{ matrix.target }})
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -86,12 +99,16 @@ jobs:
       # OIDC token for cosign keyless signing (Fulcio/Rekor).
       id-token: write
     steps:
+      # The signing step and `gh release upload` need the repo checked out (a `.git`
+      # directory) and the tag context.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Flatten artifacts + compute checksums
         run: |
@@ -140,7 +157,7 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
       - name: Generate SBOM
-        run: cargo cyclonedx --all --format json --output-format json --spec-version 1.5
+        run: cargo cyclonedx --all --format json --spec-version 1.5
 
       - name: Upload SBOM to release
         env:
