@@ -4,6 +4,15 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-08-25
+
+### Added
+- **M2.6 — extension enable/disable lifecycle** (ADR-0004):
+  - `kaptein-core::config::Extensions` (disabled-id set) + `is_enabled` + `update_config`
+    (load-mutate-persist to the XDG TOML config).
+  - `kaptein extension enable/disable --id`; `extension list` now shows enabled/disabled
+    state.
+
 ## [0.21.0] - 2026-08-25
 
 ### Added
