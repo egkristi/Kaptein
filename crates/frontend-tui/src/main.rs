@@ -119,14 +119,22 @@ async fn run_event_loop(
     let mut namespace: Option<String> = None; // None = all namespaces
     let mut sort_key: kaptein_core::discovery::SortKey = kaptein_core::discovery::SortKey::Name;
     let mut sort_descending = false;
-    let mut rows: Vec<TableRow> = fetch(
-        client,
-        kind,
-        namespace.as_deref(),
-        sort_key,
-        sort_descending,
-    )
-    .await?;
+
+    // An informer-backed live data plane (ADR-0006): seeded once, kept fresh by a
+    // background watch task. Sorting/filtering and the table itself read the in-memory
+    // plane — the TUI does *not* re-list the cluster per keystroke.
+    let mut plane =
+        kaptein_integration::LivePlane::new(client.clone(), kind.gvk(), namespace.clone());
+    plane
+        .seed()
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let mut watch = Some(tokio::spawn({
+        let plane = plane.clone_plane();
+        async move { plane.watch_loop().await }
+    }));
+
+    let mut rows: Vec<TableRow> = query_plane(&plane, sort_key, sort_descending).await?;
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
@@ -141,6 +149,13 @@ async fn run_event_loop(
     let mut palette_query: Option<String> = None;
 
     loop {
+        // Refresh from the live plane (cheap: reads the in-memory MemPlane, applying any
+        // watch deltas that have landed since the last frame). No API call per keystroke.
+        // Skipped while fuzzy-jump mode is active (its filtered `rows` is authoritative).
+        if jump_query.is_none() && palette_query.is_none() {
+            rows = query_plane(&plane, sort_key, sort_descending).await?;
+        }
+
         let status_line = if let Some(q) = palette_query.as_deref() {
             let matches = palette_matches(q);
             format!(
@@ -280,6 +295,8 @@ async fn run_event_loop(
                             &mut namespace,
                             &mut sort_key,
                             &mut sort_descending,
+                            &mut plane,
+                            &mut watch,
                             &mut rows,
                             &mut selected,
                             &mut scroll,
@@ -311,55 +328,25 @@ async fn run_event_loop(
                 }
                 KeyCode::Tab if palette_query.is_none() => {
                     kind = kind.next();
-                    rows = fetch(
-                        client,
-                        kind,
-                        namespace.as_deref(),
-                        sort_key,
-                        sort_descending,
-                    )
-                    .await?;
+                    rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
                     selected = 0;
                     scroll = 0;
                     detail = None;
                 }
                 KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
-                    rows = fetch(
-                        client,
-                        kind,
-                        namespace.as_deref(),
-                        sort_key,
-                        sort_descending,
-                    )
-                    .await?;
+                    rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
                     selected = 0;
                     scroll = 0;
                     detail = None;
                 }
                 KeyCode::Char('s') if palette_query.is_none() => {
                     sort_key = next_sort_key(sort_key);
-                    rows = fetch(
-                        client,
-                        kind,
-                        namespace.as_deref(),
-                        sort_key,
-                        sort_descending,
-                    )
-                    .await?;
                     selected = 0;
                     scroll = 0;
                 }
                 KeyCode::Char('S') if palette_query.is_none() => {
                     sort_descending = !sort_descending;
-                    rows = fetch(
-                        client,
-                        kind,
-                        namespace.as_deref(),
-                        sort_key,
-                        sort_descending,
-                    )
-                    .await?;
                     selected = 0;
                     scroll = 0;
                 }
@@ -415,55 +402,6 @@ async fn run_event_loop(
     }
 
     Ok(())
-}
-
-async fn fetch(
-    client: &Client,
-    kind: Kind,
-    namespace: Option<&str>,
-    sort_key: kaptein_core::discovery::SortKey,
-    descending: bool,
-) -> io::Result<Vec<TableRow>> {
-    // The TUI consumes the render contract through the integration layer's DataPlane
-    // (ADR-0005 / M2.0), not `discovery::list_with` directly. Sorting/filtering happen in
-    // the view-model; this function only maps a `Page` of `Row`s to geometry-local rows.
-    let gvk = kind.gvk();
-    let plane = kaptein_integration::KubernetesPlane::new(
-        client.clone(),
-        gvk.clone(),
-        namespace.map(|s| s.to_string()),
-    );
-    let sort_column = match sort_key {
-        kaptein_core::discovery::SortKey::Name => "name",
-        kaptein_core::discovery::SortKey::Namespace => "namespace",
-        kaptein_core::discovery::SortKey::Kind => "kind",
-        kaptein_core::discovery::SortKey::Created => "created",
-    };
-    let page = kaptein_integration::kaptein_viewmodel::DataPlane::query(
-        &plane,
-        &kaptein_integration::kaptein_viewmodel::Query {
-            start: 0,
-            end: 50_000,
-            sort: Some(kaptein_integration::kaptein_viewmodel::SortSpec {
-                column: sort_column.to_string(),
-                descending,
-            }),
-            filter: None,
-        },
-    )
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
-
-    Ok(page
-        .rows
-        .into_iter()
-        .map(|r| TableRow {
-            name: cell_text(&r.cells, 0),
-            namespace: cell_text(&r.cells, 1),
-            status: cell_text(&r.cells, 2),
-            created: timestamp_text(&r.cells, 3),
-        })
-        .collect())
 }
 
 /// Extract a cell's display text by column index (geometry-local mapping of the
@@ -599,17 +537,24 @@ async fn execute_command(
     namespace: &mut Option<String>,
     sort_key: &mut kaptein_core::discovery::SortKey,
     sort_descending: &mut bool,
+    plane: &mut kaptein_integration::LivePlane,
+    watch: &mut Option<
+        tokio::task::JoinHandle<Result<usize, kaptein_integration::IntegrationError>>,
+    >,
     rows: &mut Vec<TableRow>,
     selected: &mut usize,
     scroll: &mut usize,
     detail: &mut Option<String>,
 ) -> io::Result<()> {
+    let mut need_rebuild = false;
     match cmd {
         PaletteCommand::NextKind => {
             *kind = kind.next();
+            need_rebuild = true;
         }
         PaletteCommand::NextNamespace => {
             *namespace = cycle_namespace(client, namespace.clone()).await?;
+            need_rebuild = true;
         }
         PaletteCommand::CycleSort => {
             *sort_key = next_sort_key(*sort_key);
@@ -639,19 +584,80 @@ async fn execute_command(
             return Ok(());
         }
     }
-    // Re-fetch for commands that changed the view (kind/namespace/sort).
-    *rows = fetch(
-        client,
-        *kind,
-        namespace.as_deref(),
-        *sort_key,
-        *sort_descending,
-    )
-    .await?;
+    if need_rebuild {
+        rebuild_plane(client, plane, watch, *kind, namespace.clone()).await?;
+    }
+    // Re-query the (possibly rebuilt) live plane — no new API list.
+    *rows = query_plane(plane, *sort_key, *sort_descending).await?;
     *selected = 0;
     *scroll = 0;
     *detail = None;
     Ok(())
+}
+
+/// Rebuild the live plane for a new (kind, namespace) and restart the watch task.
+/// Sorting/filtering are re-applied by `query_plane` without a new API list.
+async fn rebuild_plane(
+    client: &Client,
+    plane: &mut kaptein_integration::LivePlane,
+    watch: &mut Option<
+        tokio::task::JoinHandle<Result<usize, kaptein_integration::IntegrationError>>,
+    >,
+    kind: Kind,
+    namespace: Option<String>,
+) -> io::Result<()> {
+    // Stop the old watch task (best-effort; the stream ends on abort).
+    if let Some(handle) = watch.take() {
+        handle.abort();
+    }
+    *plane = kaptein_integration::LivePlane::new(client.clone(), kind.gvk(), namespace);
+    plane
+        .seed()
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    *watch = Some(tokio::spawn({
+        let p = plane.clone_plane();
+        async move { p.watch_loop().await }
+    }));
+    Ok(())
+}
+
+/// Query the live plane (sort + filter in the view-model, window in the data plane) and
+/// map the resulting `Page` of `Row`s into geometry-local table rows.
+async fn query_plane(
+    plane: &kaptein_integration::LivePlane,
+    sort_key: kaptein_core::discovery::SortKey,
+    descending: bool,
+) -> io::Result<Vec<TableRow>> {
+    let sort_column = match sort_key {
+        kaptein_core::discovery::SortKey::Name => "name",
+        kaptein_core::discovery::SortKey::Namespace => "namespace",
+        kaptein_core::discovery::SortKey::Kind => "kind",
+        kaptein_core::discovery::SortKey::Created => "created",
+    };
+    use kaptein_integration::kaptein_viewmodel::DataPlane as _;
+    let page = plane
+        .query(&kaptein_integration::kaptein_viewmodel::Query {
+            start: 0,
+            end: 50_000,
+            sort: Some(kaptein_integration::kaptein_viewmodel::SortSpec {
+                column: sort_column.to_string(),
+                descending,
+            }),
+            filter: None,
+        })
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(page
+        .rows
+        .into_iter()
+        .map(|r| TableRow {
+            name: cell_text(&r.cells, 0),
+            namespace: cell_text(&r.cells, 1),
+            status: cell_text(&r.cells, 2),
+            created: timestamp_text(&r.cells, 3),
+        })
+        .collect())
 }
 
 async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result<Option<String>> {

@@ -1208,10 +1208,13 @@ version = "0.18.0"
 dependencies = [
  "async-trait",
  "futures-util",
+ "k8s-openapi",
  "kaptein-core",
  "kaptein-viewmodel",
  "kube",
+ "serde_json",
  "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

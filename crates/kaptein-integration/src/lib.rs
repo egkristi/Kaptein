@@ -89,6 +89,7 @@ pub use kaptein_core;
 /// Re-export the view-model so a frontend depends on exactly one integration crate for
 /// both the render contract (`DataPlane`, `Row`, `Cell`, `Query`) and the core binding.
 pub use kaptein_viewmodel;
+use kube::ResourceExt as _;
 
 /// Build a Kubernetes client for the default context.
 pub async fn client() -> Result<kube::Client, IntegrationError> {
@@ -206,10 +207,167 @@ impl kaptein_viewmodel::DataPlane for KubernetesPlane {
         _from: kaptein_viewmodel::Revision,
     ) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = kaptein_viewmodel::RowPatch> + Send>>
     {
-        // The live informer subscription is wired by `KubernetesPlane`'s caller via the
-        // core store; the network `DataPlane` (`serve`/gRPC-Web) provides this. For the
-        // TUI MVP, `query` is authoritative and there are no live deltas.
+        // The one-shot `KubernetesPlane` has no live deltas; `LivePlane` (below) provides
+        // the informer-backed subscription.
         Box::pin(futures_util::stream::empty())
+    }
+}
+
+/// Map a watch event over a `DynamicObject` into a `RowPatch`, using the same
+/// `ResourceSummary` → `Row` mapping as `resource_row`. Bookmarks and errors produce no
+/// patch (they carry no resource change).
+fn watch_event_to_patch(
+    event: &kube::api::WatchEvent<kube::core::DynamicObject>,
+    gvk: &kube::core::GroupVersionKind,
+) -> Option<kaptein_viewmodel::RowPatch> {
+    match event {
+        kube::api::WatchEvent::Added(obj) | kube::api::WatchEvent::Modified(obj) => {
+            let row = resource_row(kaptein_core::discovery::summary_of(obj, gvk));
+            Some(kaptein_viewmodel::RowPatch::Upsert {
+                id: row.id.clone(),
+                row,
+            })
+        }
+        kube::api::WatchEvent::Deleted(obj) => {
+            let id = obj.metadata.uid.clone().unwrap_or_else(|| obj.name_any());
+            Some(kaptein_viewmodel::RowPatch::Remove {
+                id: kaptein_viewmodel::RowId(id),
+            })
+        }
+        kube::api::WatchEvent::Bookmark(_) | kube::api::WatchEvent::Error(_) => None,
+    }
+}
+
+/// A `DataPlane` that is **informer-backed and live**: it seeds a `MemPlane` from a
+/// bounded list, then a background watch task applies `Added`/`Modified`/`Deleted`
+/// deltas as `RowPatch` upserts/removes. `query` reads the live `MemPlane` (no API call
+/// per keystroke) and `subscribe` streams real deltas — the ADR-0006 "informer-based,
+/// never polling" shape for the TUI.
+pub struct LivePlane {
+    mem: kaptein_viewmodel::MemPlane,
+    client: kube::Client,
+    gvk: kube::core::GroupVersionKind,
+    namespace: Option<String>,
+}
+
+impl Clone for LivePlane {
+    /// Clone shares the same in-memory `MemPlane` and Kubernetes client — two handles to
+    /// one live data plane (the watch task and the TUI both hold a handle).
+    fn clone(&self) -> Self {
+        Self {
+            mem: self.mem.clone(),
+            client: self.client.clone(),
+            gvk: self.gvk.clone(),
+            namespace: self.namespace.clone(),
+        }
+    }
+}
+
+impl LivePlane {
+    /// Create a live plane for `group/version/kind`.
+    pub fn new(
+        client: kube::Client,
+        gvk: kube::core::GroupVersionKind,
+        namespace: Option<String>,
+    ) -> Self {
+        let mem = kaptein_viewmodel::MemPlane::new(kaptein_viewmodel::Schema {
+            column_ids: RESOURCE_COLUMNS.iter().map(|s| s.to_string()).collect(),
+        });
+        Self {
+            mem,
+            client,
+            gvk,
+            namespace,
+        }
+    }
+
+    /// A convenience alias for `Clone::clone` (the TUI holds two handles: one for the
+    /// watch task, one for querying).
+    pub fn clone_plane(&self) -> Self {
+        self.clone()
+    }
+
+    /// The underlying `MemPlane` (exposed for tests).
+    pub fn mem(&self) -> &kaptein_viewmodel::MemPlane {
+        &self.mem
+    }
+
+    /// Seed the plane from a bounded list (the "list" half of list-then-watch). The
+    /// caller then runs `watch_loop` on a background task to apply live deltas.
+    pub async fn seed(&self) -> Result<usize, IntegrationError> {
+        let summaries =
+            kaptein_core::discovery::list(&self.client, &self.gvk, self.namespace.as_deref())
+                .await?;
+        let count = summaries.len();
+        for s in summaries {
+            let row = resource_row(s);
+            self.mem.upsert(row);
+        }
+        Ok(count)
+    }
+
+    /// Run the watch loop until the stream ends, applying deltas to the `MemPlane`.
+    /// This is the "watch" half — drive it on a `tokio::spawn`ed task. Returns the
+    /// number of deltas applied.
+    pub async fn watch_loop(&self) -> Result<usize, IntegrationError> {
+        let ar = kube::core::ApiResource::from_gvk(&self.gvk);
+        let api: kube::Api<kube::core::DynamicObject> = match self.namespace.as_deref() {
+            Some(ns) => kube::Api::namespaced_with(self.client.clone(), ns, &ar),
+            None => kube::Api::all_with(self.client.clone(), &ar),
+        };
+        let list = api
+            .list(&kube::api::ListParams::default())
+            .await
+            .map_err(kaptein_core::Error::Api)?;
+        let rv = list
+            .metadata
+            .resource_version
+            .clone()
+            .unwrap_or_else(|| "0".to_string());
+        let mut stream = Box::pin(
+            api.watch(&kube::api::WatchParams::default(), &rv)
+                .await
+                .map_err(kaptein_core::Error::Api)?,
+        );
+        let mut applied = 0usize;
+        use futures_util::StreamExt;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(ev) => {
+                    if let Some(patch) = watch_event_to_patch(&ev, &self.gvk) {
+                        match patch {
+                            kaptein_viewmodel::RowPatch::Upsert { row, .. } => {
+                                self.mem.upsert(row);
+                            }
+                            kaptein_viewmodel::RowPatch::Remove { id } => {
+                                self.mem.remove(&id);
+                            }
+                        }
+                        applied += 1;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        Ok(applied)
+    }
+}
+
+#[async_trait::async_trait]
+impl kaptein_viewmodel::DataPlane for LivePlane {
+    async fn query(
+        &self,
+        query: &kaptein_viewmodel::Query,
+    ) -> Result<kaptein_viewmodel::Page, kaptein_viewmodel::Error> {
+        self.mem.query(query).await
+    }
+
+    fn subscribe(
+        &self,
+        from: kaptein_viewmodel::Revision,
+    ) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = kaptein_viewmodel::RowPatch> + Send>>
+    {
+        self.mem.subscribe(from)
     }
 }
 
@@ -250,5 +408,127 @@ mod tests {
             }
             _ => panic!("expected External variant"),
         }
+    }
+
+    fn pod_obj(name: &str, ns: &str, uid: &str) -> kube::core::DynamicObject {
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+        kube::core::DynamicObject {
+            types: Some(kube::core::TypeMeta {
+                api_version: "v1".into(),
+                kind: "Pod".into(),
+            }),
+            metadata: ObjectMeta {
+                name: Some(name.into()),
+                namespace: Some(ns.into()),
+                uid: Some(uid.into()),
+                ..Default::default()
+            },
+            data: serde_json::json!({"status": {"phase": "Running"}}),
+        }
+    }
+
+    fn pod_gvk() -> kube::core::GroupVersionKind {
+        kube::core::GroupVersionKind::gvk("", "v1", "Pod")
+    }
+
+    #[test]
+    fn watch_event_added_maps_to_upsert() {
+        let obj = pod_obj("p", "ns", "uid-1");
+        let patch = watch_event_to_patch(&kube::api::WatchEvent::Added(obj), &pod_gvk())
+            .expect("added -> patch");
+        match patch {
+            kaptein_viewmodel::RowPatch::Upsert { id, row } => {
+                assert_eq!(id.0, "uid-1");
+                assert_eq!(kaptein_viewmodel::cell_text(&row.cells[0]), "p");
+            }
+            _ => panic!("expected upsert"),
+        }
+    }
+
+    #[test]
+    fn watch_event_deleted_maps_to_remove_by_uid() {
+        let obj = pod_obj("p", "ns", "uid-9");
+        let patch = watch_event_to_patch(&kube::api::WatchEvent::Deleted(obj), &pod_gvk())
+            .expect("deleted -> patch");
+        match patch {
+            kaptein_viewmodel::RowPatch::Remove { id } => assert_eq!(id.0, "uid-9"),
+            _ => panic!("expected remove"),
+        }
+    }
+
+    #[test]
+    fn bookmark_and_error_map_to_none() {
+        let bookmark = kube::api::WatchEvent::Bookmark(kube::core::watch::Bookmark {
+            types: kube::core::TypeMeta::default(),
+            metadata: kube::core::watch::BookmarkMeta {
+                resource_version: "1".into(),
+                annotations: Default::default(),
+            },
+        });
+        assert!(watch_event_to_patch(&bookmark, &pod_gvk()).is_none());
+        let err = kube::api::WatchEvent::Error(Box::<kube::core::Status>::default());
+        assert!(watch_event_to_patch(&err, &pod_gvk()).is_none());
+    }
+
+    #[test]
+    fn resource_row_uses_uid_as_stable_id() {
+        let summary = kaptein_core::discovery::ResourceSummary {
+            name: "p".into(),
+            namespace: "ns".into(),
+            kind: "Pod".into(),
+            uid: Some("uid-7".into()),
+            created: None,
+            status: "Running".into(),
+        };
+        let row = resource_row(summary);
+        assert_eq!(row.id.0, "uid-7");
+        assert!(matches!(
+            row.cells[2],
+            kaptein_viewmodel::Cell::Status { .. }
+        ));
+    }
+
+    /// A live integration test (skipped without a cluster): seeds a `LivePlane` from the
+    /// real API server and asserts the informer-backed data plane returns a real page.
+    /// This is the "real kube client" tier the review flagged as missing, gated on
+    /// `KUBECONFIG` so it is safe in CI without a cluster.
+    #[tokio::test]
+    async fn live_plane_seeds_from_cluster_when_available() {
+        if std::env::var_os("KUBECONFIG").is_none() {
+            eprintln!("skipping live_plane_seeds_from_cluster_when_available: no KUBECONFIG");
+            return;
+        }
+        let client = match kaptein_core::discovery::client().await {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("skipping: cluster unreachable");
+                return;
+            }
+        };
+        let plane = LivePlane::new(
+            client,
+            kube::core::GroupVersionKind::gvk("", "v1", "Namespace"),
+            None,
+        );
+        let seeded = plane.seed().await.expect("seed");
+        assert!(
+            seeded > 0,
+            "a live cluster must have at least one namespace"
+        );
+        use kaptein_viewmodel::DataPlane as _;
+        let page = plane
+            .query(&kaptein_viewmodel::Query {
+                start: 0,
+                end: 10,
+                sort: Some(kaptein_viewmodel::SortSpec {
+                    column: "name".into(),
+                    descending: false,
+                }),
+                filter: None,
+            })
+            .await
+            .expect("query");
+        assert_eq!(page.total, seeded);
+        assert!(!page.rows.is_empty());
     }
 }

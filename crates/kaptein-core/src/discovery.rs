@@ -167,7 +167,7 @@ pub async fn list(
 }
 
 /// Convert a `DynamicObject` into a display-neutral `ResourceSummary`.
-pub(crate) fn summary_of(obj: &DynamicObject, gvk: &GroupVersionKind) -> ResourceSummary {
+pub fn summary_of(obj: &DynamicObject, gvk: &GroupVersionKind) -> ResourceSummary {
     let kind = obj
         .types
         .as_ref()
