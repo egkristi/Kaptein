@@ -138,7 +138,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Attach binaries, checksums, and cosign signature bundles.
+          # A tag push does not create a GitHub release on its own — create it
+          # (idempotent: `|| true` tolerates an already-existing release), then
+          # attach binaries, checksums, and cosign signature bundles.
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" \
+            --generate-notes || true
           gh release upload "${GITHUB_REF_NAME}" \
             *.tar.gz *.zip SHA256SUMS *.bundle --clobber
 
@@ -174,22 +178,26 @@ jobs:
 
       # Sign the SBOM so it can be verified against the same GitHub Actions OIDC
       # identity as the binaries (SECURITY.md's "Verifying a release" section).
+      # `cargo cyclonedx` writes per-crate `*.cdx.json` files under `target/`, so
+      # we sign them in place (recursively) rather than relying on a top-level glob.
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.2
       - name: Sign SBOM with cosign (keyless)
         run: |
           set -euo pipefail
-          for f in *.cdx.json; do
+          while IFS= read -r -d '' f; do
             cosign sign-blob --yes --bundle "$f.bundle" "$f"
-          done
+          done < <(find . -name '*.cdx.json' -print0)
 
       - name: Upload SBOM (and signature) to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          find . -maxdepth 1 -name '*.cdx.json' -print0 \
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" \
+            --generate-notes || true
+          find . -name '*.cdx.json' -print0 \
             | xargs -0 -I{} gh release upload "${GITHUB_REF_NAME}" {} --clobber
-          find . -maxdepth 1 -name '*.cdx.json.bundle' -print0 \
+          find . -name '*.cdx.json.bundle' -print0 \
             | xargs -0 -I{} gh release upload "${GITHUB_REF_NAME}" {} --clobber
 
   provenance:
