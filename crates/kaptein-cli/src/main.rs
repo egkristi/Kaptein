@@ -35,6 +35,9 @@ enum Command {
         /// case-insensitive substring filter on name/namespace/kind
         #[arg(short, long)]
         filter: Option<String>,
+        /// list metadata only (PartialObjectMetadata — no full object bodies)
+        #[arg(long)]
+        metadata: bool,
         /// kubeconfig context to use (context switching)
         #[arg(long)]
         context: Option<String>,
@@ -382,6 +385,7 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             sort,
             descending,
             filter,
+            metadata,
             context,
         } => {
             let gvk = parse_gvk(&gvk);
@@ -394,15 +398,38 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
                 None => client.clone(),
             };
-            let items = kaptein_core::discovery::list_with(
-                &client,
-                &gvk,
-                namespace.as_deref(),
-                sort_key,
-                descending,
-                filter.as_deref(),
-            )
-            .await?;
+            // Metadata-only listing (ADR-0006) is the bounded, cheap path for
+            // list-heavy views: the API server returns `metadata` only.
+            let items = if metadata {
+                let mut all = Vec::new();
+                let mut token: Option<String> = None;
+                loop {
+                    let (page, next) = kaptein_core::discovery::list_metadata_bounded(
+                        &client,
+                        &gvk,
+                        namespace.as_deref(),
+                        500,
+                        token.as_deref(),
+                    )
+                    .await?;
+                    all.extend(page);
+                    match next {
+                        Some(t) => token = Some(t),
+                        None => break,
+                    }
+                }
+                all
+            } else {
+                kaptein_core::discovery::list_with(
+                    &client,
+                    &gvk,
+                    namespace.as_deref(),
+                    sort_key,
+                    descending,
+                    filter.as_deref(),
+                )
+                .await?
+            };
             for item in items {
                 let created = item.created.map(|t| t.0.to_string()).unwrap_or_default();
                 println!(

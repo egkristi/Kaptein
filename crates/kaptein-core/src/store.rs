@@ -95,6 +95,23 @@ impl InformerStore {
         list.items.len()
     }
 
+    /// Seed from already-summarized items (metadata-only lists reduce to summaries
+    /// without going through `DynamicObject`). Returns the count.
+    pub fn seed_summaries(&self, summaries: Vec<crate::discovery::ResourceSummary>) -> usize {
+        let mut inner = self.inner.lock().expect("store poisoned");
+        let count = summaries.len();
+        for s in summaries {
+            let key = if s.namespace.is_empty() {
+                s.name.clone()
+            } else {
+                format!("{}/{}", s.namespace, s.name)
+            };
+            inner.items.insert(key, s);
+        }
+        inner.revision += 1;
+        count
+    }
+
     /// A snapshot of the current items (order unspecified — the view-model sorts).
     pub fn snapshot(&self) -> Vec<crate::discovery::ResourceSummary> {
         self.inner
@@ -134,8 +151,9 @@ fn row_key(obj: &DynamicObject) -> RowKey {
 
 /// Run the list-then-watch loop for a resource kind into the store, until the watch ends
 /// (caller drives this with a timeout or Ctrl-C). This is the informer-backed form of
-/// `watchring::watch_into_ring`: it seeds the store from a bounded `list`, then applies
-/// watch deltas. Returns the number of watch events applied (the seed is not counted).
+/// `watchring::watch_into_ring`: it seeds the store from a bounded, **metadata-only**
+/// list (ADR-0006 `PartialObjectMetadata`), then applies watch deltas. Returns the
+/// number of watch events applied (the seed is not counted).
 pub async fn run_informer(
     client: &Client,
     gvk: &GroupVersionKind,
@@ -149,17 +167,35 @@ pub async fn run_informer(
         None => Api::all_with(client.clone(), &ar),
     };
 
-    // 1. Seed from a bounded list (continue-token paging so a large kind is bounded).
+    // 1. Seed from a bounded, metadata-only list (continue-token paging). Metadata-only
+    //    keeps the seed cheap for list-heavy views (ADR-0006); the watch stream that
+    //    follows carries full objects so status is available for the current view.
     let mut continue_token: Option<String> = None;
     loop {
-        let mut lp = ListParams::default().limit(limit.max(1));
-        if let Some(token) = &continue_token {
-            lp = lp.continue_token(token);
-        }
-        let page: ObjectList<DynamicObject> = api.list(&lp).await.map_err(Error::Api)?;
-        let rv = page.metadata.resource_version.clone();
-        let next = page.metadata.continue_.clone();
-        store.seed(page, gvk);
+        let (summaries, next, rv) = {
+            let mut lp = ListParams::default().limit(limit.max(1));
+            if let Some(token) = &continue_token {
+                lp = lp.continue_token(token);
+            }
+            let list: ObjectList<kube::core::PartialObjectMeta<DynamicObject>> =
+                api.list_metadata(&lp).await.map_err(Error::Api)?;
+            let rv = list.metadata.resource_version.clone();
+            let next = list.metadata.continue_.clone();
+            let summaries: Vec<crate::discovery::ResourceSummary> = list
+                .into_iter()
+                .map(|meta| crate::discovery::ResourceSummary {
+                    name: meta.name_any(),
+                    namespace: meta.namespace().unwrap_or_default(),
+                    kind: gvk.kind.clone(),
+                    uid: meta.metadata.uid.clone(),
+                    created: meta.metadata.creation_timestamp.clone(),
+                    status: String::new(),
+                })
+                .collect();
+            (summaries, next, rv)
+        };
+
+        store.seed_summaries(summaries);
         match next {
             Some(next) => continue_token = Some(next),
             None => {
@@ -248,6 +284,28 @@ mod tests {
 
         // Apply an add (upsert).
         store.apply(&WatchEvent::Added(obj("c", "ns")), &gvk());
+        assert_eq!(store.len(), 2);
+    }
+
+    #[test]
+    fn seed_summaries_keys_by_namespace_name() {
+        let store = InformerStore::new();
+        let summary = |name: &str, ns: &str| crate::discovery::ResourceSummary {
+            name: name.into(),
+            namespace: ns.into(),
+            kind: "Pod".into(),
+            uid: None,
+            created: None,
+            status: String::new(),
+        };
+        let n = store.seed_summaries(vec![summary("a", "ns"), summary("b", "")]);
+        assert_eq!(n, 2);
+        assert_eq!(store.len(), 2);
+        // Namespaced "a" and cluster-scoped "b" have distinct keys, so both survive.
+        let snap = store.snapshot();
+        assert_eq!(snap.len(), 2);
+        // Re-seeding the same identity is an upsert, not a duplicate.
+        store.seed_summaries(vec![summary("a", "ns")]);
         assert_eq!(store.len(), 2);
     }
 

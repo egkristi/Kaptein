@@ -8,7 +8,7 @@
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use kube::api::{Api, DynamicObject, ListParams, ObjectList};
 use kube::config::KubeConfigOptions;
-use kube::core::{ApiResource, GroupVersionKind};
+use kube::core::{ApiResource, GroupVersionKind, PartialObjectMeta};
 use kube::{Client, Config, ResourceExt};
 
 use crate::Error;
@@ -212,6 +212,53 @@ pub async fn list_bounded(
         list.into_iter().map(|obj| summary_of(&obj, gvk)).collect(),
         next,
     ))
+}
+
+/// A bounded, **metadata-only** page of summaries (ADR-0006: `PartialObjectMetadata`
+/// for list-heavy views). Uses the `application/json;as=PartialObjectMetadataList`
+/// accept header so the API server returns only `metadata` — no full object bodies — for
+/// views that need name/namespace/kind/age/status but not the whole spec. This is what
+/// keeps a 50 000-object view bounded without materializing every object.
+pub async fn list_metadata_bounded(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    limit: u32,
+    continue_token: Option<&str>,
+) -> Result<(Vec<ResourceSummary>, Option<String>), Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let mut lp = ListParams::default().limit(limit.max(1));
+    if let Some(token) = continue_token {
+        lp = lp.continue_token(token);
+    }
+
+    // `PartialObjectMeta<DynamicObject>` carries `types` + `metadata` only.
+    let list: ObjectList<PartialObjectMeta<DynamicObject>> =
+        api.list_metadata(&lp).await.map_err(Error::Api)?;
+    let next = list.metadata.continue_.clone();
+    let summaries = list
+        .into_iter()
+        .map(|meta| {
+            // A metadata-only object has no `.status`/`.data`; status is empty (the
+            // frontend falls back to a kind-appropriate placeholder). `uid`/`created`
+            // come from the metadata itself. The API server erases the kind to
+            // `PartialObjectMetadata`, so restore the *requested* kind for display.
+            ResourceSummary {
+                name: meta.name_any(),
+                namespace: meta.namespace().unwrap_or_default(),
+                kind: gvk.kind.clone(),
+                uid: meta.metadata.uid.clone(),
+                created: meta.metadata.creation_timestamp.clone(),
+                status: String::new(),
+            }
+        })
+        .collect();
+    Ok((summaries, next))
 }
 
 /// A sort key for a `ResourceSummary` column.
