@@ -34,9 +34,12 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          # `security-and-quality` is stricter than the default suite: it includes
-          # security queries plus high-confidence correctness/quality queries.
-          queries: security-and-quality
+          # `security-extended` is the right suite here: clippy (`-D warnings`) already
+          # owns Rust *quality* linting (unused variables, etc.), so CodeQL's
+          # security-and-quality suite would only duplicate that with a noisier, newer
+          # Rust analysis that produces false positives (e.g. rust/unused-variable).
+          # CodeQL is the *security* net; clippy is the *quality* net.
+          queries: security-extended
           # Autodetect the Rust build; the runner's rustup honors rust-toolchain.toml
           # (pinned to the MSRV), so the scan matches the shipped toolchain.
           config: |
