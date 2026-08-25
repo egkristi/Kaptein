@@ -182,15 +182,15 @@ Milestones:
   cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative
   - Ship a versioned JSON Schema (and/or CUE schema) for view definitions plus a
     `kaptein viewdef validate` command so lenses are reviewable in PRs
-  - **Status: schema + validation landed** (commit 979cae7 → next). `kaptein-viewmodel::lens`
+  - **Status: schema + validation + lifecycle landed.** `kaptein-viewmodel::lens`
     defines the versioned lens data model (`ViewDefinition`, `GroupVersionKind`,
-    `StatusRule`/`RuleOp`, `LensAction`) and `validate_viewdef` (id/api_version/columns/
-    status/actions); `kaptein viewdef validate -f` parses a lens (YAML/JSON) and reports
-    problems; an example CNPG lens ships under `extensions/` (MIT/Apache-2.0). Also
-    shipped: the JSON Schema (`extensions/viewdef.schema.json` + `kaptein viewdef schema`),
-    `evaluate_status` (field-path resolution + rule evaluation), and the `extension.yaml`
-    manifest + `kaptein extension {list,validate}` lifecycle (ADR-0004). Remaining:
-    status-rule *rendering* in a frontend and the enable/disable state store.
+    `StatusRule`/`RuleOp`, `LensAction`), `validate_viewdef`, and `evaluate_status`
+    (field-path resolution + rule evaluation); `kaptein viewdef validate -f` parses a
+    lens and reports problems; `kaptein viewdef schema` emits the JSON Schema; the
+    `extension.yaml` manifest + `kaptein extension {list,validate,enable,disable}`
+    lifecycle (ADR-0004) are implemented; an example CNPG lens ships under
+    `extensions/` (MIT/Apache-2.0). Remaining: status-rule *rendering* in a frontend and
+    shipping the Strimzi/KubeVirt/cert-manager/etc. lens set.
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile
@@ -218,6 +218,9 @@ Milestones:
     memory cap, default-deny network/FS)
   - Extension manifest loader + discovery from Git-backed paths; `kaptein extension`
     lifecycle subcommands (validate, list, enable, disable)
+    *Manifest loader + discovery + full lifecycle (`list`/`validate`/`enable`/`disable`)
+    are implemented (`kaptein-core::extension` + `kaptein-core::config::Extensions`).
+    The WASM host + WIT worlds (tier 2) remain, gated on real lenses existing first.*
   - `ext-sdk/` authoring crate (manifest types, WIT worlds, host imports) with a
     versioning + deprecation policy so plugins don't break across releases
   - First example extensions: a lens, a WASM plugin, and a shell-out integration
