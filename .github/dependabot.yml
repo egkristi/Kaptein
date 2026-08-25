@@ -1,16 +1,48 @@
 version: 2
 updates:
+  # Rust (cargo) dependencies — the whole workspace lives at the repo root.
+  # `versioning-strategy: lockfile-only` keeps Cargo.toml manifests as the source
+  # of truth and only updates Cargo.lock, so Dependabot doesn't churn the
+  # workspace.package version pins (the crates use `version.workspace = true`).
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+    versioning-strategy: "lockfile-only"
     open-pull-requests-limit: 10
     labels:
-      - dependencies
+      - "dependencies"
+      - "cargo"
+    commit-message:
+      prefix: "cargo"
+      include: "scope"
+    groups:
+      # One PR for all patch/minor updates instead of one per crate, to keep the
+      # PR queue reviewable. Major bumps stay individual so they're reviewed
+      # one at a time (they can break the API).
+      cargo-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
 
+  # GitHub Actions — grouped so all action bumps land in a single PR.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
     labels:
-      - dependencies
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
