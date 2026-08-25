@@ -64,7 +64,9 @@ unowned debt. Done items are struck through.
    the real kube client when `KUBECONFIG` is present.
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
-   kind/envtest tier and Kubernetes-minor conformance remain open.*
+   kind/envtest tier and Kubernetes-minor conformance remain open. A live integration-test
+   tier (`crates/kaptein-core/tests/live.rs`, gated on `KAPTEIN_LIVE_TESTS=1`) now
+   exercises the read path and the delete write path against a real cluster.*
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
    aspirational.
 5. ~~**Signed releases + SBOM**~~ (done, commit eba14d9 + SLSA provenance in

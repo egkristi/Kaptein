@@ -12,6 +12,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     required).
   - `krew/kaptein.yaml` — Krew plugin manifest for `kubectl krew install kaptein`.
   - `Dockerfile` — distroless static image built from the verified release tarball.
+- **M2.0b — live integration-test tier**:
+  - `crates/kaptein-core/tests/live.rs` exercises the real kube client (list, describe,
+    and the delete dry-run vs. real write path) against a cluster, self-cleaning in a
+    throwaway namespace and gated on `KAPTEIN_LIVE_TESTS=1` so the default run stays
+    hermetic.
 
 ### Added
 - **M2.2 — status-rule rendering (lens → render contract)**:

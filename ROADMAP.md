@@ -193,6 +193,13 @@ Milestones:
     are unit-tested today
   - CI runs on Windows and macOS (not just `ubuntu-latest`), plus a conformance check
     against the latest three Kubernetes minors
+  - *Landed (2026-08-25): the Windows/macOS test matrix was already in CI; the first
+    **live integration-test tier** now exists — `crates/kaptein-core/tests/live.rs`
+    exercises the real kube client (list, describe, and the delete dry-run vs. real
+    write path) against a cluster, self-cleaning in a throwaway namespace and gated on
+    `KAPTEIN_LIVE_TESTS=1` so the default run stays hermetic. Remaining: kind/envtest in
+    CI (a cluster is not guaranteed on ubuntu runners) and the latest-three-minors
+    conformance matrix.*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a

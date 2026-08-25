@@ -34,6 +34,18 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+### Live integration tests (opt-in)
+
+The default `cargo test` is hermetic. To exercise the real kube client against a
+cluster (read path + delete dry-run/real write path), opt in explicitly — the tests
+create and clean up their own throwaway namespace:
+
+```bash
+KAPTEIN_LIVE_TESTS=1 KUBECONFIG=~/.kube/config cargo test -p kaptein-core --test live
+```
+
+They never touch existing namespaces and are self-cleaning.
+
 ## Before you submit
 
 1. **Put logic in `kaptein-viewmodel`.** If the TUI needs a column, a sort, a filter, a
