@@ -16,6 +16,26 @@ pub struct Config {
     /// Context guardrails (context-name patterns → prod/staging).
     #[serde(default)]
     pub guardrails: Guardrails,
+    /// Extension lifecycle: ids of **disabled** extensions (ADR-0004). Discovery finds
+    /// every manifest; only non-disabled extensions are loaded. Disabled-by-default for
+    /// unknown ids (safe default).
+    #[serde(default)]
+    pub extensions: Extensions,
+}
+
+/// Extension enable/disable state.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Extensions {
+    /// Reverse-DNS ids of disabled extensions.
+    #[serde(default)]
+    pub disabled: Vec<String>,
+}
+
+impl Extensions {
+    /// Whether an extension id is enabled (i.e. not in the disabled set).
+    pub fn is_enabled(&self, id: &str) -> bool {
+        !self.disabled.iter().any(|d| d == id)
+    }
 }
 
 /// Resolve the config file path: `$KAPTEIN_CONFIG`, else `$XDG_CONFIG_HOME/kaptein/config.toml`,
@@ -108,6 +128,17 @@ pub fn explain_context(config: &Config, context_name: &str) -> String {
     }
 }
 
+/// Load the config, mutate it with `f`, and persist it back to the config file (TOML).
+/// This is the primitive behind `kaptein extension enable/disable` — the only place the
+/// tool writes its own config. Fails (returns `Err`) rather than silently not saving.
+pub fn update_config(f: impl FnOnce(&mut Config)) -> Result<(), String> {
+    let path = config_path();
+    let mut config = load_from(&path);
+    f(&mut config);
+    let text = toml::to_string_pretty(&config).map_err(|e| format!("serialize config: {e}"))?;
+    std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
 /// Load from an explicit path (used by tests to avoid mutating process env).
 fn load_from(path: &std::path::Path) -> Config {
     let Ok(text) = std::fs::read_to_string(path) else {
@@ -165,6 +196,7 @@ prod = ["webtop"]
                 prod: vec!["(".into()], // invalid regex
                 staging: vec![],
             },
+            extensions: Extensions::default(),
         };
         let problems = validate(&c);
         assert!(!problems.is_empty());
@@ -178,6 +210,7 @@ prod = ["webtop"]
                 prod: vec!["^prod-".into()],
                 staging: vec![],
             },
+            extensions: Extensions::default(),
         };
         assert!(validate(&c).is_empty());
     }
@@ -189,9 +222,33 @@ prod = ["webtop"]
                 prod: vec!["^prod-".into()],
                 staging: vec!["^stag-".into()],
             },
+            extensions: Extensions::default(),
         };
         assert!(explain_context(&c, "prod-eu").contains("PROD"));
         assert!(explain_context(&c, "stag-eu").contains("STAGING"));
         assert!(explain_context(&c, "random").contains("UNKNOWN"));
+    }
+
+    #[test]
+    fn extensions_disabled_set_gates_is_enabled() {
+        let mut c = Config::default();
+        assert!(c.extensions.is_enabled("com.example.a"));
+        c.extensions.disabled.push("com.example.a".into());
+        assert!(!c.extensions.is_enabled("com.example.a"));
+        assert!(c.extensions.is_enabled("com.example.b"));
+    }
+
+    #[test]
+    fn config_with_extensions_section_round_trips() {
+        let text = r#"[guardrails]
+prod = []
+staging = []
+
+[extensions]
+disabled = ["com.example.a"]
+"#;
+        let c: Config = toml::from_str(text).expect("parse");
+        assert_eq!(c.extensions.disabled, vec!["com.example.a"]);
+        assert!(!c.extensions.is_enabled("com.example.a"));
     }
 }

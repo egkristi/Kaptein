@@ -395,6 +395,18 @@ enum ExtensionCommand {
         #[arg(short = 'd', long, default_value = "extensions")]
         dir: String,
     },
+    /// Enable an extension by id (removes it from the disabled set).
+    Enable {
+        /// reverse-DNS extension id, e.g. "com.example.cnpg-lens"
+        #[arg(short, long)]
+        id: String,
+    },
+    /// Disable an extension by id (adds it to the disabled set).
+    Disable {
+        /// reverse-DNS extension id, e.g. "com.example.cnpg-lens"
+        #[arg(short, long)]
+        id: String,
+    },
 }
 
 #[tokio::main]
@@ -593,37 +605,66 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             );
             Ok(())
         }
-        Command::Extension { command } => {
-            let (dir, list) = match command {
-                ExtensionCommand::List { dir } => (dir, true),
-                ExtensionCommand::Validate { dir } => (dir, false),
-            };
-            let (found, problems) = kaptein_core::extension::discover(std::path::Path::new(&dir));
-            if list {
+        Command::Extension { command } => match command {
+            ExtensionCommand::List { dir } => {
+                let (found, _problems) =
+                    kaptein_core::extension::discover(std::path::Path::new(&dir));
+                let config = kaptein_core::config::load();
                 for ext in &found {
+                    let state = if config.extensions.is_enabled(&ext.manifest.id) {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
                     println!(
-                        "{:<30} {:<20} v{:<8} {:?}",
-                        ext.manifest.id, ext.manifest.name, ext.manifest.version, ext.manifest.kind
+                        "{:<30} {:<20} v{:<8} {:<11} {:?}",
+                        ext.manifest.id,
+                        ext.manifest.name,
+                        ext.manifest.version,
+                        state,
+                        ext.manifest.kind
                     );
                 }
                 if found.is_empty() {
                     println!("no extensions found in {dir}");
                 }
-            } else {
+                Ok(())
+            }
+            ExtensionCommand::Validate { dir } => {
+                let (found, problems) =
+                    kaptein_core::extension::discover(std::path::Path::new(&dir));
                 for p in &problems {
                     eprintln!("error: {p}");
                 }
                 if problems.is_empty() {
                     println!("{} extension(s) valid in {dir}", found.len());
+                    Ok(())
                 } else {
-                    return Err(kaptein_core::Error::Internal(format!(
+                    Err(kaptein_core::Error::Internal(format!(
                         "{} invalid extension manifest(s)",
                         problems.len()
-                    )));
+                    )))
                 }
             }
-            Ok(())
-        }
+            ExtensionCommand::Enable { id } => {
+                kaptein_core::config::update_config(|config| {
+                    config.extensions.disabled.retain(|d| d != &id);
+                })
+                .map_err(kaptein_core::Error::Internal)?;
+                println!("enabled {id}");
+                Ok(())
+            }
+            ExtensionCommand::Disable { id } => {
+                kaptein_core::config::update_config(|config| {
+                    if !config.extensions.disabled.iter().any(|d| d == &id) {
+                        config.extensions.disabled.push(id.clone());
+                    }
+                })
+                .map_err(kaptein_core::Error::Internal)?;
+                println!("disabled {id}");
+                Ok(())
+            }
+        },
         Command::Diagnose { name, namespace } => {
             let pod = kaptein_core::pods::get_pod(&client, &namespace, &name).await?;
             let findings = kaptein_core::diagnostics::diagnose(&pod);
