@@ -4,6 +4,37 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-08-25
+
+### Security
+- **Secret leak via `metadata.annotations` fixed** — `redact_object` now masks a
+  Secret's annotations map (incl. `kubectl.kubernetes.io/last-applied-configuration`,
+  which `kubectl apply` embeds as a full plaintext copy). `ca.crt` removed from
+  `SENSITIVE_KEYS` (a public cert, not a secret).
+- **MCP agent-identity fallback now warns** — `agent_identity_resolution()` reports how
+  the identity was resolved; the server warns loudly when it falls back to the operator's
+  kubeconfig (or a name-only agent), instead of silently attributing agent actions to
+  human credentials.
+
+### Fixed
+- **Events double-count** — `recent_events` dedups `core/v1` + `events.k8s.io/v1` on
+  `(namespace, kind, name, reason, last_timestamp_ms)`.
+- **MCP preflight hardcoding** — `preflight_target` derives (verb, resource, group,
+  namespace) from the call's own `gvk`/`namespace` args; `describe(gvk=v1/Secret,
+  ns=kube-system)` preflights `get secrets` in `kube-system`, not `get pods` in `default`.
+- **MCP audit accuracy** — `get_events` records `Operation::List`; `target.group`/`kind`
+  are split from the gvk instead of stuffing the whole string into `kind`.
+- **MemPlane history replay lost deletions** — history records the full `RowPatch`
+  (upsert AND remove), so reconnects don't resurrect deleted rows; `VecDeque` cap
+  eviction; closed senders dropped (no per-subscriber leak).
+- **TUI virtualization** — materializes only the visible window, not all 50k rows per
+  frame.
+- **Watch reconnect** — `LivePlane::watch_loop` relists (metadata-only) and reconnects
+  with exponential backoff on watch expiry/410, instead of going silently stale.
+- **Command palette `quit` actually quits.**
+- **Diagnostics** — `ImagePullBackOff` no longer misreported as `crash_loop_backoff`;
+  `image_pull` also fires for Running pods after an image update.
+
 ## [0.22.0] - 2026-08-25
 
 ### Added
