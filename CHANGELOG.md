@@ -4,6 +4,17 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-08-25
+
+### Added
+- **M1.8 performance regression guard** — a 50k-row query benchmark-style test asserts
+  sort+filter+window stays linear (fails loudly on accidental O(n²)), giving the perf
+  budget its first CI signal before the kwok harness lands.
+
+### Changed
+- CI: advanced CodeQL workflow (`security-extended`, rust + actions) replaces the
+  implicit GitHub default setup; clippy owns Rust quality linting.
+
 ## [0.24.0] - 2026-08-25
 
 ### Fixed
