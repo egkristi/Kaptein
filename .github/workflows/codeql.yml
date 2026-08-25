@@ -1,0 +1,57 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan so newly-published queries catch issues in unmerged main.
+    - cron: "30 1 * * 1"
+
+permissions:
+  # Required to upload SARIF results to the security tab.
+  security-events: write
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - rust
+          - actions
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # `security-and-quality` is stricter than the default suite: it includes
+          # security queries plus high-confidence correctness/quality queries.
+          queries: security-and-quality
+          # Autodetect the Rust build; the runner's rustup honors rust-toolchain.toml
+          # (pinned to the MSRV), so the scan matches the shipped toolchain.
+          config: |
+            paths:
+              - crates
+              - extensions
+            paths-ignore:
+              - target
+              - docs
+
+      - name: Autobuild (Rust)
+        if: matrix.language == 'rust'
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
