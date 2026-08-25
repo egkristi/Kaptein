@@ -123,14 +123,12 @@ jobs:
         run: |
           set -euo pipefail
           # Sign each artifact and the checksums file. Keyless signing uses the
-          # GitHub Actions OIDC identity (Fulcio) and records to Rekor; the
-          # .sig + .pem (certificate) + .crt (bundle) are attached alongside.
+          # GitHub Actions OIDC identity (Fulcio) and records to Rekor. Modern
+          # cosign writes a single `.bundle` (containing the signature + certificate),
+          # and the `--output-signature`/`--output-certificate` flags are deprecated
+          # and ignored under the new bundle format — so we write only the bundle.
           for f in *.tar.gz *.zip SHA256SUMS; do
-            cosign sign-blob --yes \
-              --output-signature "$f.sig" \
-              --output-certificate "$f.pem" \
-              --bundle "$f.bundle" \
-              "$f"
+            cosign sign-blob --yes --bundle "$f.bundle" "$f"
           done
           ls -la
 
@@ -138,9 +136,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Attach binaries, checksums, and cosign signature material.
+          # Attach binaries, checksums, and cosign signature bundles.
           gh release upload "${GITHUB_REF_NAME}" \
-            *.tar.gz *.zip SHA256SUMS *.sig *.pem *.bundle --clobber
+            *.tar.gz *.zip SHA256SUMS *.bundle --clobber
 
   sbom:
     name: SBOM (CycloneDX)
