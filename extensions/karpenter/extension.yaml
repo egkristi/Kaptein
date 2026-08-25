@@ -1,0 +1,10 @@
+# Karpenter NodePool lens extension manifest (ADR-0004). MIT/Apache-2.0.
+# The lens itself is lens.nodepool.yaml.
+
+id: com.kaptein.karpenter-nodepool-lens
+name: Karpenter NodePool lens
+version: 1.0.0
+api_version: 1
+kind: lens
+entrypoint: lens.nodepool.yaml
+permissions: []

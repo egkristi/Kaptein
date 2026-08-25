@@ -28,8 +28,8 @@ pub use diff::{DiffLine, UnifiedDiff, render_unified, unified_diff};
 pub use error::Error;
 pub use fuzzy::{FuzzyMatch, fuzzy_jump};
 pub use lens::{
-    GroupVersionKind, LENS_SCHEMA_VERSION, LensAction, RuleOp, StatusRule, ViewDefinition,
-    evaluate_status, validate_viewdef,
+    ConditionRule, GroupVersionKind, LENS_SCHEMA_VERSION, LensAction, RuleOp, StatusRule,
+    ViewDefinition, evaluate_status, validate_viewdef,
 };
 pub use logparse::{LogCell, ParsedLogLine, infer_columns, parse_json_line, parse_log_stream};
 pub use mem_plane::{MemPlane, Schema};

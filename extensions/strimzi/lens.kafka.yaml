@@ -1,0 +1,44 @@
+# Strimzi Kafka lens — a view definition (ADR-0004 tier 1, ADR-0012).
+# MIT/Apache-2.0 (extension surface). Binds the Strimzi `Kafka` CRD to columns and
+# condition-based status inference (Strimzi signals readiness via `Ready` and
+# `ClusterOperatorNotReady` conditions, not a bare phase).
+
+id: com.kaptein.kafka-lens
+api_version: 1
+target:
+  group: kafka.strimzi.io
+  version: v1beta2
+  kind: Kafka
+
+columns:
+  - id: name
+    header_key: col.name
+    kind: text
+    sortable: true
+  - id: replicas
+    header_key: col.replicas
+    kind: number
+    sortable: true
+  - id: status
+    header_key: col.status
+    kind: status
+    sortable: true
+
+conditions:
+  - condition_type: Ready
+    status: "True"
+    level: ok
+  - condition_type: ClusterOperatorNotReady
+    status: "True"
+    level: error
+  - condition_type: Ready
+    status: "False"
+    level: error
+  - condition_type: Ready
+    status: Unknown
+    level: pending
+
+actions:
+  - id: describe
+    label_key: action.describe
+    state: allowed

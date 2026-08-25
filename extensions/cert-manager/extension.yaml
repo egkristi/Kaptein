@@ -1,0 +1,10 @@
+# cert-manager Certificate lens extension manifest (ADR-0004). MIT/Apache-2.0.
+# The lens itself is lens.certificate.yaml.
+
+id: com.kaptein.cert-manager-certificate-lens
+name: cert-manager Certificate lens
+version: 1.0.0
+api_version: 1
+kind: lens
+entrypoint: lens.certificate.yaml
+permissions: []

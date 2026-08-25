@@ -589,11 +589,12 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             let problems = kaptein_viewmodel::validate_viewdef(&vd);
             if problems.is_empty() {
                 println!(
-                    "lens {} ({}) is valid ({} columns, {} status rules, {} actions)",
+                    "lens {} ({}) is valid ({} columns, {} status rules, {} conditions, {} actions)",
                     vd.id,
                     vd.target.display(),
                     vd.columns.len(),
                     vd.status.len(),
+                    vd.conditions.len(),
                     vd.actions.len()
                 );
                 Ok(())
@@ -1427,6 +1428,40 @@ mod tests {
             const_version,
             kaptein_viewmodel::LENS_SCHEMA_VERSION as u64,
             "viewdef.schema.json api_version const drifts from LENS_SCHEMA_VERSION"
+        );
+    }
+
+    /// The bundled JSON Schema must declare the `conditions` property (condition-based
+    /// status rules) — if the Rust `ConditionRule` type is added but the schema omits it,
+    /// a JSON-Schema validation would reject a lens the Rust validator accepts.
+    #[test]
+    fn bundled_schema_declares_conditions() {
+        let schema = crate::schema::VIEWDEF_SCHEMA;
+        let value: serde_json::Value = serde_json::from_str(schema).expect("schema is valid JSON");
+        assert!(
+            value.pointer("/properties/conditions").is_some(),
+            "viewdef.schema.json must declare a conditions property"
+        );
+    }
+
+    /// A condition-based lens must validate and deserialize (Kubernetes-condition
+    /// status inference is how the hardest lenses — Strimzi, KubeVirt, cert-manager —
+    /// signal readiness; ADR-0012).
+    #[test]
+    fn condition_lens_validates_cleanly() {
+        let yaml = "id: com.kaptein.kafka-lens\napi_version: 1\ntarget: {group: kafka.strimzi.io, version: v1beta2, kind: Kafka}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true}]\nconditions: [{condition_type: Ready, status: \"True\", level: ok}, {condition_type: Ready, status: \"False\", level: error}]\nactions: [{id: describe, label_key: action.describe, state: allowed}]\n";
+        let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
+        let vd: kaptein_viewmodel::ViewDefinition =
+            serde_json::from_value(value).expect("lens deserializes");
+        assert!(
+            kaptein_viewmodel::validate_viewdef(&vd).is_empty(),
+            "condition lens must be valid"
+        );
+        let ready =
+            serde_json::json!({"status": {"conditions": [{"type": "Ready", "status": "True"}]}});
+        assert_eq!(
+            kaptein_viewmodel::evaluate_status(&vd, &ready),
+            Some(kaptein_viewmodel::StatusLevel::Ok)
         );
     }
 

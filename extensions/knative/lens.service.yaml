@@ -1,0 +1,37 @@
+# Knative Service lens — a view definition (ADR-0004 tier 1, ADR-0012).
+# MIT/Apache-2.0 (extension surface). Knative Services expose a `Ready` condition plus
+# `ConfigurationsReady`/`RoutesReady` sub-conditions; `Ready` is the authoritative
+# signal.
+
+id: com.kaptein.knative-service-lens
+api_version: 1
+target:
+  group: serving.knative.dev
+  version: v1
+  kind: Service
+
+columns:
+  - id: name
+    header_key: col.name
+    kind: text
+    sortable: true
+  - id: status
+    header_key: col.status
+    kind: status
+    sortable: true
+
+conditions:
+  - condition_type: Ready
+    status: "True"
+    level: ok
+  - condition_type: Ready
+    status: "False"
+    level: error
+  - condition_type: Ready
+    status: Unknown
+    level: pending
+
+actions:
+  - id: describe
+    label_key: action.describe
+    state: allowed

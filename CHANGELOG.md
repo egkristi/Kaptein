@@ -4,6 +4,23 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **M2.2 — condition-based lens rules + shipped lens set**:
+  - `kaptein-viewmodel::lens::ConditionRule` — declarative Kubernetes-condition status
+    inference (`status.conditions[]` by `type` + `status`), because Strimzi/KubeVirt/
+    cert-manager/etc. signal readiness via typed conditions, not a bare phase.
+  - `evaluate_status` now evaluates `conditions` rules after scalar `status` rules;
+    `validate_viewdef` validates condition types/statuses; the lens JSON Schema gained a
+    `conditions` property (with a drift-guard test).
+  - Shipped the example lens set under `extensions/`: Strimzi Kafka, cert-manager
+    Certificate, KubeVirt VirtualMachine, Keycloak, Tekton PipelineRun, Karpenter
+    NodePool, Knative Service, Velero Backup (alongside CNPG) — all MIT/Apache-2.0.
+- **Supply chain**: `publish.yml` is now idempotent (skips crates already at the tagged
+  version) and gated on `cargo test`; `release.yml` cosign-signs the SBOM and generates
+  SLSA provenance via `slsa-framework/slsa-github-generator`.
+
 ## [0.25.0] - 2026-08-25
 
 ### Added

@@ -1,0 +1,36 @@
+# Tekton PipelineRun lens — a view definition (ADR-0004 tier 1, ADR-0012).
+# MIT/Apache-2.0 (extension surface). PipelineRuns expose a `Succeeded` condition
+# (corev1.ConditionTrue/False) that maps directly onto status inference.
+
+id: com.kaptein.tekton-pipelinerun-lens
+api_version: 1
+target:
+  group: tekton.dev
+  version: v1
+  kind: PipelineRun
+
+columns:
+  - id: name
+    header_key: col.name
+    kind: text
+    sortable: true
+  - id: status
+    header_key: col.status
+    kind: status
+    sortable: true
+
+conditions:
+  - condition_type: Succeeded
+    status: "True"
+    level: ok
+  - condition_type: Succeeded
+    status: "False"
+    level: error
+  - condition_type: Succeeded
+    status: Unknown
+    level: pending
+
+actions:
+  - id: describe
+    label_key: action.describe
+    state: allowed

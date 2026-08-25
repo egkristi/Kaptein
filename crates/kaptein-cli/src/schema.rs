@@ -64,6 +64,19 @@ pub const VIEWDEF_SCHEMA: &str = r#"{
         }
       }
     },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["condition_type", "status", "level"],
+        "additionalProperties": false,
+        "properties": {
+          "condition_type": { "type": "string", "description": "The Kubernetes condition type, e.g. \"Ready\" or \"ReconciliationSucceeded\"." },
+          "status": { "type": "string", "enum": ["True", "False", "Unknown"], "description": "The condition status to match." },
+          "level": { "type": "string", "enum": ["ok", "info", "warning", "error", "pending"] }
+        }
+      }
+    },
     "actions": {
       "type": "array",
       "items": {

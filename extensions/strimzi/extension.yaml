@@ -1,0 +1,10 @@
+# Strimzi Kafka lens extension manifest (ADR-0004). MIT/Apache-2.0 (extension surface).
+# The lens itself is lens.kafka.yaml.
+
+id: com.kaptein.kafka-lens
+name: Strimzi Kafka lens
+version: 1.0.0
+api_version: 1
+kind: lens
+entrypoint: lens.kafka.yaml
+permissions: []

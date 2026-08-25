@@ -1,0 +1,10 @@
+# Tekton PipelineRun lens extension manifest (ADR-0004). MIT/Apache-2.0.
+# The lens itself is lens.pipelinerun.yaml.
+
+id: com.kaptein.tekton-pipelinerun-lens
+name: Tekton PipelineRun lens
+version: 1.0.0
+api_version: 1
+kind: lens
+entrypoint: lens.pipelinerun.yaml
+permissions: []

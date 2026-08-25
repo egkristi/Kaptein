@@ -81,6 +81,26 @@ pub struct StatusRule {
     pub level: crate::render::StatusLevel,
 }
 
+/// A status-inference rule over Kubernetes conditions (`status.conditions[]`).
+///
+/// The scalar [`StatusRule`] cannot express how the majority of modern CRDs signal
+/// readiness — via a typed condition (`type` + `status`) rather than a bare phase. This
+/// rule matches the first condition whose `type` equals [`Self::condition_type`]; if
+/// that condition's `status` equals [`Self::status`], the rule fires at [`Self::level`].
+/// This is what lets Strimzi Kafka, KubeVirt VirtualMachine, cert-manager Certificate,
+/// Keycloak, Tekton PipelineRun, Karpenter NodePool, and Knative Service all be declared
+/// as data (ADR-0012's "prove the schema against the hardest lenses" test).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConditionRule {
+    /// The condition `type` to match, e.g. `"Ready"`, `"ReconciliationSucceeded"`.
+    pub condition_type: String,
+    /// The condition `status` to match: `"True"`, `"False"`, or `"Unknown"` (the three
+    /// canonical Kubernetes condition statuses).
+    pub status: String,
+    /// The level to assign when the condition matches.
+    pub level: crate::render::StatusLevel,
+}
+
 /// An action a lens declares. This is the lens-native form (snake_case `state`) — it
 /// maps to the render contract's `semantic::Action` at evaluation time. It is a separate
 /// type so the lens schema stays its own clean, user-authored contract.
@@ -116,6 +136,10 @@ pub struct ViewDefinition {
     /// Optional status-inference rules, evaluated in order (first match wins).
     #[serde(default)]
     pub status: Vec<StatusRule>,
+    /// Optional condition-based status rules (`status.conditions[]`), evaluated after
+    /// `status` (first match wins within the whole sequence).
+    #[serde(default)]
+    pub conditions: Vec<ConditionRule>,
     /// Actions this lens makes available, with their RBAC-preflight state.
     #[serde(default)]
     pub actions: Vec<LensAction>,
@@ -207,7 +231,26 @@ pub fn validate_viewdef(vd: &ViewDefinition) -> Vec<String> {
         }
     }
 
+    // Condition rules: the type must be non-empty and the status must be one of the
+    // canonical Kubernetes condition statuses (True/False/Unknown).
+    for (i, rule) in vd.conditions.iter().enumerate() {
+        if rule.condition_type.trim().is_empty() {
+            problems.push(format!("conditions[{i}].condition_type: must not be empty"));
+        }
+        if !is_condition_status(&rule.status) {
+            problems.push(format!(
+                "conditions[{i}].status {:?}: must be one of \"True\", \"False\", \"Unknown\"",
+                rule.status
+            ));
+        }
+    }
+
     problems
+}
+
+/// A canonical Kubernetes condition status: `True`, `False`, or `Unknown`.
+fn is_condition_status(status: &str) -> bool {
+    matches!(status, "True" | "False" | "Unknown")
 }
 
 /// A dotted JSON field path: leading identifier, then `.identifier` segments (or
@@ -263,6 +306,9 @@ fn split_subscripts(segment: &str) -> (&str, Vec<usize>) {
 /// returning the first matching level, or `None` when no rule matches. This is the
 /// "status inference" half of the lens engine (ADR-0012): the frontend colors the status
 /// chip from the level; the lens declares the meaning.
+///
+/// Scalar `status` rules are evaluated first, then `conditions` rules (first match wins
+/// across the whole sequence).
 pub fn evaluate_status(
     vd: &ViewDefinition,
     resource: &serde_json::Value,
@@ -272,7 +318,27 @@ pub fn evaluate_status(
             return Some(rule.level);
         }
     }
+    for rule in &vd.conditions {
+        if condition_matches(rule, resource) {
+            return Some(rule.level);
+        }
+    }
     None
+}
+
+/// Match a condition rule: find `status.conditions[]` and look for a condition whose
+/// `type` equals the rule's type and whose `status` equals the rule's status.
+fn condition_matches(rule: &ConditionRule, resource: &serde_json::Value) -> bool {
+    let Some(conditions) = resource.get("status").and_then(|s| s.get("conditions")) else {
+        return false;
+    };
+    let Some(list) = conditions.as_array() else {
+        return false;
+    };
+    list.iter().any(|cond| {
+        cond.get("type").and_then(|t| t.as_str()) == Some(rule.condition_type.as_str())
+            && cond.get("status").and_then(|s| s.as_str()) == Some(rule.status.as_str())
+    })
 }
 
 fn rule_matches(rule: &StatusRule, resource: &serde_json::Value) -> bool {
@@ -400,6 +466,7 @@ mod tests {
             },
             columns: vec![col("name"), col("status")],
             status: vec![example_status_rule()],
+            conditions: vec![],
             actions: vec![action("describe")],
         }
     }
@@ -569,6 +636,76 @@ mod tests {
         assert_eq!(
             evaluate_status(&vd, &msg),
             Some(crate::render::StatusLevel::Error)
+        );
+    }
+
+    #[test]
+    fn condition_rule_matches_ready_true() {
+        let mut vd = valid();
+        vd.status = vec![];
+        vd.conditions = vec![
+            ConditionRule {
+                condition_type: "Ready".into(),
+                status: "True".into(),
+                level: crate::render::StatusLevel::Ok,
+            },
+            ConditionRule {
+                condition_type: "Ready".into(),
+                status: "False".into(),
+                level: crate::render::StatusLevel::Error,
+            },
+        ];
+        let ready = serde_json::json!({
+            "status": {"conditions": [{"type": "Ready", "status": "True"}]}
+        });
+        assert_eq!(
+            evaluate_status(&vd, &ready),
+            Some(crate::render::StatusLevel::Ok)
+        );
+        let not_ready = serde_json::json!({
+            "status": {"conditions": [{"type": "Ready", "status": "False"}]}
+        });
+        assert_eq!(
+            evaluate_status(&vd, &not_ready),
+            Some(crate::render::StatusLevel::Error)
+        );
+        // A condition of a different type must not match.
+        let other = serde_json::json!({
+            "status": {"conditions": [{"type": "Progressing", "status": "True"}]}
+        });
+        assert_eq!(evaluate_status(&vd, &other), None);
+        // Missing conditions must not match.
+        assert_eq!(
+            evaluate_status(&vd, &serde_json::json!({"status": {}})),
+            None
+        );
+    }
+
+    #[test]
+    fn invalid_condition_status_is_flagged() {
+        let mut vd = valid();
+        vd.conditions = vec![ConditionRule {
+            condition_type: "Ready".into(),
+            status: "Yes".into(),
+            level: crate::render::StatusLevel::Ok,
+        }];
+        let problems = validate_viewdef(&vd);
+        assert!(problems.iter().any(|p| p.contains("conditions[0].status")));
+    }
+
+    #[test]
+    fn empty_condition_type_is_flagged() {
+        let mut vd = valid();
+        vd.conditions = vec![ConditionRule {
+            condition_type: "".into(),
+            status: "True".into(),
+            level: crate::render::StatusLevel::Ok,
+        }];
+        let problems = validate_viewdef(&vd);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("conditions[0].condition_type"))
         );
     }
 }

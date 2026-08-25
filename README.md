@@ -142,7 +142,9 @@ chosen data-first:
 
 All three are declared by a shared **extension manifest** (`extension.yaml`) and
 discovered from configurable, Git-backed extension paths — no central marketplace.
-Lifecycle is managed with `kaptein extension {validate,list,enable,disable}`.
+Lifecycle is managed with `kaptein extension {validate,list,enable,disable}`. Example
+lenses ship under [`extensions/`](extensions/) — CNPG, Strimzi Kafka, KubeVirt,
+cert-manager, Keycloak, Tekton, Velero, Karpenter, and Knative — all MIT/Apache-2.0.
 
 **Sandbox by default.** WASM plugins run with fuel metering, a memory cap, **no network
 and no filesystem** unless a capability is declared in the WIT world *and* in the

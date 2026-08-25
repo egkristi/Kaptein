@@ -4,7 +4,9 @@ Everything under `extensions/` is part of Kaptein's **extension surface** and is
 licensed **MIT OR Apache-2.0** (not BUSL-1.1), per ADR-0004's licensing split.
 
 This includes:
-- Example view definitions (lenses) — `*.yaml` here
+- Example view definitions (lenses) — `*.yaml` here: CNPG, Strimzi Kafka, KubeVirt,
+  cert-manager, Keycloak, Tekton, Velero, Karpenter, and Knative (each in its own
+  subdirectory with an `extension.yaml` manifest)
 - Future example WASM plugins and shell-out integrations
 
 The lens **schema** (the view-definition format) is likewise MIT/Apache-2.0, so a

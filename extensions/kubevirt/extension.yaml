@@ -1,0 +1,10 @@
+# KubeVirt VirtualMachine lens extension manifest (ADR-0004). MIT/Apache-2.0.
+# The lens itself is lens.vm.yaml.
+
+id: com.kaptein.kubevirt-vm-lens
+name: KubeVirt VirtualMachine lens
+version: 1.0.0
+api_version: 1
+kind: lens
+entrypoint: lens.vm.yaml
+permissions: []
