@@ -21,13 +21,38 @@ pub async fn describe_dynamic(
     namespace: Option<&str>,
     name: &str,
 ) -> Result<String, Error> {
+    describe_dynamic_policy(client, gvk, namespace, name, RedactPolicy::Redacted).await
+}
+
+/// The redaction policy for fetching a resource as YAML. `Redacted` masks secret values
+/// (the default for display/MCP); `Unredacted` returns the object verbatim and is only
+/// for the `edit` path, where the operator edits real values and the `SecretViewed`
+/// audit event records the unmask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedactPolicy {
+    Redacted,
+    Unredacted,
+}
+
+/// Fetch a resource and serialize it to YAML, honoring a [`RedactPolicy`]. The
+/// `Unredacted` variant is for `kaptein edit` only — it returns real secret values so a
+/// round-trip edit doesn't overwrite them with the `[REDACTED]` marker.
+pub async fn describe_dynamic_policy(
+    client: &Client,
+    gvk: &kube::core::GroupVersionKind,
+    namespace: Option<&str>,
+    name: &str,
+    policy: RedactPolicy,
+) -> Result<String, Error> {
     let ar = kube::core::ApiResource::from_gvk(gvk);
     let api: Api<kube::api::DynamicObject> = match namespace {
         Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
         None => Api::all_with(client.clone(), &ar),
     };
     let mut obj = api.get(name).await.map_err(Error::Api)?;
-    crate::redact::redact_object(&mut obj);
+    if policy == RedactPolicy::Redacted {
+        crate::redact::redact_object(&mut obj);
+    }
     serde_yaml::to_string(&obj).map_err(|e| Error::Internal(e.to_string()))
 }
 

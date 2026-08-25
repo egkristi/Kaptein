@@ -17,8 +17,23 @@ pub async fn edit_in_editor(
     namespace: Option<&str>,
     name: &str,
 ) -> Result<String, kaptein_core::Error> {
-    // 1. Fetch the current object as YAML.
-    let current = kaptein_core::describe::describe_dynamic(client, gvk, namespace, name).await?;
+    // 1. Fetch the current object as YAML — **unredacted**, because the operator edits
+    //    real values. A redacted round-trip would submit the literal `[REDACTED]` marker
+    //    over every secret value (issue #17). The unmask is audited below.
+    let current = kaptein_core::describe::describe_dynamic_policy(
+        client,
+        gvk,
+        namespace,
+        name,
+        kaptein_core::describe::RedactPolicy::Unredacted,
+    )
+    .await?;
+
+    // Audit the secret view before showing the values (M1.7 DoD: `Operation::SecretViewed`
+    // is emitted when an operator unmasks a secret).
+    if kaptein_core::redact::is_secret_kind(&gvk.kind) {
+        audit_secret_viewed(&gvk.kind, namespace.unwrap_or_default(), name);
+    }
 
     // 2. Write it to a temp file so the editor has a stable path.
     let tmp = temp_file_for(name)?;
@@ -77,4 +92,38 @@ fn temp_file_for(name: &str) -> Result<PathBuf, kaptein_core::Error> {
     let mut p = std::env::temp_dir();
     p.push(format!("kaptein-edit-{name}.yaml"));
     Ok(p)
+}
+
+/// Emit a best-effort `SecretViewed` audit event (M1.7 / ADR-0010) when the `edit` path
+/// unmasks a secret for editing. Audit-write failure must not block the edit.
+fn audit_secret_viewed(kind: &str, namespace: &str, name: &str) {
+    use kaptein_viewmodel::audit::{
+        Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source,
+    };
+    let context = kaptein_core::discovery::current_context_name().unwrap_or_default();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let event = AuditEvent {
+        timestamp: now_ms,
+        actor: Actor {
+            kind: ActorKind::Human,
+            name: std::env::var("USER").unwrap_or_else(|_| "human".into()),
+        },
+        context,
+        operation: Operation::SecretViewed,
+        target: ResourceRef {
+            group: "".into(),
+            kind: kind.into(),
+            namespace: namespace.into(),
+            name: name.into(),
+        },
+        outcome: Outcome::Applied,
+        source: Source::Tui,
+        session_id: "cli".into(),
+        reason: None,
+        on_behalf_of: None,
+    };
+    let _ = crate::audit::append(&event);
 }

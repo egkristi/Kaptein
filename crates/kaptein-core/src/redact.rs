@@ -45,7 +45,7 @@ const SENSITIVE_KEYS: &[&str] = &[
 ];
 
 /// Whether a resource kind holds secret data by definition.
-fn is_secret_kind(kind: &str) -> bool {
+pub fn is_secret_kind(kind: &str) -> bool {
     kind.eq_ignore_ascii_case("Secret")
         || kind.eq_ignore_ascii_case("ExternalSecret")
         || kind.eq_ignore_ascii_case("ClusterSecretStore")
