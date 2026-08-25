@@ -354,6 +354,45 @@ mod tests {
         );
     }
 
+    /// A performance regression guard for the M1.8 budget: query (sort + filter +
+    /// window) over 50 000 rows must not regress into accidental O(n²) behavior. The
+    /// bound is deliberately generous (a CI-safety net, not a precise budget — the kwok
+    /// harness owns the p99 <16 ms target). An accidental quadratic regression would
+    /// blow well past it.
+    #[test]
+    fn query_50k_rows_is_not_quadratic() {
+        let p = plane();
+        for i in 0..50_000 {
+            p.upsert(row(&format!("row-{i}"), &format!("name-{i}"), i));
+        }
+        let start = std::time::Instant::now();
+        for _ in 0..10 {
+            let page = tokio_test_block(p.query(&Query {
+                start: 0,
+                end: 50,
+                sort: Some(SortSpec {
+                    column: "count".into(),
+                    descending: true,
+                }),
+                filter: Some(Filter {
+                    expression: "name-4".into(),
+                }),
+            }))
+            .expect("query");
+            assert_eq!(
+                page.total, 11_111,
+                "filter should match name-4*, name-40*.."
+            );
+        }
+        let elapsed = start.elapsed();
+        // 10 queries over 50k rows: even a ~1s total would be unacceptable; this guard
+        // fails loudly on a regression while passing comfortably on the linear path.
+        assert!(
+            elapsed.as_secs() < 5,
+            "50k-row query regressed: {elapsed:?} for 10 queries"
+        );
+    }
+
     // Minimal async block executor (no tokio in the view-model; this crate stays wasm-pure).
     fn tokio_test_block<F: std::future::Future>(f: F) -> F::Output {
         futures_util::pin_mut!(f);
