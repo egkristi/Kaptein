@@ -17,6 +17,15 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - Shipped the example lens set under `extensions/`: Strimzi Kafka, cert-manager
     Certificate, KubeVirt VirtualMachine, Keycloak, Tekton PipelineRun, Karpenter
     NodePool, Knative Service, Velero Backup (alongside CNPG) — all MIT/Apache-2.0.
+- **M2.2 — status-rule rendering (lens → render contract)**:
+  - `kaptein-viewmodel::lens::render_row` maps a `ViewDefinition` + a resource into the
+    render contract's `Row`/`Cell` — the "status-rule rendering" half of M2.2, shared by
+    every frontend.
+  - `Column.field` is a new data-binding on lens columns: a non-status column's value
+    must come from an explicit dotted JSON path (ADR-0012 — the schema is no longer
+    implicit); `validate_viewdef` enforces it. `Status` columns are still *inferred*.
+  - `kaptein viewdef render -f <lens> -r <resource>` renders a lens against a live or
+    fixture resource.
 - **Supply chain**: `publish.yml` is now idempotent (skips crates already at the tagged
   version) and gated on `cargo test`; `release.yml` cosign-signs the SBOM and generates
   SLSA provenance via `slsa-framework/slsa-github-generator`.

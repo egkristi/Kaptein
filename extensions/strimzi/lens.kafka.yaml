@@ -15,10 +15,12 @@ columns:
     header_key: col.name
     kind: text
     sortable: true
+    field: metadata.name
   - id: replicas
     header_key: col.replicas
     kind: number
     sortable: true
+    field: spec.kafka.replicas
   - id: status
     header_key: col.status
     kind: status

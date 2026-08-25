@@ -93,6 +93,7 @@ fn surface_kind_is_derived_from_surface() {
             header_key: "col.name".into(),
             kind: ColumnKind::Text,
             sortable: true,
+            field: Some("metadata.name".into()),
         }],
     };
     assert_eq!(table.kind(), crate::surface::SurfaceKind::Table);

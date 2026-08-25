@@ -15,6 +15,7 @@ columns:
     header_key: col.name
     kind: text
     sortable: true
+    field: metadata.name
   - id: status
     header_key: col.status
     kind: status

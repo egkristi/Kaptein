@@ -135,8 +135,8 @@ pub enum EditorMode {
 }
 
 /// A column definition. The view-model owns *meaning* (id, header key, data kind,
-/// sortability); the frontend owns *geometry* (rendered width in cells vs. font
-/// metrics). There is deliberately no `width` field here.
+/// sortability, and the data-binding `field`); the frontend owns *geometry* (rendered
+/// width in cells vs. font metrics). There is deliberately no `width` field here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Column {
     pub id: String,
@@ -146,6 +146,13 @@ pub struct Column {
     /// The data kind — semantics (numeric vs. text) drives alignment and sort order.
     pub kind: ColumnKind,
     pub sortable: bool,
+    /// For lens (view-definition) columns: the dotted JSON path that supplies this
+    /// column's value (e.g. `metadata.name`, `spec.instances`). `None` for built-in
+    /// surfaces and for the `Status` column, whose value is *inferred* by the lens's
+    /// status rules rather than read from a single field (ADR-0012: the schema must
+    /// express where every value comes from).
+    #[serde(default)]
+    pub field: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

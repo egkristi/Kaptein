@@ -46,7 +46,8 @@ pub const VIEWDEF_SCHEMA: &str = r#"{
           "id": { "type": "string", "description": "Column id (semantics, not geometry)." },
           "header_key": { "type": "string", "description": "Dotted i18n header key, e.g. \"col.name\"." },
           "kind": { "type": "string", "enum": ["text", "number", "timestamp", "status"] },
-          "sortable": { "type": "boolean", "default": true }
+          "sortable": { "type": "boolean", "default": true },
+          "field": { "type": "string", "description": "Dotted JSON path supplying this column's value (e.g. \"metadata.name\", \"spec.instances\"). Required for non-status columns; omitted for the Status column whose value is inferred." }
         }
       }
     },

@@ -90,6 +90,15 @@ enum Command {
     },
     /// Print the versioned JSON Schema for view definitions (for CI/PR review).
     ViewdefSchema,
+    /// Render a lens against a live (or fixture) resource as the render contract's Row.
+    ViewdefRender {
+        /// path to a lens YAML/JSON file
+        #[arg(short = 'f', long)]
+        file: String,
+        /// JSON/YAML resource to render (a file path or an inline JSON object)
+        #[arg(short = 'r', long)]
+        resource: String,
+    },
     /// Discover + validate extensions (`extension.yaml` manifests) in a directory.
     Extension {
         /// list discovered extensions, or validate their manifests
@@ -615,6 +624,50 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             // release implements. Embedded (not `include_str!`) so `cargo publish`
             // packages it correctly.
             print!("{}", schema::VIEWDEF_SCHEMA);
+            Ok(())
+        }
+        Command::ViewdefRender { file, resource } => {
+            // Load the lens, then render a resource (a file path or inline JSON) through
+            // it into the render contract's `Row`. This proves status-rule *rendering*
+            // end-to-end and gives lens authors a way to test a lens against a fixture
+            // without a live cluster.
+            let lens_text = std::fs::read_to_string(&file)
+                .map_err(|e| kaptein_core::Error::Internal(format!("cannot read {file}: {e}")))?;
+            let lens_value: serde_json::Value = serde_yaml::from_str(&lens_text)
+                .map_err(|e| kaptein_core::Error::Internal(format!("cannot parse {file}: {e}")))?;
+            let vd: kaptein_viewmodel::ViewDefinition = serde_json::from_value(lens_value)
+                .map_err(|e| {
+                    kaptein_core::Error::Internal(format!("cannot deserialize {file}: {e}"))
+                })?;
+            let problems = kaptein_viewmodel::validate_viewdef(&vd);
+            if !problems.is_empty() {
+                for p in &problems {
+                    eprintln!("error: {p}");
+                }
+                return Err(kaptein_core::Error::Internal(format!(
+                    "lens {file} is invalid ({} problem(s))",
+                    problems.len()
+                )));
+            }
+
+            // The resource is either a file path or inline JSON/YAML.
+            let resource_value: serde_json::Value = if std::path::Path::new(&resource).is_file() {
+                let text = std::fs::read_to_string(&resource).map_err(|e| {
+                    kaptein_core::Error::Internal(format!("cannot read {resource}: {e}"))
+                })?;
+                serde_yaml::from_str(&text).map_err(|e| {
+                    kaptein_core::Error::Internal(format!("cannot parse {resource}: {e}"))
+                })?
+            } else {
+                serde_yaml::from_str(&resource).map_err(|e| {
+                    kaptein_core::Error::Internal(format!("cannot parse inline resource: {e}"))
+                })?
+            };
+
+            let row = kaptein_viewmodel::render_row(&vd, &resource_value);
+            let json = serde_json::to_string_pretty(&row)
+                .map_err(|e| kaptein_core::Error::Internal(format!("cannot serialize row: {e}")))?;
+            println!("{json}");
             Ok(())
         }
         Command::Extension { command } => match command {
@@ -1449,7 +1502,7 @@ mod tests {
     /// signal readiness; ADR-0012).
     #[test]
     fn condition_lens_validates_cleanly() {
-        let yaml = "id: com.kaptein.kafka-lens\napi_version: 1\ntarget: {group: kafka.strimzi.io, version: v1beta2, kind: Kafka}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true}]\nconditions: [{condition_type: Ready, status: \"True\", level: ok}, {condition_type: Ready, status: \"False\", level: error}]\nactions: [{id: describe, label_key: action.describe, state: allowed}]\n";
+        let yaml = "id: com.kaptein.kafka-lens\napi_version: 1\ntarget: {group: kafka.strimzi.io, version: v1beta2, kind: Kafka}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true, field: metadata.name}]\nconditions: [{condition_type: Ready, status: \"True\", level: ok}, {condition_type: Ready, status: \"False\", level: error}]\nactions: [{id: describe, label_key: action.describe, state: allowed}]\n";
         let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
         let vd: kaptein_viewmodel::ViewDefinition =
             serde_json::from_value(value).expect("lens deserializes");
@@ -1471,13 +1524,41 @@ mod tests {
     fn example_cnpg_lens_validates_cleanly() {
         // A minimal in-repo fixture (the canonical lens lives under `extensions/`, which
         // `cargo publish` does not package — so the test uses an inline document).
-        let yaml = "id: com.example.cnpg-lens\napi_version: 1\ntarget: {group: postgresql.cnpg.io, version: v1, kind: Cluster}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true}]\nstatus: [{field: status.phase, op: eq, value: ClusterIsReady, level: ok}]\nactions: [{id: describe, label_key: action.describe, state: allowed}]\n";
+        let yaml = "id: com.example.cnpg-lens\napi_version: 1\ntarget: {group: postgresql.cnpg.io, version: v1, kind: Cluster}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true, field: metadata.name}]\nstatus: [{field: status.phase, op: eq, value: ClusterIsReady, level: ok}]\nactions: [{id: describe, label_key: action.describe, state: allowed}]\n";
         let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
         let vd: kaptein_viewmodel::ViewDefinition =
             serde_json::from_value(value).expect("lens deserializes");
         assert!(
             kaptein_viewmodel::validate_viewdef(&vd).is_empty(),
             "example lens must be valid"
+        );
+    }
+
+    /// `render_row` maps a lens + resource into the render contract's `Row` — the
+    /// "status-rule rendering" half of M2.2, exercised end-to-end from a lens fixture.
+    #[test]
+    fn render_row_binds_fields_and_infers_status() {
+        let yaml = "id: com.example.cnpg-lens\napi_version: 1\ntarget: {group: postgresql.cnpg.io, version: v1, kind: Cluster}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true, field: metadata.name}, {id: instances, header_key: col.instances, kind: number, sortable: true, field: spec.instances}, {id: status, header_key: col.status, kind: status, sortable: true}]\nstatus: [{field: status.phase, op: eq, value: ClusterIsReady, level: ok}]\n";
+        let vd: kaptein_viewmodel::ViewDefinition =
+            serde_yaml::from_str(yaml).expect("lens deserializes");
+        let resource = serde_json::json!({
+            "metadata": {"uid": "u1", "name": "pg", "namespace": "db"},
+            "spec": {"instances": 3},
+            "status": {"phase": "ClusterIsReady"}
+        });
+        let row = kaptein_viewmodel::render_row(&vd, &resource);
+        assert_eq!(row.id, kaptein_viewmodel::RowId("u1".into()));
+        assert_eq!(
+            row.cells[0],
+            kaptein_viewmodel::Cell::Text { value: "pg".into() }
+        );
+        assert_eq!(row.cells[1], kaptein_viewmodel::Cell::Number { value: 3 });
+        assert_eq!(
+            row.cells[2],
+            kaptein_viewmodel::Cell::Status {
+                level: kaptein_viewmodel::StatusLevel::Ok,
+                label_key: "status.ok".into(),
+            }
         );
     }
 }

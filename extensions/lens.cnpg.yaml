@@ -16,10 +16,12 @@ columns:
     header_key: col.name
     kind: text
     sortable: true
+    field: metadata.name
   - id: instances
     header_key: col.instances
     kind: number
     sortable: true
+    field: spec.instances
   - id: status
     header_key: col.status
     kind: status

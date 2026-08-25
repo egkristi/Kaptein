@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::render::{Cell, Row, RowId};
 use crate::surface::{Column, ColumnKind};
 
 /// The lens schema version this release validates. Bumped on a breaking change to the
@@ -190,6 +191,23 @@ pub fn validate_viewdef(vd: &ViewDefinition) -> Vec<String> {
                 col.id
             ));
         }
+        // A data column's value must come from somewhere: either a `field` path, or a
+        // `Status` kind (whose value is *inferred* by the status/condition rules).
+        if col.kind != ColumnKind::Status && col.field.as_deref().is_none_or(str::is_empty) {
+            problems.push(format!(
+                "columns.{:?}: a non-status column needs a `field` (dotted JSON path) so \
+                 its value is data-bound, not implicit (ADR-0012)",
+                col.id
+            ));
+        } else if let Some(field) = col.field.as_deref()
+            && !field.is_empty()
+            && !valid_field_path(field)
+        {
+            problems.push(format!(
+                "columns.{:?}.field {:?}: not a dotted JSON path",
+                col.id, field
+            ));
+        }
     }
 
     // Status rules: field must be a dotted path; numeric ops need a numeric value.
@@ -326,6 +344,112 @@ pub fn evaluate_status(
     None
 }
 
+/// Render a lens + a live resource into the render contract's `Row` (ADR-0005).
+///
+/// This is the "status-rule *rendering*" half of M2.2: it maps a `ViewDefinition`'s
+/// columns onto a resource's JSON, so a frontend (TUI/GUI/browser/headless) consumes the
+/// *same* `Row`/`Cell` for the same input. Column semantics:
+///
+/// - A column whose `field` is set resolves that dotted path against the resource and
+///   emits a typed cell (numbers → `Number`, strings/bools/null → `Text`).
+/// - A `Status`-kind column's value is **inferred** via [`evaluate_status`]: the lens's
+///   status/condition rules decide the `StatusLevel` and the chip label.
+/// - A `field` that is absent/`None` on a `Text` column renders an empty cell; a
+///   missing field on a `Status` column renders an `Info` chip (no rule matched).
+///
+/// The stable `RowId` is the resource `metadata.uid` when present, else
+/// `namespace/name` (the same identity contract as `kaptein-integration`).
+pub fn render_row(vd: &ViewDefinition, resource: &serde_json::Value) -> Row {
+    let id = resource
+        .get("metadata")
+        .and_then(|m| m.get("uid"))
+        .and_then(|u| u.as_str())
+        .map(|uid| RowId(uid.to_string()))
+        .unwrap_or_else(|| {
+            let name = resource
+                .get("metadata")
+                .and_then(|m| m.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
+            let ns = resource
+                .get("metadata")
+                .and_then(|m| m.get("namespace"))
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
+            RowId(if ns.is_empty() {
+                name.to_string()
+            } else {
+                format!("{ns}/{name}")
+            })
+        });
+
+    let cells = vd
+        .columns
+        .iter()
+        .map(|col| cell_for_column(col, resource, vd))
+        .collect();
+
+    Row { id, cells }
+}
+
+/// Build the `Cell` for a single lens column against a resource.
+fn cell_for_column(col: &Column, resource: &serde_json::Value, vd: &ViewDefinition) -> Cell {
+    if col.kind == ColumnKind::Status {
+        // The status chip is *inferred* (not read from a single field): the lens's
+        // rules decide the level and label.
+        let (level, label) = match evaluate_status(vd, resource) {
+            Some(level) => (level, level_label(level)),
+            None => (crate::render::StatusLevel::Info, "unknown".to_string()),
+        };
+        return Cell::Status {
+            level,
+            label_key: label,
+        };
+    }
+
+    // Data columns read a dotted field path; a missing/unset field is an empty cell.
+    let Some(field) = col.field.as_deref() else {
+        return empty_cell_for_kind(col.kind);
+    };
+    match resolve_field(resource, field) {
+        Some(serde_json::Value::Number(n)) if n.is_i64() => Cell::Number {
+            value: n.as_i64().unwrap_or(0),
+        },
+        Some(serde_json::Value::Number(n)) => Cell::Text {
+            value: n.to_string(),
+        },
+        Some(serde_json::Value::String(s)) => Cell::Text { value: s.clone() },
+        Some(serde_json::Value::Bool(b)) => Cell::Text {
+            value: b.to_string(),
+        },
+        Some(serde_json::Value::Null) | None => empty_cell_for_kind(col.kind),
+        Some(other) => Cell::Text {
+            value: other.to_string(),
+        },
+    }
+}
+
+/// An empty cell matching a column's kind (empty text, or `0` for numbers).
+fn empty_cell_for_kind(kind: ColumnKind) -> Cell {
+    match kind {
+        ColumnKind::Number => Cell::Number { value: 0 },
+        _ => Cell::Text {
+            value: String::new(),
+        },
+    }
+}
+
+/// A stable, i18n-facing label for a status level (the frontend resolves the key).
+fn level_label(level: crate::render::StatusLevel) -> String {
+    match level {
+        crate::render::StatusLevel::Ok => "status.ok".into(),
+        crate::render::StatusLevel::Info => "status.info".into(),
+        crate::render::StatusLevel::Warning => "status.warning".into(),
+        crate::render::StatusLevel::Error => "status.error".into(),
+        crate::render::StatusLevel::Pending => "status.pending".into(),
+    }
+}
+
 /// Match a condition rule: find `status.conditions[]` and look for a condition whose
 /// `type` equals the rule's type and whose `status` equals the rule's status.
 fn condition_matches(rule: &ConditionRule, resource: &serde_json::Value) -> bool {
@@ -408,18 +532,21 @@ pub fn example_cnpg_columns() -> Vec<Column> {
             header_key: "col.name".into(),
             kind: ColumnKind::Text,
             sortable: true,
+            field: Some("metadata.name".into()),
         },
         Column {
             id: "instances".into(),
             header_key: "col.instances".into(),
             kind: ColumnKind::Number,
             sortable: true,
+            field: Some("spec.instances".into()),
         },
         Column {
             id: "status".into(),
             header_key: "col.status".into(),
             kind: ColumnKind::Status,
             sortable: true,
+            field: None,
         },
     ]
 }
@@ -444,6 +571,17 @@ mod tests {
             header_key: format!("col.{id}"),
             kind: ColumnKind::Text,
             sortable: true,
+            field: Some(format!("metadata.{id}")),
+        }
+    }
+
+    fn status_col(id: &str) -> Column {
+        Column {
+            id: id.into(),
+            header_key: format!("col.{id}"),
+            kind: ColumnKind::Status,
+            sortable: true,
+            field: None,
         }
     }
 
@@ -464,7 +602,7 @@ mod tests {
                 version: "v1".into(),
                 kind: "Cluster".into(),
             },
-            columns: vec![col("name"), col("status")],
+            columns: vec![col("name"), status_col("status")],
             status: vec![example_status_rule()],
             conditions: vec![],
             actions: vec![action("describe")],
@@ -706,6 +844,143 @@ mod tests {
             problems
                 .iter()
                 .any(|p| p.contains("conditions[0].condition_type"))
+        );
+    }
+
+    #[test]
+    fn non_status_column_without_field_is_flagged() {
+        let mut vd = valid();
+        // A text column with no `field` cannot be data-bound.
+        vd.columns = vec![Column {
+            id: "name".into(),
+            header_key: "col.name".into(),
+            kind: ColumnKind::Text,
+            sortable: true,
+            field: None,
+        }];
+        let problems = validate_viewdef(&vd);
+        assert!(problems.iter().any(|p| p.contains("field")));
+    }
+
+    #[test]
+    fn malformed_column_field_is_flagged() {
+        let mut vd = valid();
+        vd.columns = vec![Column {
+            id: "name".into(),
+            header_key: "col.name".into(),
+            kind: ColumnKind::Text,
+            sortable: true,
+            field: Some(".bad.path".into()),
+        }];
+        let problems = validate_viewdef(&vd);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("not a dotted JSON path"))
+        );
+    }
+
+    #[test]
+    fn render_row_maps_fields_and_infers_status() {
+        // A lens with a name (data), instances (number), and status (inferred) column.
+        let vd = ViewDefinition {
+            id: "com.example.cnpg-lens".into(),
+            api_version: LENS_SCHEMA_VERSION,
+            target: GroupVersionKind {
+                group: "postgresql.cnpg.io".into(),
+                version: "v1".into(),
+                kind: "Cluster".into(),
+            },
+            columns: vec![
+                Column {
+                    id: "name".into(),
+                    header_key: "col.name".into(),
+                    kind: ColumnKind::Text,
+                    sortable: true,
+                    field: Some("metadata.name".into()),
+                },
+                Column {
+                    id: "instances".into(),
+                    header_key: "col.instances".into(),
+                    kind: ColumnKind::Number,
+                    sortable: true,
+                    field: Some("spec.instances".into()),
+                },
+                Column {
+                    id: "status".into(),
+                    header_key: "col.status".into(),
+                    kind: ColumnKind::Status,
+                    sortable: true,
+                    field: None,
+                },
+            ],
+            status: vec![StatusRule {
+                field: "status.phase".into(),
+                op: RuleOp::Eq,
+                value: serde_json::json!("ClusterIsReady"),
+                level: crate::render::StatusLevel::Ok,
+            }],
+            conditions: vec![],
+            actions: vec![],
+        };
+
+        let resource = serde_json::json!({
+            "metadata": {"uid": "abc-123", "name": "pg", "namespace": "db"},
+            "spec": {"instances": 3},
+            "status": {"phase": "ClusterIsReady"}
+        });
+
+        let row = render_row(&vd, &resource);
+        // Stable identity is metadata.uid.
+        assert_eq!(row.id, RowId("abc-123".into()));
+        assert_eq!(row.cells.len(), 3);
+        // name → Text("pg")
+        assert_eq!(row.cells[0], Cell::Text { value: "pg".into() });
+        // instances → Number(3)
+        assert_eq!(row.cells[1], Cell::Number { value: 3 });
+        // status → inferred Ok chip
+        assert_eq!(
+            row.cells[2],
+            Cell::Status {
+                level: crate::render::StatusLevel::Ok,
+                label_key: "status.ok".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn render_row_falls_back_to_ns_name_identity_and_info_status() {
+        let vd = ViewDefinition {
+            id: "com.example.t".into(),
+            api_version: LENS_SCHEMA_VERSION,
+            target: GroupVersionKind {
+                group: "example.io".into(),
+                version: "v1".into(),
+                kind: "Thing".into(),
+            },
+            columns: vec![Column {
+                id: "status".into(),
+                header_key: "col.status".into(),
+                kind: ColumnKind::Status,
+                sortable: true,
+                field: None,
+            }],
+            status: vec![],
+            conditions: vec![],
+            actions: vec![],
+        };
+        // No uid → ns/name identity; no matching rule → Info "unknown" chip.
+        let resource = serde_json::json!({
+            "metadata": {"name": "x", "namespace": "n"}
+        });
+        let row = render_row(&vd, &resource);
+        assert_eq!(row.id, RowId("n/x".into()));
+        assert_eq!(
+            row.cells[0],
+            Cell::Status {
+                level: crate::render::StatusLevel::Info,
+                label_key: "unknown".into(),
+            }
         );
     }
 }

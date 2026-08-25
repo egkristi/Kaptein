@@ -201,16 +201,20 @@ Milestones:
   cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative
   - Ship a versioned JSON Schema (and/or CUE schema) for view definitions plus a
     `kaptein viewdef validate` command so lenses are reviewable in PRs
-  - **Status: schema + validation + lifecycle landed, lens set shipped.** 
+  - **Status: schema + validation + lifecycle landed, lens set shipped, rendering done.**
     `kaptein-viewmodel::lens` defines the versioned lens data model (`ViewDefinition`,
     `GroupVersionKind`, `StatusRule`/`RuleOp`, `ConditionRule`, `LensAction`),
-    `validate_viewdef`, and `evaluate_status` (field-path resolution + scalar **and
-    Kubernetes-condition** rule evaluation); `kaptein viewdef validate -f` parses a lens
-    and reports problems; `kaptein viewdef schema` emits the JSON Schema; the
-    `extension.yaml` manifest + `kaptein extension {list,validate,enable,disable}`
-    lifecycle (ADR-0004) are implemented; the example lens set ships under `extensions/`
-    — CNPG, Strimzi Kafka, KubeVirt, cert-manager, Keycloak, Tekton, Velero, Karpenter,
-    Knative (all MIT/Apache-2.0). Remaining: status-rule *rendering* in a frontend.
+    `validate_viewdef`, `evaluate_status` (field-path resolution + scalar **and
+    Kubernetes-condition** rule evaluation), and `render_row` (maps a lens + a resource
+    into the render contract's `Row` — the status-rule *rendering* half, with a
+    data-bound `Column.field` so a column's value source is explicit, not implicit, per
+    ADR-0012); `kaptein viewdef validate -f` parses a lens and reports problems;
+    `kaptein viewdef schema` emits the JSON Schema; `kaptein viewdef render` renders a
+    lens against a live/fixture resource; the `extension.yaml` manifest +
+    `kaptein extension {list,validate,enable,disable}` lifecycle (ADR-0004) are
+    implemented; the example lens set ships under `extensions/` — CNPG, Strimzi Kafka,
+    KubeVirt, cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative (all
+    MIT/Apache-2.0).
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile
