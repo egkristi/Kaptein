@@ -100,6 +100,49 @@ pub fn agent_identity_name() -> String {
     "mcp-client".to_string()
 }
 
+/// How the agent identity was resolved — so callers can distinguish a real dedicated
+/// identity from a silent fallback to the operator's own kubeconfig (which would record
+/// an *agent* actor for actions taken with the *human's* credentials, exactly what
+/// SECURITY.md promises against).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentIdentityResolution {
+    /// In-cluster ServiceAccount (the pod's own narrow identity).
+    InClusterServiceAccount,
+    /// Explicit `KAPTEIN_SA_TOKEN` bearer token.
+    ExplicitToken,
+    /// `KAPTEIN_AGENT` was set (audit name only; the client identity is separate).
+    NamedAgent,
+    /// Fallback to the default kubeconfig — the operator's own credentials.
+    OperatorKubeconfig,
+}
+
+/// Resolve the agent identity *and report how it was resolved*. The MCP server uses this
+/// to refuse (or warn) on the operator-kubeconfig fallback, so the audit log never
+/// silently records an agent actor for actions taken with human credentials.
+pub fn agent_identity_resolution() -> AgentIdentityResolution {
+    // 1. In-cluster ServiceAccount.
+    if std::env::var("KUBERNETES_SERVICE_HOST").is_ok()
+        && std::env::var("KUBERNETES_SERVICE_PORT").is_ok()
+    {
+        return AgentIdentityResolution::InClusterServiceAccount;
+    }
+    // 2. Explicit bearer token.
+    if std::env::var("KAPTEIN_SA_TOKEN")
+        .map(|t| !t.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return AgentIdentityResolution::ExplicitToken;
+    }
+    // 3. A named agent (audit-name only) — still falls back to kubeconfig for the client.
+    if std::env::var("KAPTEIN_AGENT")
+        .map(|n| !n.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return AgentIdentityResolution::NamedAgent;
+    }
+    AgentIdentityResolution::OperatorKubeconfig
+}
+
 /// Read the current context name from the kubeconfig (for guardrail classification).
 pub fn current_context_name() -> Result<String, Error> {
     use kube::config::Kubeconfig;

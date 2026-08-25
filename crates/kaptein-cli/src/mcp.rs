@@ -32,8 +32,22 @@ pub struct KapteinMcp {
 impl KapteinMcp {
     pub async fn new() -> Result<Self, CoreError> {
         // Dedicated agent identity (ADR-0007 mode 3): the MCP server runs with its own
-        // ServiceAccount/token, not a shared human credential. Falls back to the default
-        // kubeconfig when no agent identity is configured.
+        // ServiceAccount/token, not a shared human credential. If no dedicated identity
+        // is configured and we fall back to the operator's kubeconfig, **warn loudly**
+        // (to stderr) so the operator knows the audit log will attribute agent actions
+        // to a human credential. A hard refusal is a future config flag.
+        match discovery::agent_identity_resolution() {
+            discovery::AgentIdentityResolution::OperatorKubeconfig
+            | discovery::AgentIdentityResolution::NamedAgent => {
+                eprintln!(
+                    "governance warning: no dedicated agent identity (in-cluster SA or \
+                     KAPTEIN_SA_TOKEN); the MCP server is using the operator's own \
+                     kubeconfig. Set KAPTEIN_SA_TOKEN (or run in-cluster) so agent actions \
+                     are not attributed to a human credential (SECURITY.md / ADR-0007)."
+                );
+            }
+            _ => {}
+        }
         let agent_name = discovery::agent_identity_name();
         let context_name = discovery::current_context_name().unwrap_or_default();
         let session_id = format!("mcp-{}", now_ms_hex());
@@ -692,9 +706,9 @@ impl KapteinMcp {
             Actor, ActorKind, AuditEvent, Operation, ResourceRef, Source,
         };
         let operation = match tool_name {
-            "list_resources" => Operation::List,
+            "list_resources" | "get_events" => Operation::List,
             "describe" => Operation::Describe,
-            "logs" | "get_events" => Operation::Logs,
+            "logs" => Operation::Logs,
             "diagnose"
             | "explain_pod_failure"
             | "why_is_job_pending"
@@ -710,18 +724,22 @@ impl KapteinMcp {
                 .unwrap_or_default()
         };
         let namespace = get("namespace");
-        let name = if tool_name == "list_resources" {
+        let name = if tool_name == "list_resources" || tool_name == "get_events" {
             String::new() // a list has no single target name
         } else {
             get("name")
         };
-        let kind = match tool_name {
-            "describe" | "list_resources" => get("gvk"),
-            "logs" | "diagnose" | "explain_pod_failure" => "Pod".to_string(),
-            "why_is_job_pending" => "Job".to_string(),
-            "blast_radius" => get("gvk"),
-            "get_events" | "what_changed_between" => "Event".to_string(),
-            _ => tool_name.to_string(),
+        // Split a `group/version/kind` string into (group, kind) so the audit record
+        // carries the real api group and kind, not the whole gvk string in `kind`.
+        let (group, kind) = match tool_name {
+            "describe" | "list_resources" | "blast_radius" => {
+                let (g, _, k) = parse_gvk_parts(&get("gvk"));
+                (g, k)
+            }
+            "logs" | "diagnose" | "explain_pod_failure" => (String::new(), "Pod".to_string()),
+            "why_is_job_pending" => (String::new(), "Job".to_string()),
+            "get_events" | "what_changed_between" => (String::new(), "Event".to_string()),
+            _ => (String::new(), tool_name.to_string()),
         };
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -736,7 +754,7 @@ impl KapteinMcp {
             context: self.context_name.clone(),
             operation,
             target: ResourceRef {
-                group: "".into(),
+                group,
                 kind,
                 namespace,
                 name,
