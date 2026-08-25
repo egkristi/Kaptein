@@ -342,6 +342,12 @@ async fn run_event_loop(
                 }
                 KeyCode::Tab if palette_query.is_none() => {
                     kind = kind.next();
+                    // Cluster-scoped kinds (Nodes/Namespaces) have no namespace: a
+                    // namespaced list/watch for them 404s. Clear the namespace so the
+                    // plane uses a cluster-scoped API.
+                    if kind.cluster_scoped() {
+                        namespace = None;
+                    }
                     rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
                     selected = 0;
                     scroll = 0;
@@ -562,6 +568,11 @@ async fn execute_command(
     match cmd {
         PaletteCommand::NextKind => {
             *kind = kind.next();
+            // Cluster-scoped kinds have no namespace — clear it to avoid a 404 on the
+            // namespaced list/watch.
+            if kind.cluster_scoped() {
+                *namespace = None;
+            }
             need_rebuild = true;
         }
         PaletteCommand::NextNamespace => {
