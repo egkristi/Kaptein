@@ -194,11 +194,18 @@ async fn run_event_loop(
             let header = Block::default().title(status_line).borders(Borders::ALL);
             frame.render_widget(header, chunks[0]);
 
-            let table_rows: Vec<Row> = rows
+            // Materialize only the visible window (virtualization): the table renders
+            // `scroll..scroll+page_height`, so allocating ratatui `Row`s for all 50k
+            // objects every frame is wasted work. This is the change that keeps the
+            // M1.8 perf budget reachable.
+            let view_start = scroll.min(rows.len());
+            let view_end = (scroll + page_height).min(rows.len()).max(view_start);
+            let table_rows: Vec<Row> = rows[view_start..view_end]
                 .iter()
                 .enumerate()
-                .map(|(i, r)| {
-                    let base = if i == selected {
+                .map(|(offset, r)| {
+                    let absolute = view_start + offset;
+                    let base = if absolute == selected {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
                         Style::default()
@@ -227,10 +234,12 @@ async fn run_event_loop(
             let table = Table::new(table_rows, widths)
                 .header(Row::new(vec!["NAME", "NAMESPACE", "STATUS", "CREATED"]))
                 .block(Block::default().borders(Borders::ALL));
+            // The rows are already the visible window, so no `.with_offset` is needed —
+            // the selection highlight is computed against the absolute index above.
             frame.render_stateful_widget(
                 table,
                 chunks[1],
-                &mut ratatui::widgets::TableState::default().with_offset(scroll),
+                &mut ratatui::widgets::TableState::default(),
             );
 
             let detail_text = detail.clone().unwrap_or_else(|| {
@@ -288,7 +297,7 @@ async fn run_event_loop(
                     if let Some(q) = palette_query.as_deref()
                         && let Some(cmd) = palette_matches(q).into_iter().next()
                     {
-                        execute_command(
+                        let should_quit = execute_command(
                             cmd,
                             client,
                             &mut kind,
@@ -303,8 +312,13 @@ async fn run_event_loop(
                             &mut detail,
                         )
                         .await?;
+                        palette_query = None;
+                        if should_quit {
+                            break;
+                        }
+                    } else {
+                        palette_query = None;
                     }
-                    palette_query = None;
                 }
                 KeyCode::Char('j') | KeyCode::Down if palette_query.is_none() => {
                     selected = (selected + 1).min(rows.len().saturating_sub(1));
@@ -538,14 +552,12 @@ async fn execute_command(
     sort_key: &mut kaptein_core::discovery::SortKey,
     sort_descending: &mut bool,
     plane: &mut kaptein_integration::LivePlane,
-    watch: &mut Option<
-        tokio::task::JoinHandle<Result<usize, kaptein_integration::IntegrationError>>,
-    >,
+    watch: &mut Option<tokio::task::JoinHandle<Result<(), kaptein_integration::IntegrationError>>>,
     rows: &mut Vec<TableRow>,
     selected: &mut usize,
     scroll: &mut usize,
     detail: &mut Option<String>,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     let mut need_rebuild = false;
     match cmd {
         PaletteCommand::NextKind => {
@@ -566,7 +578,7 @@ async fn execute_command(
             if let Some(r) = rows.get(*selected) {
                 *detail = describe(client, *kind, r).await.ok();
             }
-            return Ok(());
+            return Ok(false);
         }
         PaletteCommand::DiagnoseSelected => {
             if *kind == Kind::Pods
@@ -576,12 +588,12 @@ async fn execute_command(
             } else {
                 *detail = Some("Diagnostics are available for pods only.".into());
             }
-            return Ok(());
+            return Ok(false);
         }
         PaletteCommand::Quit => {
-            // The caller treats `Quit` by breaking out of the run loop; signal via a
-            // sentinel is overkill — instead we just return and the UI stays open.
-            return Ok(());
+            // Signal the run loop to break out of the event loop (the palette's `quit`
+            // must actually quit, not just close the palette).
+            return Ok(true);
         }
     }
     if need_rebuild {
@@ -592,7 +604,7 @@ async fn execute_command(
     *selected = 0;
     *scroll = 0;
     *detail = None;
-    Ok(())
+    Ok(false)
 }
 
 /// Rebuild the live plane for a new (kind, namespace) and restart the watch task.
@@ -600,9 +612,7 @@ async fn execute_command(
 async fn rebuild_plane(
     client: &Client,
     plane: &mut kaptein_integration::LivePlane,
-    watch: &mut Option<
-        tokio::task::JoinHandle<Result<usize, kaptein_integration::IntegrationError>>,
-    >,
+    watch: &mut Option<tokio::task::JoinHandle<Result<(), kaptein_integration::IntegrationError>>>,
     kind: Kind,
     namespace: Option<String>,
 ) -> io::Result<()> {

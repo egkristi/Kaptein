@@ -306,50 +306,71 @@ impl LivePlane {
         Ok(count)
     }
 
-    /// Run the watch loop until the stream ends, applying deltas to the `MemPlane`.
-    /// This is the "watch" half — drive it on a `tokio::spawn`ed task. Returns the
-    /// number of deltas applied.
-    pub async fn watch_loop(&self) -> Result<usize, IntegrationError> {
+    /// Run the watch loop until cancelled, applying deltas to the `MemPlane`. This is the
+    /// "watch" half — drive it on a `tokio::spawn`ed task. On watch expiry/error
+    /// (routinely after ~5 min server timeouts or a 410 Gone) it **relists and
+    /// reconnects with backoff** rather than going silently stale.
+    pub async fn watch_loop(&self) -> Result<(), IntegrationError> {
         let ar = kube::core::ApiResource::from_gvk(&self.gvk);
         let api: kube::Api<kube::core::DynamicObject> = match self.namespace.as_deref() {
             Some(ns) => kube::Api::namespaced_with(self.client.clone(), ns, &ar),
             None => kube::Api::all_with(self.client.clone(), &ar),
         };
-        let list = api
-            .list(&kube::api::ListParams::default())
-            .await
-            .map_err(kaptein_core::Error::Api)?;
-        let rv = list
-            .metadata
-            .resource_version
-            .clone()
-            .unwrap_or_else(|| "0".to_string());
-        let mut stream = Box::pin(
-            api.watch(&kube::api::WatchParams::default(), &rv)
-                .await
-                .map_err(kaptein_core::Error::Api)?,
-        );
-        let mut applied = 0usize;
         use futures_util::StreamExt;
-        while let Some(event) = stream.next().await {
-            match event {
-                Ok(ev) => {
-                    if let Some(patch) = watch_event_to_patch(&ev, &self.gvk) {
-                        match patch {
-                            kaptein_viewmodel::RowPatch::Upsert { row, .. } => {
-                                self.mem.upsert(row);
-                            }
-                            kaptein_viewmodel::RowPatch::Remove { id } => {
-                                self.mem.remove(&id);
+        let mut backoff_ms: u64 = 100;
+
+        loop {
+            // Get a fresh resourceVersion via a metadata-only, bounded list — not a full
+            // object list (we already seeded in `seed`; this is just the "watch from
+            // here" cursor).
+            let rv = match api
+                .list_metadata(&kube::api::ListParams::default().limit(1))
+                .await
+            {
+                Ok(list) => list
+                    .metadata
+                    .resource_version
+                    .clone()
+                    .unwrap_or_else(|| "0".to_string()),
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    backoff_ms = (backoff_ms * 2).min(5_000);
+                    continue;
+                }
+            };
+
+            let stream = match api.watch(&kube::api::WatchParams::default(), &rv).await {
+                Ok(s) => s,
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    backoff_ms = (backoff_ms * 2).min(5_000);
+                    continue;
+                }
+            };
+            let mut stream = Box::pin(stream);
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(ev) => {
+                        backoff_ms = 100; // healthy stream resets backoff
+                        if let Some(patch) = watch_event_to_patch(&ev, &self.gvk) {
+                            match patch {
+                                kaptein_viewmodel::RowPatch::Upsert { row, .. } => {
+                                    self.mem.upsert(row);
+                                }
+                                kaptein_viewmodel::RowPatch::Remove { id } => {
+                                    self.mem.remove(&id);
+                                }
                             }
                         }
-                        applied += 1;
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
+            // Stream ended (expired or errored): back off and reconnect.
+            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            backoff_ms = (backoff_ms * 2).min(5_000);
         }
-        Ok(applied)
     }
 }
 
