@@ -7,6 +7,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.27.0] - 2026-08-25
 
 ### Added
+- **M2.0c — informer lifecycle policy (ADR-0006)**:
+  - `kaptein-core::informer::InformerManager` — lazy per-view `register`/`touch`/
+    `release`, LRU `evict_idle` with TTL, and a hard cap that returns `Denied`
+    (degrade-to-on-demand-list) instead of exceeding the cap.
+  - The cap and idle TTL are now configurable via a new `[informer]` config section
+    (`max_watches`, `idle_ttl_secs`), satisfying ADR-0006's "the cap must be a policy,
+    exposed in the config file".
 - **Distribution & release sync (cross-cutting)**:
   - `install.sh` — checksum-verified install of the signed release binaries (no `cargo`
     required).

@@ -22,6 +22,7 @@ pub mod exec;
 pub mod extension;
 pub mod external;
 pub mod guardrails;
+pub mod informer;
 pub mod moat;
 pub mod nodes;
 pub mod overview;

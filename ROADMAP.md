@@ -187,6 +187,12 @@ Milestones:
     `store::watch_from` does not).
   - The ADR-0006 subjects that have no code: lazy-per-view informers, LRU + TTL eviction,
     and a hard cap on concurrent watches with degradation to on-demand list.
+  - *Landed (2026-08-25): `kaptein-core::informer::InformerManager` implements the
+    lifecycle policy — lazy per-view `register` (idempotent `touch`), LRU `evict_idle`
+    with TTL, and a hard cap that returns `Denied` (degrade-to-on-demand-list) instead of
+    exceeding the cap. The policy (`max_watches`, `idle_ttl_secs`) is exposed in the
+    config file under `[informer]` (ADR-0006 requires the cap to be a configurable
+    policy). Remaining: wiring the manager into the frontend view lifecycle.*
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none

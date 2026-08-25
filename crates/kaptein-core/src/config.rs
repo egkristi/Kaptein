@@ -21,6 +21,51 @@ pub struct Config {
     /// unknown ids (safe default).
     #[serde(default)]
     pub extensions: Extensions,
+    /// Informer lifecycle policy (ADR-0006): the hard cap on concurrent watches and the
+    /// idle TTL. Exposed in config because the cap is a policy decision (per-cluster vs.
+    /// global), not a hardcoded constant.
+    #[serde(default)]
+    pub informer: InformerConfig,
+}
+
+/// Informer lifecycle policy, mirroring [`crate::informer::InformerPolicy`] as a
+/// serde-friendly config section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InformerConfig {
+    /// Maximum number of simultaneous live watches (degradation to on-demand list beyond
+    /// this).
+    #[serde(default = "default_max_watches")]
+    pub max_watches: usize,
+    /// Idle watches are evicted after this many seconds.
+    #[serde(default = "default_idle_ttl_secs")]
+    pub idle_ttl_secs: u64,
+}
+
+fn default_max_watches() -> usize {
+    16
+}
+
+fn default_idle_ttl_secs() -> u64 {
+    300
+}
+
+impl Default for InformerConfig {
+    fn default() -> Self {
+        Self {
+            max_watches: default_max_watches(),
+            idle_ttl_secs: default_idle_ttl_secs(),
+        }
+    }
+}
+
+impl InformerConfig {
+    /// The policy in the form [`crate::informer::InformerManager`] consumes.
+    pub fn to_policy(&self) -> crate::informer::InformerPolicy {
+        crate::informer::InformerPolicy {
+            max_watches: self.max_watches.max(1),
+            idle_ttl: std::time::Duration::from_secs(self.idle_ttl_secs.max(1)),
+        }
+    }
 }
 
 /// Extension enable/disable state.
@@ -197,6 +242,7 @@ prod = ["webtop"]
                 staging: vec![],
             },
             extensions: Extensions::default(),
+            informer: InformerConfig::default(),
         };
         let problems = validate(&c);
         assert!(!problems.is_empty());
@@ -211,6 +257,7 @@ prod = ["webtop"]
                 staging: vec![],
             },
             extensions: Extensions::default(),
+            informer: InformerConfig::default(),
         };
         assert!(validate(&c).is_empty());
     }
@@ -223,6 +270,7 @@ prod = ["webtop"]
                 staging: vec!["^stag-".into()],
             },
             extensions: Extensions::default(),
+            informer: InformerConfig::default(),
         };
         assert!(explain_context(&c, "prod-eu").contains("PROD"));
         assert!(explain_context(&c, "stag-eu").contains("STAGING"));
