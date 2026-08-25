@@ -2,6 +2,11 @@
 
 > Website: <https://kaptein.io> · Source: <https://github.com/egkristi/Kaptein>
 
+[![CI](https://github.com/egkristi/Kaptein/actions/workflows/ci.yml/badge.svg)](https://github.com/egkristi/Kaptein/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/egkristi/Kaptein/actions/workflows/codeql.yml/badge.svg)](https://github.com/egkristi/Kaptein/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/egkristi/Kaptein)](https://github.com/egkristi/Kaptein/releases)
+[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-orange.svg)](LICENSE)
+
 **Kaptein** is a unified Kubernetes workbench: a fast terminal UI, a native GUI, and a
 headless agent — all three thin projections of one renderer-agnostic domain layer. It
 is built for operators, SREs, platform engineers, and security teams who live inside
