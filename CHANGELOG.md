@@ -4,6 +4,22 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-08-25
+
+### Added
+- **M2.0 — wired the render contract + informer store** (review #3):
+  - `kaptein-viewmodel::table`: renderer-agnostic sort/filter over `Row`/`Cell`.
+  - `kaptein-viewmodel::mem_plane::MemPlane`: first concrete `DataPlane` (wasm-pure,
+    revision, upsert/remove, bounded `query`, history-replaying `subscribe`).
+  - `kaptein-core::store::InformerStore` + `run_informer`: bounded list-then-watch with
+    a monotonic `StoreRevision`.
+  - `kaptein-core::discovery::list_bounded`: server-side pagination (limit + continue).
+  - `kaptein-integration::KubernetesPlane`: the `DataPlane` binding core → view-model.
+  - The TUI now queries a `DataPlane` (render-intent) instead of `discovery::list_with`.
+- Contract test: the same `Query` over a `DataPlane` yields the same `Page` across
+  projections (TUI/GUI/headless share one render-intent).
+- First `#[tokio::test]` (informer store concurrent writer/reader contract).
+
 ## [0.17.0] - 2026-08-24
 
 ### Added
