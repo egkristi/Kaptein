@@ -81,6 +81,16 @@ pub async fn dry_run_apply(client: &Client, manifest: &str) -> Result<DryRun, Er
 /// Server-managed fields (`metadata.managedFields`, `metadata.resourceVersion`,
 /// `metadata.creationTimestamp`, `metadata.uid`, `status`) are stripped before the
 /// patch — they are read-only and would otherwise be rejected by the API server.
+///
+/// # Phase 2 guardrail (issue #16)
+///
+/// `force: true` is **correct for dry-run only** — it lets the dry-run succeed against
+/// resources created by other field managers (`kubectl create`, Flux/Argo). The Phase 2
+/// **real write path must NOT reuse this function or carry `force: true` forward**: a
+/// real apply with `force` silently steals field ownership from Flux/Argo/GitOps, which
+/// would then drop those fields on their next reconcile. The write path needs a *new*
+/// function with `force: false` (or an explicit field-ownership negotiation), never this
+/// one.
 pub async fn dry_run_apply_patch(client: &Client, manifest: &str) -> Result<DryRun, Error> {
     let mut obj: DynamicObject =
         serde_yaml::from_str(manifest).map_err(|e| Error::Internal(e.to_string()))?;
