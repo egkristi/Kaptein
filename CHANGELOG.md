@@ -4,6 +4,20 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-25
+
+### Fixed
+- **#17 — `kaptein edit` no longer round-trips `[REDACTED]`** — the edit path now
+  fetches unredacted (via `describe_dynamic_policy`) and emits `Operation::SecretViewed`
+  when editing a secret-kind resource; `describe` stays redacted by default.
+- **#18 — bounded informer store wired + watch reconnect** — `store::watch_from`
+  reconnects with backoff and relists on watch expiry/410; new `kaptein watch-store`
+  gives `run_informer` its first caller outside tests.
+
+### Changed
+- Documented the `force: true` Phase 2 guardrail on `dry_run_apply_patch` (#16) so the
+  M2.3 write path can't silently carry it into Flux/Argo ownership theft.
+
 ## [0.23.0] - 2026-08-25
 
 ### Security
