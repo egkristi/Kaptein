@@ -4,6 +4,18 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-25
+
+### Added
+- **M2.2 — view-definition (lens) schema + validation + evaluation** (data-first):
+  - `kaptein-viewmodel::lens`: versioned lens data model (`ViewDefinition`,
+    `GroupVersionKind`, `StatusRule`/`RuleOp`, `LensAction`) with `validate_viewdef`.
+  - `evaluate_status`: resolve dotted field paths (with `[i]` subscripts) and apply the
+    first matching status rule (`Eq`/`Ne`/`Gt`/`Gte`/`Lt`/`Lte`/`Contains`).
+  - `kaptein viewdef validate -f` parses a lens (YAML/JSON) and reports every problem.
+  - Example CNPG lens under `extensions/` (MIT/Apache-2.0, ADR-0004).
+- Lens contract-version gate (`LENS_SCHEMA_VERSION` + `api_version` refusal).
+
 ## [0.19.0] - 2026-08-25
 
 ### Added
