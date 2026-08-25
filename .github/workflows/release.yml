@@ -94,6 +94,8 @@ jobs:
     name: Attach to GitHub release (checksums + signatures)
     needs: build
     runs-on: ubuntu-latest
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     permissions:
       contents: write
       # OIDC token for cosign keyless signing (Fulcio/Rekor).
@@ -140,11 +142,24 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" \
             *.tar.gz *.zip SHA256SUMS *.bundle --clobber
 
+      # Generate the SLSA subject digest for the generic generator. The generator
+      # attests to these exact artifact bytes; consumers verify provenance with
+      # `slsa-verifier` against the artifact they downloaded.
+      - name: Generate SLSA subject hashes
+        id: hash
+        run: |
+          set -euo pipefail
+          echo "hashes=$(sha256sum *.tar.gz *.zip SHA256SUMS | base64 -w0)" >> "$GITHUB_OUTPUT"
+
   sbom:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # OIDC token so the SBOM can be cosign-attested and linked to the
+      # binaries it describes (an unsigned SBOM is unverifiable supply-chain
+      # metadata).
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -157,8 +172,38 @@ jobs:
       - name: Generate SBOM
         run: cargo cyclonedx --all --format json --spec-version 1.5
 
-      - name: Upload SBOM to release
+      # Sign the SBOM so it can be verified against the same GitHub Actions OIDC
+      # identity as the binaries (SECURITY.md's "Verifying a release" section).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+      - name: Sign SBOM with cosign (keyless)
+        run: |
+          set -euo pipefail
+          for f in *.cdx.json; do
+            cosign sign-blob --yes --bundle "$f.bundle" "$f"
+          done
+
+      - name: Upload SBOM (and signature) to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          find . -name '*.cdx.json' -print0 | xargs -0 -I{} gh release upload "${GITHUB_REF_NAME}" {} --clobber
+          find . -maxdepth 1 -name '*.cdx.json' -print0 \
+            | xargs -0 -I{} gh release upload "${GITHUB_REF_NAME}" {} --clobber
+          find . -maxdepth 1 -name '*.cdx.json.bundle' -print0 \
+            | xargs -0 -I{} gh release upload "${GITHUB_REF_NAME}" {} --clobber
+
+  provenance:
+    name: SLSA provenance
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      # Needed to detect the GitHub Actions environment and read the workflow
+      # definition that produced the artifacts.
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.release.outputs.hashes }}"
+      # Attach the signed provenance to the tagged GitHub release.
+      upload-assets: true

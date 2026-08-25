@@ -351,15 +351,15 @@ Milestones:
   serialization, not at the frontend.
 - **Signed releases + SBOM** — cosign signature, SLSA provenance, SBOM, and a
   `SHA256SUMS` file on every release (elevated from the Phase 0 "stub" to a real DoD per
-  review; SECURITY.md already promises it). *Cosign keyless + CycloneDX SBOM +
-  `SHA256SUMS` are implemented in `.github/workflows/release.yml`; SLSA provenance
-  generation is the remaining piece. Open: **verifiability** — nothing documents how a
-  user verifies a signature (`cosign verify-blob --certificate-identity …
-  --certificate-oidc-issuer …`), and the SBOM job lacks `id-token: write` so it is
-  unsigned/unattested (`cosign attest` would link it to the binaries).*
+  review; SECURITY.md already promises it). *Done: cosign keyless signing + CycloneDX
+  SBOM + `SHA256SUMS` (release.yml), the SBOM is cosign-signed against the same OIDC
+  identity as the binaries, and SLSA provenance is generated per release via
+  `slsa-framework/slsa-github-generator` (the `provenance` job).*
 - **Release-gate hygiene** — neither `release.yml` nor `publish.yml` runs `cargo test`
   before shipping; `publish.yml` pushes five crates on a raw tag with no `needs:` on
-  anything. Add `needs: test` to each.
+  anything. Add `needs: test` to each. *Done: `release.yml` has a `test` gate job and
+  `publish.yml` now has a `needs: test` gate and is idempotent (skips crates already
+  at the tagged version).*
 - **Redaction-aware error boundary** — `kaptein-viewmodel::Error` maps raw
   `kube::Error`/subprocess failures to user-facing messages; `kaptein-integration` is
   that boundary, not a `#[error("{0}")]` pass-through (elevated per review).
@@ -390,12 +390,11 @@ Milestones:
   precedence config → CLI → env; a unified error enum in `kaptein-viewmodel` that maps raw
   `kube::Error` and subprocess failures to redaction-aware, user-facing messages.
 
-## Immediate next steps
-
-*(Phase 0 is long done, M2.0 is done. The live next steps are the remaining **M2.0b**
-(kind/envtest + latest-three-minors conformance), **M1.8 kwok harness**, **M2.1 browser
-UI**, **M2.2 view-definition/lens engine**, and the cross-cutting supply-chain items:
-**distribution & release sync** and **SLSA provenance**.)*
+- **Immediate next steps** — *(Phase 0 is long done, M2.0 is done. The live next steps
+  are the remaining **M2.0b** (kind/envtest + latest-three-minors conformance), **M1.8
+  kwok harness**, **M2.1 browser UI**, **M2.2 view-definition/lens engine**, and the
+  cross-cutting **distribution & release sync** item — the SLSA-provenance and
+  release-gate-hygiene pieces are now done.)*
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the
