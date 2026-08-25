@@ -223,6 +223,85 @@ fn valid_field_path(field: &str) -> bool {
     parts.all(is_segment)
 }
 
+/// Resolve a dotted field path (with `[i]` subscripts) against a JSON object. Returns
+/// `None` when the path is absent or a segment does not exist. Used by status-rule
+/// evaluation so a lens can read `status.phase` or `spec.containers[0].name`.
+fn resolve_field<'a>(root: &'a serde_json::Value, field: &str) -> Option<&'a serde_json::Value> {
+    let mut cur = root;
+    for segment in field.split('.') {
+        // Split a `name[0][1]` segment into the identifier and its subscripts.
+        let (ident, subscripts) = split_subscripts(segment);
+        cur = cur.get(ident)?;
+        for sub in subscripts {
+            cur = cur.get(sub)?;
+        }
+    }
+    Some(cur)
+}
+
+/// Split `"containers[0][1]"` into `("containers", [0, 1])`. A segment with no
+/// subscripts yields an empty index list.
+fn split_subscripts(segment: &str) -> (&str, Vec<usize>) {
+    let mut idx = segment.len();
+    let mut subs = Vec::new();
+    while idx > 0 && segment[..idx].ends_with(']') {
+        if let Some(open) = segment[..idx].rfind('[') {
+            let inside = &segment[open + 1..idx - 1];
+            if let Ok(n) = inside.parse::<usize>() {
+                subs.push(n);
+            }
+            idx = open;
+        } else {
+            break;
+        }
+    }
+    subs.reverse();
+    (&segment[..idx], subs)
+}
+
+/// Evaluate a lens's status rules against a live resource's JSON representation,
+/// returning the first matching level, or `None` when no rule matches. This is the
+/// "status inference" half of the lens engine (ADR-0012): the frontend colors the status
+/// chip from the level; the lens declares the meaning.
+pub fn evaluate_status(
+    vd: &ViewDefinition,
+    resource: &serde_json::Value,
+) -> Option<crate::render::StatusLevel> {
+    for rule in &vd.status {
+        if rule_matches(rule, resource) {
+            return Some(rule.level);
+        }
+    }
+    None
+}
+
+fn rule_matches(rule: &StatusRule, resource: &serde_json::Value) -> bool {
+    let Some(actual) = resolve_field(resource, &rule.field) else {
+        return false;
+    };
+    match rule.op {
+        RuleOp::Eq => actual == &rule.value,
+        RuleOp::Ne => actual != &rule.value,
+        RuleOp::Gt | RuleOp::Gte | RuleOp::Lt | RuleOp::Lte => {
+            // Numeric comparison; non-numeric operands never match.
+            let (Some(a), Some(b)) = (actual.as_i64(), rule.value.as_i64()) else {
+                return false;
+            };
+            match rule.op {
+                RuleOp::Gt => a > b,
+                RuleOp::Gte => a >= b,
+                RuleOp::Lt => a < b,
+                RuleOp::Lte => a <= b,
+                _ => unreachable!(),
+            }
+        }
+        RuleOp::Contains => match (actual.as_str(), rule.value.as_str()) {
+            (Some(a), Some(b)) => a.contains(b),
+            _ => false,
+        },
+    }
+}
+
 fn is_segment(seg: &str) -> bool {
     // A segment is an identifier, optionally followed by one or more `[index]`
     // subscripts: `containers`, `containers[0]`, `containers[0][1]`.
@@ -409,5 +488,87 @@ mod tests {
         assert!(!valid_field_path(""));
         assert!(!valid_field_path(".phase"));
         assert!(!valid_field_path("status..phase"));
+    }
+
+    #[test]
+    fn resolve_field_reads_nested_and_indexed_paths() {
+        let v = serde_json::json!({
+            "status": {"phase": "Running"},
+            "spec": {"containers": [{"name": "app"}]}
+        });
+        assert_eq!(
+            resolve_field(&v, "status.phase"),
+            Some(&serde_json::json!("Running"))
+        );
+        assert_eq!(
+            resolve_field(&v, "spec.containers[0].name"),
+            Some(&serde_json::json!("app"))
+        );
+        assert_eq!(resolve_field(&v, "status.nope"), None);
+    }
+
+    #[test]
+    fn evaluate_status_first_match_wins() {
+        let mut vd = valid();
+        vd.status = vec![
+            StatusRule {
+                field: "status.phase".into(),
+                op: RuleOp::Eq,
+                value: serde_json::json!("Running"),
+                level: crate::render::StatusLevel::Ok,
+            },
+            StatusRule {
+                field: "status.phase".into(),
+                op: RuleOp::Ne,
+                value: serde_json::json!("Running"),
+                level: crate::render::StatusLevel::Warning,
+            },
+        ];
+        let running = serde_json::json!({"status": {"phase": "Running"}});
+        assert_eq!(
+            evaluate_status(&vd, &running),
+            Some(crate::render::StatusLevel::Ok)
+        );
+        let pending = serde_json::json!({"status": {"phase": "Pending"}});
+        assert_eq!(
+            evaluate_status(&vd, &pending),
+            Some(crate::render::StatusLevel::Warning)
+        );
+        let empty = serde_json::json!({});
+        assert_eq!(evaluate_status(&vd, &empty), None);
+    }
+
+    #[test]
+    fn numeric_rule_compares_numerically() {
+        let mut vd = valid();
+        vd.status = vec![StatusRule {
+            field: "spec.replicas".into(),
+            op: RuleOp::Gt,
+            value: serde_json::json!(1),
+            level: crate::render::StatusLevel::Warning,
+        }];
+        let three = serde_json::json!({"spec": {"replicas": 3}});
+        assert_eq!(
+            evaluate_status(&vd, &three),
+            Some(crate::render::StatusLevel::Warning)
+        );
+        let one = serde_json::json!({"spec": {"replicas": 1}});
+        assert_eq!(evaluate_status(&vd, &one), None);
+    }
+
+    #[test]
+    fn contains_rule_matches_substring() {
+        let mut vd = valid();
+        vd.status = vec![StatusRule {
+            field: "status.message".into(),
+            op: RuleOp::Contains,
+            value: serde_json::json!("back-off"),
+            level: crate::render::StatusLevel::Error,
+        }];
+        let msg = serde_json::json!({"status": {"message": "back-off pulling image"}});
+        assert_eq!(
+            evaluate_status(&vd, &msg),
+            Some(crate::render::StatusLevel::Error)
+        );
     }
 }
