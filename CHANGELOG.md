@@ -4,6 +4,17 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-25
+
+### Added
+- **M2.2/M2.6 — extension manifest + lifecycle** (ADR-0004):
+  - `kaptein-core::extension`: `ExtensionManifest` + `validate_manifest` + `discover`
+    (recursive `extension.yaml` walk with per-manifest problem reporting).
+  - `kaptein extension list` / `kaptein extension validate`.
+  - Example `extensions/extension.yaml` manifest for the CNPG lens.
+- Versioned JSON Schema for view definitions (`extensions/viewdef.schema.json`) +
+  `kaptein viewdef schema`, with a drift-guard test against `LENS_SCHEMA_VERSION`.
+
 ## [0.20.0] - 2026-08-25
 
 ### Added
