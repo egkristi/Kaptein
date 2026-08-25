@@ -1182,6 +1182,7 @@ dependencies = [
  "regex",
  "rmcp",
  "serde_json",
+ "serde_yaml",
  "tokio",
 ]
 

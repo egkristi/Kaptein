@@ -182,6 +182,13 @@ Milestones:
   cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative
   - Ship a versioned JSON Schema (and/or CUE schema) for view definitions plus a
     `kaptein viewdef validate` command so lenses are reviewable in PRs
+  - **Status: schema + validation landed** (commit 979cae7 → next). `kaptein-viewmodel::lens`
+    defines the versioned lens data model (`ViewDefinition`, `GroupVersionKind`,
+    `StatusRule`/`RuleOp`, `LensAction`) and `validate_viewdef` (id/api_version/columns/
+    status/actions); `kaptein viewdef validate -f` parses a lens (YAML/JSON) and reports
+    problems; an example CNPG lens ships under `extensions/` (MIT/Apache-2.0). Remaining:
+    the JSON Schema artifact, status-rule *evaluation* against live objects, and the
+    `kaptein extension {list,enable,disable}` lifecycle.
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile

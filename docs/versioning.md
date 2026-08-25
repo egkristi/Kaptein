@@ -31,8 +31,10 @@ it implements and refuses a `tools/call` from a client whose declared
 `_meta["io.kaptein/apiVersion"]` has a different **major** (a client that omits the field
 is accepted for backward compatibility). The rule lives in
 `kaptein-viewmodel::versioned` (`ApiVersion`, `is_compatible`, `MCP_API_VERSION`) and is
-enforced in `crates/kaptein-cli/src/mcp.rs`. The **lens** and **WIT** gates land with
-their engines (M2.2 / M2.6), which is when those contracts first exist.
+enforced in `crates/kaptein-cli/src/mcp.rs`. The **lens** gate is implemented too:
+`kaptein-viewmodel::lens::LENS_SCHEMA_VERSION` + `validate_viewdef` refuse a lens whose
+`api_version` differs (via `kaptein viewdef validate`). The **WIT** gate lands with its
+engine (M2.6), which is when that contract first exists.
 
 ## Change log
 

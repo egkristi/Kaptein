@@ -45,9 +45,9 @@ unowned debt. Done items are struck through.
    kind/envtest tier and Kubernetes-minor conformance remain open.*
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
    aspirational.
-5. **Signed releases + SBOM** (cross-cutting): cosign + SLSA + SBOM + SHA256SUMS.
-   *Cosign keyless signing + CycloneDX SBOM + SHA256SUMS implemented in
-   `.github/workflows/release.yml` (SLSA provenance generation still open).*
+5. ~~**Signed releases + SBOM**~~ (partially done, commit eba14d9): cosign keyless +
+   CycloneDX SBOM + SHA256SUMS implemented in `.github/workflows/release.yml`. *SLSA
+   provenance generation remains open.*
 6. ~~**Config schema/precedence/validation**~~ (done, commit 29cc1e6): `kaptein config validate`
    / `explain-context` flag invalid guardrail regexes and explain classification.
 7. ~~**Redaction-aware error boundary**~~ (done, commit 98a39cc): `kaptein-integration`

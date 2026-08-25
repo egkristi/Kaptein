@@ -1,0 +1,41 @@
+# CNPG Cluster lens — a view definition (ADR-0004 tier 1, ADR-0012).
+#
+# This is *data*, not code: it binds the CloudNativePG `Cluster` CRD to columns,
+# status inference, and actions. It is the hardest-lens acceptance test from ADR-0012.
+# This file (the lens schema + example lenses) is MIT/Apache-2.0 — see ADR-0004.
+
+id: com.example.cnpg-lens
+api_version: 1
+target:
+  group: postgresql.cnpg.io
+  version: v1
+  kind: Cluster
+
+columns:
+  - id: name
+    header_key: col.name
+    kind: text
+    sortable: true
+  - id: instances
+    header_key: col.instances
+    kind: number
+    sortable: true
+  - id: status
+    header_key: col.status
+    kind: status
+    sortable: true
+
+status:
+  - field: status.phase
+    op: eq
+    value: "ClusterIsReady"
+    level: ok
+  - field: status.phase
+    op: ne
+    value: "ClusterIsReady"
+    level: warning
+
+actions:
+  - id: describe
+    label_key: action.describe
+    state: allowed

@@ -81,6 +81,12 @@ enum Command {
         #[arg(long)]
         context: String,
     },
+    /// Validate a view-definition (lens) file against the lens schema.
+    ViewdefValidate {
+        /// path to a lens YAML/JSON file
+        #[arg(short = 'f', long)]
+        file: String,
+    },
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
@@ -512,6 +518,45 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 kaptein_core::config::explain_context(&config, &context)
             );
             Ok(())
+        }
+        Command::ViewdefValidate { file } => {
+            let path = std::path::Path::new(&file);
+            let text = std::fs::read_to_string(path).map_err(|e| {
+                kaptein_core::Error::Internal(format!("cannot read {}: {e}", path.display()))
+            })?;
+            // A lens is YAML (or JSON, which YAML is a superset of) — parse to a
+            // serde_json::Value first, then deserialize to the view-model type.
+            let value: serde_json::Value = serde_yaml::from_str(&text).map_err(|e| {
+                kaptein_core::Error::Internal(format!("cannot parse {}: {e}", path.display()))
+            })?;
+            let vd: kaptein_viewmodel::ViewDefinition =
+                serde_json::from_value(value).map_err(|e| {
+                    kaptein_core::Error::Internal(format!(
+                        "cannot deserialize {}: {e}",
+                        path.display()
+                    ))
+                })?;
+            let problems = kaptein_viewmodel::validate_viewdef(&vd);
+            if problems.is_empty() {
+                println!(
+                    "lens {} ({}) is valid ({} columns, {} status rules, {} actions)",
+                    vd.id,
+                    vd.target.display(),
+                    vd.columns.len(),
+                    vd.status.len(),
+                    vd.actions.len()
+                );
+                Ok(())
+            } else {
+                let count = problems.len();
+                for p in &problems {
+                    eprintln!("error: {p}");
+                }
+                Err(kaptein_core::Error::Internal(format!(
+                    "lens {} is invalid ({count} problem(s))",
+                    path.display()
+                )))
+            }
         }
         Command::Diagnose { name, namespace } => {
             let pod = kaptein_core::pods::get_pod(&client, &namespace, &name).await?;
