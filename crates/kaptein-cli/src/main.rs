@@ -87,6 +87,8 @@ enum Command {
         #[arg(short = 'f', long)]
         file: String,
     },
+    /// Print the versioned JSON Schema for view definitions (for CI/PR review).
+    ViewdefSchema,
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
@@ -557,6 +559,16 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     path.display()
                 )))
             }
+        }
+        Command::ViewdefSchema => {
+            // The lens schema is the MIT/Apache-2.0 extension surface (ADR-0004). Emit it
+            // so CI and contributors can validate lenses against the exact schema the
+            // release implements.
+            print!(
+                "{}",
+                include_str!("../../../extensions/viewdef.schema.json")
+            );
+            Ok(())
         }
         Command::Diagnose { name, namespace } => {
             let pod = kaptein_core::pods::get_pod(&client, &namespace, &name).await?;
@@ -1271,5 +1283,40 @@ fn parse_gvk(s: &str) -> GroupVersionKind {
             eprintln!("invalid gvk: {s}");
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The bundled JSON Schema's `api_version` `const` must equal the Rust
+    /// `LENS_SCHEMA_VERSION` — a drift between the schema and the code would let a lens
+    /// validate against one version and be refused by the other. This test catches that.
+    #[test]
+    fn bundled_schema_api_version_matches_lens_schema_version() {
+        let schema = include_str!("../../../extensions/viewdef.schema.json");
+        let value: serde_json::Value = serde_json::from_str(schema).expect("schema is valid JSON");
+        let const_version = value
+            .pointer("/properties/api_version/const")
+            .and_then(|v| v.as_u64())
+            .expect("schema has properties.api_version.const");
+        assert_eq!(
+            const_version,
+            kaptein_viewmodel::LENS_SCHEMA_VERSION as u64,
+            "viewdef.schema.json api_version const drifts from LENS_SCHEMA_VERSION"
+        );
+    }
+
+    /// The example lens must validate cleanly against the real validator (it is the
+    /// "reviewable in PRs" acceptance test from ADR-0012).
+    #[test]
+    fn example_cnpg_lens_validates_cleanly() {
+        let yaml = include_str!("../../../extensions/example-cnpg-lens.yaml");
+        let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
+        let vd: kaptein_viewmodel::ViewDefinition =
+            serde_json::from_value(value).expect("lens deserializes");
+        assert!(
+            kaptein_viewmodel::validate_viewdef(&vd).is_empty(),
+            "example lens must be valid"
+        );
     }
 }
