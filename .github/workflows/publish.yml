@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only publish when triggered by a tag push, or a manual dispatch with a version.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
