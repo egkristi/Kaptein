@@ -37,6 +37,10 @@ unowned debt. Done items are struck through.
    `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
 2. **M2.0 — wire `DataPlane` + informer store** (blocking): the render contract and the
    informer-backed bounded store are implemented, not just specified.
+   *First increment done (commit ad1cb5b): `MemPlane` (DataPlane) + `table` sort/filter
+   in the view-model, `InformerStore`/`run_informer` + `list_bounded` in core,
+   `KubernetesPlane` in the integration layer, and the TUI queries it. Remaining: live
+   deltas into the TUI and `PartialObjectMetadata` for the most list-heavy views.*
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
    kind/envtest tier and Kubernetes-minor conformance remain open.*

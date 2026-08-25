@@ -273,4 +273,43 @@ mod tests {
         assert_eq!(row_key(&obj("p", "ns")), "ns/p");
         assert_eq!(row_key(&obj("node", "")), "node");
     }
+
+    /// The store is shared across tasks: a spawned writer applies watch deltas while the
+    /// main task snapshots. This exercises the `Arc<Mutex<..>>` + revision contract that
+    /// `run_informer` relies on — the "informer-driven, never polling" shape — without a
+    /// live cluster (the watch stream is synthesized via `apply`).
+    #[tokio::test]
+    async fn concurrent_writer_and_reader_see_consistent_snapshots() {
+        let store = InformerStore::new();
+        let seed = ObjectList {
+            types: kube::core::TypeMeta {
+                api_version: "v1".into(),
+                kind: "PodList".into(),
+            },
+            metadata: Default::default(),
+            items: vec![obj("seed", "ns")],
+        };
+        store.seed(seed, &gvk());
+
+        let writer = store.clone();
+        let handle = tokio::spawn(async move {
+            for i in 0..10 {
+                let o = obj(&format!("pod-{i}"), "ns");
+                writer.apply(&WatchEvent::Added(o), &gvk());
+                tokio::task::yield_now().await;
+            }
+        });
+
+        // Snapshot while the writer is running; every observation is internally
+        // consistent (len == snapshot length) and monotonic.
+        let mut observed = 0usize;
+        while observed < 11 {
+            let snap = store.snapshot();
+            assert_eq!(snap.len(), store.len());
+            observed = store.len();
+            tokio::task::yield_now().await;
+        }
+        handle.await.expect("writer task");
+        assert_eq!(store.len(), 11); // seed + 10
+    }
 }

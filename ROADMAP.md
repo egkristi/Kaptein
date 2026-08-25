@@ -160,6 +160,13 @@ Milestones:
     stops re-listing the whole cluster per keystroke
   - **DoD (falsifiable):** the TUI renders from a `DataPlane` subscription, not per-key
     `api.list` calls — and there is at least one `#[tokio::test]` exercising the store.
+  - **Status: the render contract + informer store are wired** (commit ad1cb5b).
+    `kaptein-viewmodel::mem_plane::MemPlane` is the first concrete `DataPlane`;
+    `kaptein-viewmodel::table` owns sorting/filtering; `kaptein-core::store::InformerStore`
+    + `run_informer` do bounded list-then-watch; `kaptein-integration::KubernetesPlane`
+    binds them and the TUI's `fetch` queries it. Remaining sub-items: live `DataPlane`
+    deltas into the TUI (currently a one-shot query) and `PartialObjectMetadata` for
+    the most list-heavy views.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none

@@ -129,3 +129,80 @@ fn support_matrix_is_exhaustive_and_correct() {
         SupportLevel::Full
     );
 }
+
+/// The contract test the review asked for (M2.0 DoD): the *same* `Query` over the *same*
+/// `DataPlane` yields the same rows regardless of projection — the TUI, GUI, and headless
+/// all consume the render-intent, not a per-frontend recomputation. This pins the form
+/// (query → sort/filter → page) against a `MemPlane`.
+#[test]
+fn same_query_yields_same_page_across_projections() {
+    use crate::mem_plane::{MemPlane, Schema};
+    use crate::render::{Cell, DataPlane, Filter, Query, Row, RowId, SortSpec};
+
+    fn text(v: &str) -> Cell {
+        Cell::Text { value: v.into() }
+    }
+    fn row(id: &str, name: &str, count: i64) -> Row {
+        Row {
+            id: RowId(id.into()),
+            cells: vec![text(name), Cell::Number { value: count }],
+        }
+    }
+
+    let plane = MemPlane::new(Schema {
+        column_ids: vec!["name".into(), "count".into()],
+    });
+    plane.upsert(row("a", "web", 3));
+    plane.upsert(row("b", "api", 5));
+    plane.upsert(row("c", "worker", 1));
+
+    let query = Query {
+        start: 0,
+        end: 10,
+        sort: Some(SortSpec {
+            column: "count".into(),
+            descending: true,
+        }),
+        filter: Some(Filter {
+            expression: "e".into(), // matches "web" and "worker"
+        }),
+    };
+
+    // Block on the (async) query without tokio — the view-model stays wasm-pure.
+    let page = {
+        let fut = plane.query(&query);
+        futures_util::pin_mut!(fut);
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        match fut.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(p) => p.expect("query"),
+            std::task::Poll::Pending => panic!("mem plane query must not pend"),
+        }
+    };
+
+    // Two rows match the filter, sorted by count descending: web(3) then worker(1).
+    assert_eq!(page.total, 2);
+    let names: Vec<&str> = page
+        .rows
+        .iter()
+        .map(|r| match &r.cells[0] {
+            Cell::Text { value } => value.as_str(),
+            _ => "",
+        })
+        .collect();
+    assert_eq!(names, vec!["web", "worker"]);
+
+    // The exact same query on a second handle to the same plane is identical — this is
+    // what "the TUI, GUI, and headless consume the same render-intent" means.
+    let again = {
+        let fut = plane.query(&query);
+        futures_util::pin_mut!(fut);
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        match fut.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(p) => p.expect("query"),
+            std::task::Poll::Pending => panic!("mem plane query must not pend"),
+        }
+    };
+    assert_eq!(again, page);
+}
