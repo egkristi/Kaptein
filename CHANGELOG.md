@@ -13,7 +13,8 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     (degrade-to-on-demand-list) instead of exceeding the cap.
   - The cap and idle TTL are now configurable via a new `[informer]` config section
     (`max_watches`, `idle_ttl_secs`), satisfying ADR-0006's "the cap must be a policy,
-    exposed in the config file".
+    exposed in the config file". `kaptein config validate` now bounds-checks them
+    (`0` cap/ttl is flagged, not silently defaulted).
 - **Distribution & release sync (cross-cutting)**:
   - `install.sh` — checksum-verified install of the signed release binaries (no `cargo`
     required).

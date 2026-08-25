@@ -123,6 +123,14 @@ pub fn validate(config: &Config) -> Vec<String> {
             }
         }
     }
+    // Informer policy: `max_watches = 0` would degrade every view to an on-demand list
+    // (surprising), and `idle_ttl_secs = 0` would evict every watch immediately.
+    if config.informer.max_watches == 0 {
+        problems.push("informer.max_watches: must be >= 1".into());
+    }
+    if config.informer.idle_ttl_secs == 0 {
+        problems.push("informer.idle_ttl_secs: must be >= 1".into());
+    }
     problems
 }
 
@@ -284,6 +292,38 @@ prod = ["webtop"]
         c.extensions.disabled.push("com.example.a".into());
         assert!(!c.extensions.is_enabled("com.example.a"));
         assert!(c.extensions.is_enabled("com.example.b"));
+    }
+
+    #[test]
+    fn informer_section_round_trips_and_validates() {
+        let text = r#"[guardrails]
+prod = []
+staging = []
+
+[informer]
+max_watches = 32
+idle_ttl_secs = 120
+"#;
+        let c: Config = toml::from_str(text).expect("parse");
+        assert_eq!(c.informer.max_watches, 32);
+        assert_eq!(c.informer.idle_ttl_secs, 120);
+        assert!(validate(&c).is_empty());
+
+        // A zero cap/ttl is a policy error, surfaced rather than silently defaulting.
+        let mut bad = Config::default();
+        bad.informer.max_watches = 0;
+        bad.informer.idle_ttl_secs = 0;
+        let problems = validate(&bad);
+        assert!(problems.iter().any(|p| p.contains("max_watches")));
+        assert!(problems.iter().any(|p| p.contains("idle_ttl_secs")));
+    }
+
+    #[test]
+    fn informer_policy_conversion_bounds_are_safe() {
+        let c = Config::default();
+        let policy = c.informer.to_policy();
+        assert!(policy.max_watches >= 1);
+        assert!(policy.idle_ttl.as_secs() >= 1);
     }
 
     #[test]
