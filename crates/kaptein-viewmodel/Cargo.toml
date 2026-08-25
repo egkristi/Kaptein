@@ -12,6 +12,7 @@ description = "Kaptein view-model: renderer-agnostic logic (the product)"
 serde = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+futures-channel = { workspace = true }
 thiserror = { workspace = true }
 strum = { workspace = true }
 serde_json = "1"

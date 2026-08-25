@@ -10,5 +10,8 @@ description = "Kaptein integration layer: binds kaptein-core to frontends, mappi
 
 [dependencies]
 kaptein-core = { version = "0.17.0", path = "../kaptein-core" }
+kaptein-viewmodel = { version = "0.17.0", path = "../kaptein-viewmodel" }
 kube = { workspace = true }
 thiserror = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }

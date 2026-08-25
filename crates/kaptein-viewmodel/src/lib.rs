@@ -14,10 +14,12 @@ pub mod diff;
 pub mod error;
 pub mod fuzzy;
 pub mod logparse;
+pub mod mem_plane;
 pub mod render;
 pub mod semantic;
 pub mod sink;
 pub mod surface;
+pub mod table;
 pub mod versioned;
 
 pub use audit::{Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source};
@@ -25,6 +27,7 @@ pub use diff::{DiffLine, UnifiedDiff, render_unified, unified_diff};
 pub use error::Error;
 pub use fuzzy::{FuzzyMatch, fuzzy_jump};
 pub use logparse::{LogCell, ParsedLogLine, infer_columns, parse_json_line, parse_log_stream};
+pub use mem_plane::{MemPlane, Schema};
 pub use render::{
     Cell, DataPlane, Filter, Page, Query, Revision, Row, RowId, RowPatch, SortSpec, StatusLevel,
 };
@@ -34,6 +37,7 @@ pub use surface::{
     Column, ColumnKind, EditorMode, Field, FieldKind, Projection, SupportLevel, Surface,
     SurfaceKind, support_level,
 };
+pub use table::{cell_text, cmp_cells, filter_rows, sort_rows};
 pub use versioned::{
     ApiVersion, MCP_API_VERSION, MCP_VERSION_META_KEY, is_compatible, parse_api_version,
 };

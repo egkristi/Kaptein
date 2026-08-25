@@ -27,6 +27,7 @@ pub mod overview;
 pub mod pods;
 pub mod portforward;
 pub mod redact;
+pub mod store;
 pub mod watchring;
 pub mod workloads;
 

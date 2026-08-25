@@ -669,6 +669,7 @@ name = "frontend-tui"
 version = "0.17.0"
 dependencies = [
  "crossterm",
+ "k8s-openapi",
  "kaptein-integration",
  "kaptein-viewmodel",
  "kube",
@@ -1205,7 +1206,10 @@ dependencies = [
 name = "kaptein-integration"
 version = "0.17.0"
 dependencies = [
+ "async-trait",
+ "futures-util",
  "kaptein-core",
+ "kaptein-viewmodel",
  "kube",
  "thiserror 2.0.20",
 ]
@@ -1215,6 +1219,7 @@ name = "kaptein-viewmodel"
 version = "0.17.0"
 dependencies = [
  "async-trait",
+ "futures-channel",
  "futures-util",
  "serde",
  "serde_json",

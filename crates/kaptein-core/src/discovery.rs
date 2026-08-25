@@ -6,7 +6,7 @@
 //! later milestone.
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
-use kube::api::{Api, DynamicObject, ObjectList};
+use kube::api::{Api, DynamicObject, ListParams, ObjectList};
 use kube::config::KubeConfigOptions;
 use kube::core::{ApiResource, GroupVersionKind};
 use kube::{Client, Config, ResourceExt};
@@ -19,6 +19,9 @@ pub struct ResourceSummary {
     pub name: String,
     pub namespace: String,
     pub kind: String,
+    /// The object's `metadata.uid` — the stable identity the render contract keys rows by
+    /// (ADR-0005), not a positional index.
+    pub uid: Option<String>,
     /// The resource's creation time (Rust-native), for the frontend to format.
     pub created: Option<Time>,
     /// A best-effort human-readable status (pod phase, etc.), or empty when the kind has
@@ -160,24 +163,55 @@ pub async fn list(
     let list: ObjectList<DynamicObject> =
         api.list(&Default::default()).await.map_err(Error::Api)?;
 
-    Ok(list
-        .into_iter()
-        .map(|obj| {
-            let kind = obj
-                .types
-                .as_ref()
-                .map(|t| t.kind.clone())
-                .unwrap_or_else(|| gvk.kind.clone());
-            let status = status_of(&kind, &obj);
-            ResourceSummary {
-                name: obj.name_any(),
-                namespace: obj.namespace().unwrap_or_default(),
-                kind,
-                created: obj.metadata.creation_timestamp,
-                status,
-            }
-        })
-        .collect())
+    Ok(list.into_iter().map(|obj| summary_of(&obj, gvk)).collect())
+}
+
+/// Convert a `DynamicObject` into a display-neutral `ResourceSummary`.
+pub(crate) fn summary_of(obj: &DynamicObject, gvk: &GroupVersionKind) -> ResourceSummary {
+    let kind = obj
+        .types
+        .as_ref()
+        .map(|t| t.kind.clone())
+        .unwrap_or_else(|| gvk.kind.clone());
+    let status = status_of(&kind, obj);
+    ResourceSummary {
+        name: obj.name_any(),
+        namespace: obj.namespace().unwrap_or_default(),
+        kind,
+        uid: obj.metadata.uid.clone(),
+        created: obj.metadata.creation_timestamp.clone(),
+        status,
+    }
+}
+
+/// A bounded page of summaries plus the next `continue` token, or `None` when the page
+/// is the last. This is the server-side-paginated form of `list` (ADR-0006): the caller
+/// pages through `limit` objects at a time instead of one unbounded `api.list`, so
+/// list-heavy views are bounded and the API server is not asked to materialize the world.
+pub async fn list_bounded(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    limit: u32,
+    continue_token: Option<&str>,
+) -> Result<(Vec<ResourceSummary>, Option<String>), Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let mut lp = ListParams::default().limit(limit.max(1));
+    if let Some(token) = continue_token {
+        lp = lp.continue_token(token);
+    }
+
+    let list: ObjectList<DynamicObject> = api.list(&lp).await.map_err(Error::Api)?;
+    let next = list.metadata.continue_.clone();
+    Ok((
+        list.into_iter().map(|obj| summary_of(&obj, gvk)).collect(),
+        next,
+    ))
 }
 
 /// A sort key for a `ResourceSummary` column.
@@ -272,6 +306,7 @@ mod tests {
             name: name.into(),
             namespace: ns.into(),
             kind: kind.into(),
+            uid: None,
             created: None,
             status: String::new(),
         }

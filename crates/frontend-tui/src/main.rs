@@ -424,32 +424,74 @@ async fn fetch(
     sort_key: kaptein_core::discovery::SortKey,
     descending: bool,
 ) -> io::Result<Vec<TableRow>> {
+    // The TUI consumes the render contract through the integration layer's DataPlane
+    // (ADR-0005 / M2.0), not `discovery::list_with` directly. Sorting/filtering happen in
+    // the view-model; this function only maps a `Page` of `Row`s to geometry-local rows.
     let gvk = kind.gvk();
-    let items = kaptein_core::discovery::list_with(
-        client,
-        &gvk,
-        namespace,
-        Some(sort_key),
-        descending,
-        None,
+    let plane = kaptein_integration::KubernetesPlane::new(
+        client.clone(),
+        gvk.clone(),
+        namespace.map(|s| s.to_string()),
+    );
+    let sort_column = match sort_key {
+        kaptein_core::discovery::SortKey::Name => "name",
+        kaptein_core::discovery::SortKey::Namespace => "namespace",
+        kaptein_core::discovery::SortKey::Kind => "kind",
+        kaptein_core::discovery::SortKey::Created => "created",
+    };
+    let page = kaptein_integration::kaptein_viewmodel::DataPlane::query(
+        &plane,
+        &kaptein_integration::kaptein_viewmodel::Query {
+            start: 0,
+            end: 50_000,
+            sort: Some(kaptein_integration::kaptein_viewmodel::SortSpec {
+                column: sort_column.to_string(),
+                descending,
+            }),
+            filter: None,
+        },
     )
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
-    Ok(items
+
+    Ok(page
+        .rows
         .into_iter()
         .map(|r| TableRow {
-            name: r.name,
-            namespace: r.namespace,
-            // Real status from the resource (pod phase, etc.), falling back to a
-            // kind-appropriate placeholder only when the kind has no well-known status.
-            status: if r.status.is_empty() {
-                status_for(kind)
-            } else {
-                r.status
-            },
-            created: r.created.map(|t| t.0.to_string()).unwrap_or_default(),
+            name: cell_text(&r.cells, 0),
+            namespace: cell_text(&r.cells, 1),
+            status: cell_text(&r.cells, 2),
+            created: timestamp_text(&r.cells, 3),
         })
         .collect())
+}
+
+/// Extract a cell's display text by column index (geometry-local mapping of the
+/// view-model `Row` to the TUI table; the view-model owns the *meaning* of each cell).
+fn cell_text(cells: &[kaptein_integration::kaptein_viewmodel::Cell], idx: usize) -> String {
+    cells
+        .get(idx)
+        .map(kaptein_integration::kaptein_viewmodel::cell_text)
+        .unwrap_or_default()
+}
+
+/// Format a timestamp cell as a compact, local date-time string (geometry).
+fn timestamp_text(cells: &[kaptein_integration::kaptein_viewmodel::Cell], idx: usize) -> String {
+    match cells.get(idx) {
+        Some(kaptein_integration::kaptein_viewmodel::Cell::Timestamp { millis }) => {
+            format_timestamp(*millis)
+        }
+        _ => String::new(),
+    }
+}
+
+fn format_timestamp(millis: i64) -> String {
+    // `jiff::Timestamp::from_millisecond` (re-exported by `k8s-openapi`) gives a
+    // readable rendering. The frontend owns *how* to display the instant; the
+    // view-model owns the instant.
+    k8s_openapi::jiff::Timestamp::from_millisecond(millis)
+        .map(|t| t.to_string())
+        .unwrap_or_default()
 }
 
 fn sort_label(key: kaptein_core::discovery::SortKey, descending: bool) -> String {
@@ -488,16 +530,6 @@ fn next_sort_key(key: kaptein_core::discovery::SortKey) -> kaptein_core::discove
         SortKey::Namespace => SortKey::Kind,
         SortKey::Kind => SortKey::Created,
         SortKey::Created => SortKey::Name,
-    }
-}
-
-fn status_for(kind: Kind) -> String {
-    match kind {
-        Kind::Namespaces => "Active".into(),
-        Kind::Nodes => "Ready".into(), // refined via node status in a later milestone
-        Kind::Pods => "Running".into(), // refined via pod status in a later milestone
-        Kind::Deployments => "Ready".into(),
-        Kind::Services => "Active".into(),
     }
 }
 
