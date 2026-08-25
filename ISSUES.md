@@ -35,12 +35,11 @@ unowned debt. Done items are struck through.
 1. ~~**M1b.4 — MCP governance conformance**~~ (done, commit 1cbe417): RBAC preflight +
    context classification + read-only guardrail run per tool call; audit emits
    `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
-2. **M2.0 — wire `DataPlane` + informer store** (blocking): the render contract and the
-   informer-backed bounded store are implemented, not just specified.
-   *First increment done (commit ad1cb5b): `MemPlane` (DataPlane) + `table` sort/filter
-   in the view-model, `InformerStore`/`run_informer` + `list_bounded` in core,
-   `KubernetesPlane` in the integration layer, and the TUI queries it. Remaining: live
-   deltas into the TUI and `PartialObjectMetadata` for the most list-heavy views.*
+2. ~~**M2.0 — wire `DataPlane` + informer store**~~ (done, commits ad1cb5b → 13d8aae):
+   `MemPlane` + `table` (view-model DataPlane), `InformerStore`/`run_informer` +
+   `list_metadata_bounded` (core), `KubernetesPlane`/`LivePlane` (integration), the TUI
+   renders from a live informer-backed `DataPlane`, and a live `#[tokio::test]` exercises
+   the real kube client when `KUBECONFIG` is present.
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
    kind/envtest tier and Kubernetes-minor conformance remain open.*

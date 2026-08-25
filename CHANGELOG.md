@@ -4,6 +4,24 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-08-25
+
+### Added
+- **M2.0 complete** (review #3):
+  - `kaptein-core::discovery::list_metadata_bounded` — `PartialObjectMetadata` path for
+    list-heavy views (metadata-only, no full object bodies).
+  - `kaptein-integration::LivePlane` — an informer-backed `DataPlane` with a real
+    `subscribe`: seeds a `MemPlane` from a bounded list, then a background watch task
+    applies `RowPatch` deltas keyed by `uid`.
+  - `kaptein-integration::watch_event_to_patch` — `WatchEvent<DynamicObject>` → `RowPatch`.
+  - The TUI renders from a live `LivePlane` subscription (no per-key `api.list`).
+  - `kaptein get --metadata` exercises the bounded metadata-only path.
+- Live-cluster integration test (`#[tokio::test]` gated on `KUBECONFIG`) exercising the
+  real kube client.
+
+### Changed
+- `discovery::summary_of` is now `pub` (integration layer maps watch events to rows).
+
 ## [0.18.0] - 2026-08-25
 
 ### Added

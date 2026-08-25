@@ -160,13 +160,14 @@ Milestones:
     stops re-listing the whole cluster per keystroke
   - **DoD (falsifiable):** the TUI renders from a `DataPlane` subscription, not per-key
     `api.list` calls — and there is at least one `#[tokio::test]` exercising the store.
-  - **Status: the render contract + informer store are wired** (commit ad1cb5b).
-    `kaptein-viewmodel::mem_plane::MemPlane` is the first concrete `DataPlane`;
+  - **Status: done.** The render contract + informer store are fully wired.
+    `kaptein-viewmodel::mem_plane::MemPlane` is a concrete `DataPlane`;
     `kaptein-viewmodel::table` owns sorting/filtering; `kaptein-core::store::InformerStore`
-    + `run_informer` do bounded list-then-watch; `kaptein-integration::KubernetesPlane`
-    binds them and the TUI's `fetch` queries it. Remaining sub-items: live `DataPlane`
-    deltas into the TUI (currently a one-shot query) and `PartialObjectMetadata` for
-    the most list-heavy views.
+    + `run_informer` do bounded list-then-watch; `kaptein-core::discovery::list_metadata_bounded`
+    is the `PartialObjectMetadata` path; `kaptein-integration::LivePlane` is an
+    informer-backed `DataPlane` with a real `subscribe`, and the TUI renders from it
+    (a background watch task applies deltas; no per-key `api.list`). A live `#[tokio::test]`
+    exercises the store/client against a cluster when `KUBECONFIG` is present.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -351,10 +352,10 @@ Milestones:
 
 ## Immediate next steps
 
-*(Phase 0 is long done. The live next steps are the open milestones below — the blocking
-**M2.0** (data plane + informer store) and **M2.0b** (integration tests + platform CI),
-plus the cross-cutting supply-chain items: **M1.8 kwok harness**, **signed releases +
-SBOM**, **distribution & release sync**, and **contract-version enforcement**.)*
+*(Phase 0 is long done, M2.0 is done. The live next steps are the remaining **M2.0b**
+(kind/envtest + latest-three-minors conformance), **M1.8 kwok harness**, **M2.1 browser
+UI**, **M2.2 view-definition/lens engine**, and the cross-cutting supply-chain items:
+**distribution & release sync** and **SLSA provenance**.)*
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the
