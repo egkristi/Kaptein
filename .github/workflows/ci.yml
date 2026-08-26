@@ -115,6 +115,19 @@ jobs:
           print(f"Layer dependency rule satisfied ({len(frontends)} frontend crate(s))")
           PY
 
+      # Enforce the "semantics vs geometry" rule at the source level: a frontend must
+      # not import a `kaptein_core::discovery` type for sorting/filtering (the view-model
+      # owns that meaning — AGENTS.md "frontends render, never compute"). A frontend
+      # reaching for `core::discovery::SortKey`/`sort_summaries`/`filter_summaries`/`list_with`
+      # is the drift the architecture exists to prevent (issue #32).
+      - run: |
+          set -euo pipefail
+          if grep -rn "kaptein_core::discovery::SortKey\|kaptein_core::discovery::sort_summaries\|kaptein_core::discovery::filter_summaries\|kaptein_core::discovery::list_with" crates/frontend-* 2>/dev/null; then
+            echo "error: a frontend uses core::discovery sort/filter types — sort/filter is view-model semantics (AGENTS.md)" >&2
+            exit 1
+          fi
+          echo "Frontends do not use core::discovery sort/filter types"
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

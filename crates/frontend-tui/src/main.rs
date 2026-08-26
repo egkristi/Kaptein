@@ -79,6 +79,42 @@ impl Kind {
     }
 }
 
+/// Which column the table sorts by. This is a frontend-local *navigation* choice, mapped
+/// onto the view-model's `SortSpec` column id in `query_plane` — the TUI never reaches
+/// for a `kaptein_core::discovery` sort type (the view-model owns sort semantics; the
+/// frontend owns which column is active — issue #32).
+#[derive(Clone, Copy, PartialEq)]
+enum SortColumn {
+    Name,
+    Namespace,
+    Kind,
+    Created,
+}
+
+impl SortColumn {
+    const ALL: [SortColumn; 4] = [
+        SortColumn::Name,
+        SortColumn::Namespace,
+        SortColumn::Kind,
+        SortColumn::Created,
+    ];
+
+    fn next(self) -> SortColumn {
+        let i = Self::ALL.iter().position(|c| *c == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// The view-model `SortSpec` column id (the render contract's column schema).
+    fn column_id(self) -> &'static str {
+        match self {
+            SortColumn::Name => "name",
+            SortColumn::Namespace => "namespace",
+            SortColumn::Kind => "kind",
+            SortColumn::Created => "created",
+        }
+    }
+}
+
 /// A tabular row (geometry-local, mirrors `kaptein_core::discovery::ResourceSummary`).
 #[derive(Clone)]
 struct TableRow {
@@ -117,7 +153,7 @@ async fn run_event_loop(
 ) -> io::Result<()> {
     let mut kind = Kind::Pods;
     let mut namespace: Option<String> = None; // None = all namespaces
-    let mut sort_key: kaptein_core::discovery::SortKey = kaptein_core::discovery::SortKey::Name;
+    let mut sort_key = SortColumn::Name;
     let mut sort_descending = false;
 
     // An informer-backed live data plane (ADR-0006): seeded once, kept fresh by a
@@ -463,15 +499,9 @@ fn format_timestamp(millis: i64) -> String {
         .unwrap_or_default()
 }
 
-fn sort_label(key: kaptein_core::discovery::SortKey, descending: bool) -> String {
+fn sort_label(key: SortColumn, descending: bool) -> String {
     let dir = if descending { "↓" } else { "↑" };
-    let name = match key {
-        kaptein_core::discovery::SortKey::Name => "name",
-        kaptein_core::discovery::SortKey::Namespace => "namespace",
-        kaptein_core::discovery::SortKey::Kind => "kind",
-        kaptein_core::discovery::SortKey::Created => "created",
-    };
-    format!("{name}{dir}")
+    format!("{}{dir}", key.column_id())
 }
 
 /// Re-rank rows by fuzzy-jump score against `query`, dropping non-matches. Uses the
@@ -492,14 +522,8 @@ fn fuzzy_rerank(rows: Vec<TableRow>, query: &str) -> Vec<TableRow> {
     out
 }
 
-fn next_sort_key(key: kaptein_core::discovery::SortKey) -> kaptein_core::discovery::SortKey {
-    use kaptein_core::discovery::SortKey;
-    match key {
-        SortKey::Name => SortKey::Namespace,
-        SortKey::Namespace => SortKey::Kind,
-        SortKey::Kind => SortKey::Created,
-        SortKey::Created => SortKey::Name,
-    }
+fn next_sort_key(key: SortColumn) -> SortColumn {
+    key.next()
 }
 
 /// A command-palette action. The palette lists these and fuzzy-matches the typed query;
@@ -566,7 +590,7 @@ async fn execute_command(
     client: &Client,
     kind: &mut Kind,
     namespace: &mut Option<String>,
-    sort_key: &mut kaptein_core::discovery::SortKey,
+    sort_key: &mut SortColumn,
     sort_descending: &mut bool,
     plane: &mut kaptein_integration::LivePlane,
     watch: &mut Option<tokio::task::JoinHandle<Result<(), kaptein_integration::IntegrationError>>>,
@@ -669,15 +693,10 @@ fn new_plane(
 /// map the resulting `Page` of `Row`s into geometry-local table rows.
 async fn query_plane(
     plane: &kaptein_integration::LivePlane,
-    sort_key: kaptein_core::discovery::SortKey,
+    sort_key: SortColumn,
     descending: bool,
 ) -> io::Result<Vec<TableRow>> {
-    let sort_column = match sort_key {
-        kaptein_core::discovery::SortKey::Name => "name",
-        kaptein_core::discovery::SortKey::Namespace => "namespace",
-        kaptein_core::discovery::SortKey::Kind => "kind",
-        kaptein_core::discovery::SortKey::Created => "created",
-    };
+    let sort_column = sort_key.column_id();
     use kaptein_integration::kaptein_viewmodel::DataPlane as _;
     let page = plane
         .query(&kaptein_integration::kaptein_viewmodel::Query {
