@@ -121,6 +121,31 @@ jobs:
           sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
+      # Render the Krew plugin manifest at release time: substitute the tag and the
+      # per-platform sha256 checksums (computed above) into the template placeholders,
+      # so `kubectl krew install kaptein` points at real, checksum-verified artifacts
+      # (issue #23 — the committed template ships placeholders, which CI must not treat
+      # as a valid manifest).
+      - name: Render Krew manifest
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"  # e.g. v0.27.0
+          sha() { grep "  kaptein-$1.tar.gz$" SHA256SUMS | awk '{print $1}'; }
+          sed \
+            -e "s/PLACEHOLDER_VERSION/${VERSION}/g" \
+            -e "s/PLACEHOLDER_LINUX_AMD64_SHA256/$(sha x86_64-unknown-linux-gnu)/" \
+            -e "s/PLACEHOLDER_LINUX_ARM64_SHA256/$(sha aarch64-unknown-linux-gnu)/" \
+            -e "s/PLACEHOLDER_DARWIN_AMD64_SHA256/$(sha x86_64-apple-darwin)/" \
+            -e "s/PLACEHOLDER_DARWIN_ARM64_SHA256/$(sha aarch64-apple-darwin)/" \
+            krew/kaptein.yaml > kaptein.yaml
+          # Fail loudly if any placeholder survived (a missing checksum would ship a
+          # broken manifest).
+          if grep -q 'PLACEHOLDER' kaptein.yaml; then
+            echo "error: unreplaced placeholder in rendered Krew manifest" >&2
+            exit 1
+          fi
+          cat kaptein.yaml
+
       - name: Sign artifacts with cosign (keyless)
         run: |
           set -euo pipefail
@@ -144,7 +169,7 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" \
             --generate-notes || true
           gh release upload "${GITHUB_REF_NAME}" \
-            *.tar.gz *.zip SHA256SUMS *.bundle --clobber
+            *.tar.gz *.zip SHA256SUMS *.bundle kaptein.yaml --clobber
 
       # Generate the SLSA subject digest for the generic generator. The generator
       # attests to these exact artifact bytes; consumers verify provenance with

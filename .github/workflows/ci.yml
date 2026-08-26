@@ -135,7 +135,9 @@ jobs:
           bash -n install.sh
           test -x install.sh || { echo "install.sh must be executable"; exit 1; }
           # The Krew plugin manifest must be valid YAML with a version + one
-          # platform entry per release target.
+          # platform entry per release target. The committed template carries
+          # PLACEHOLDER_* values that the release workflow renders; CI must NOT
+          # treat those placeholders as a valid manifest (issue #23).
           python3 - <<'PY'
           import yaml
           m = yaml.safe_load(open("krew/kaptein.yaml"))
@@ -146,7 +148,12 @@ jobs:
           assert len(platforms) == 4, f"expected 4 platforms, got {len(platforms)}"
           for p in platforms:
               assert p["uri"] and p["sha256"] and p["bin"], "platform uri/sha256/bin"
-          print(f"Krew manifest valid ({len(platforms)} platforms)")
+              # The committed template is a *template*: placeholders are expected here,
+              # but the values must be well-formed placeholder markers (not empty).
+              for v in (p["uri"], p["sha256"]):
+                  assert "PLACEHOLDER" not in v or v.startswith("PLACEHOLDER"), \
+                      f"malformed placeholder in {v!r}"
+          print(f"Krew template valid ({len(platforms)} platforms)")
           PY
           # The Dockerfile must be present and pin a version arg.
           grep -q "ARG KAPTEIN_VERSION" Dockerfile || { echo "Dockerfile missing version arg"; exit 1; }

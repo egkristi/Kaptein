@@ -479,45 +479,17 @@ fn parse_gvk_parts(s: &str) -> (String, String, String) {
     }
 }
 
-/// Map a resource `kind` (and group) to its RBAC `(plural_resource, api_group)`. Built-in
-/// kinds use Kubernetes' standard pluralization; anything unrecognized falls back to the
-/// lowercase kind + "s" (a conservative guess that errs toward refusing, since a wrong
-/// plural fails the preflight rather than passing).
+/// Map a resource `kind` (and group) to its RBAC `(plural_resource, api_group)`.
+///
+/// The plural is resolved with kube's own `ApiResource::from_gvk` pluralizer — the exact
+/// same plural the request path uses — so `NetworkPolicy` → `networkpolicies`,
+/// `PriorityClass` → `priorityclasses`, and CRDs get a *correct* plural rather than a
+/// naive `lowercase + "s"` (which produced `networkpolicys`/`priorityclasss` and, because
+/// preflight fails closed, wrongly refused governed access to those resources — issue #21).
 fn resource_from_kind(kind: &str, group: &str) -> (String, String) {
-    let plural = match kind {
-        "Pod" => "pods",
-        "Deployment" => "deployments",
-        "Service" => "services",
-        "Node" => "nodes",
-        "Namespace" => "namespaces",
-        "Secret" => "secrets",
-        "ConfigMap" => "configmaps",
-        "Job" => "jobs",
-        "CronJob" => "cronjobs",
-        "ReplicaSet" => "replicasets",
-        "DaemonSet" => "daemonsets",
-        "StatefulSet" => "statefulsets",
-        "Ingress" => "ingresses",
-        "PersistentVolumeClaim" => "persistentvolumeclaims",
-        "PersistentVolume" => "persistentvolumes",
-        "ServiceAccount" => "serviceaccounts",
-        "Role" => "roles",
-        "RoleBinding" => "rolebindings",
-        "ClusterRole" => "clusterroles",
-        "ClusterRoleBinding" => "clusterrolebindings",
-        "Event" => "events",
-        _ => {
-            // Unknown/CRD kind: naive pluralization (lowercase + "s"). CRDs define their
-            // own plural in discovery; a conservative guess still fails closed.
-            let mut s = kind.to_string();
-            if let Some(c) = s.chars().next() {
-                s.replace_range(..c.len_utf8(), &c.to_lowercase().to_string());
-            }
-            s.push('s');
-            return (s, group.to_string());
-        }
-    };
-    (plural.to_string(), group.to_string())
+    let gvk = GroupVersionKind::gvk(group, "v1", kind);
+    let plural = kube::core::ApiResource::from_gvk(&gvk).plural;
+    (plural, group.to_string())
 }
 
 /// A per-instance, non-constant session id: unix millis rendered as lowercase hex (not a
@@ -857,6 +829,20 @@ mod tests {
         assert_eq!(
             resource_from_kind("Deployment", "apps"),
             ("deployments".into(), "apps".into())
+        );
+        // Issue #21: kinds outside the old hardcoded table must pluralize *correctly*
+        // (kube's own pluralizer), not as naive lowercase+"s".
+        assert_eq!(
+            resource_from_kind("NetworkPolicy", "networking.k8s.io"),
+            ("networkpolicies".into(), "networking.k8s.io".into())
+        );
+        assert_eq!(
+            resource_from_kind("PriorityClass", "scheduling.k8s.io"),
+            ("priorityclasses".into(), "scheduling.k8s.io".into())
+        );
+        assert_eq!(
+            resource_from_kind("GatewayClass", "gateway.networking.k8s.io"),
+            ("gatewayclasses".into(), "gateway.networking.k8s.io".into())
         );
     }
 }

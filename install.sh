@@ -60,9 +60,6 @@ if [[ -z "${KAPTEIN_VERSION:-}" ]]; then
   fi
 fi
 
-# Strip a leading "v" only when building the download URL (GitHub tags carry it).
-VERSION_TAG="${KAPTEIN_VERSION#v}"
-
 BASE_URL="https://github.com/${REPO}/releases/download/${KAPTEIN_VERSION}"
 
 WORK="$(mktemp -d)"
@@ -72,6 +69,31 @@ echo "==> Kaptein ${KAPTEIN_VERSION} (${TARGET})"
 echo "==> Downloading ${ARCHIVE} ..."
 curl -fsSL --retry 3 "${BASE_URL}/${ARCHIVE}" -o "${WORK}/${ARCHIVE}"
 curl -fsSL --retry 3 "${BASE_URL}/SHA256SUMS" -o "${WORK}/SHA256SUMS"
+
+# Verify the checksums file is *authentic* (not just intact): the release signs
+# SHA256SUMS with cosign (keyless, via the GitHub Actions OIDC identity). Whoever can
+# serve a tampered release can serve both the archive and a matching SHA256SUMS, so an
+# integrity check alone proves nothing about who made it. Verify the signature bundle
+# when cosign is present; degrade with a loud warning otherwise (cosign is an external
+# tool, and Kaptein never hard-depends on one).
+IDENTITY="https://github.com/egkristi/Kaptein/.github/workflows/release.yml@refs/tags/${KAPTEIN_VERSION}"
+ISSUER="https://token.actions.githubusercontent.com"
+if command -v cosign >/dev/null 2>&1; then
+  echo "==> Verifying SHA256SUMS signature (cosign) ..."
+  curl -fsSL --retry 3 "${BASE_URL}/SHA256SUMS.bundle" -o "${WORK}/SHA256SUMS.bundle"
+  cosign verify-blob "${WORK}/SHA256SUMS" \
+    --bundle "${WORK}/SHA256SUMS.bundle" \
+    --certificate-identity "${IDENTITY}" \
+    --certificate-oidc-issuer "${ISSUER}" \
+    >/dev/null 2>&1 || {
+      echo "error: SHA256SUMS signature verification failed (identity ${IDENTITY})" >&2
+      exit 1
+    }
+else
+  echo "==> WARNING: cosign not found — skipping authenticity verification (integrity only)." >&2
+  echo "    Install cosign (https://docs.sigstore.dev/cosign/installation/) to verify the" >&2
+  echo "    release signature; see SECURITY.md 'Verifying a release'." >&2
+fi
 
 echo "==> Verifying SHA-256 checksum ..."
 (
