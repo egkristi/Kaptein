@@ -146,13 +146,21 @@ async fn run_event_loop(
     let mut jump_master: Vec<TableRow> = Vec::new();
     // Command-palette mode: Some(query) means the palette is open (vim-style ':').
     let mut palette_query: Option<String> = None;
+    // The last-observed MemPlane revision: the table is only re-queried (a full
+    // clone+sort of the row set) when a watch delta actually landed, not every ~10 Hz
+    // frame — the fix for issue #28's "query_plane still asks for 50k rows at 10 Hz".
+    let mut last_revision = plane.mem().revision();
 
     loop {
-        // Refresh from the live plane (cheap: reads the in-memory MemPlane, applying any
-        // watch deltas that have landed since the last frame). No API call per keystroke.
+        // Refresh from the live plane only when its revision advanced (a watch delta
+        // landed). No API call per keystroke and no redundant per-frame clone+sort.
         // Skipped while fuzzy-jump mode is active (its filtered `rows` is authoritative).
         if jump_query.is_none() && palette_query.is_none() {
-            rows = query_plane(&plane, sort_key, sort_descending).await?;
+            let rev = plane.mem().revision();
+            if rev != last_revision {
+                rows = query_plane(&plane, sort_key, sort_descending).await?;
+                last_revision = rev;
+            }
         }
 
         let status_line = if let Some(q) = palette_query.as_deref() {
@@ -348,6 +356,8 @@ async fn run_event_loop(
                         namespace = None;
                     }
                     rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
+                    rows = query_plane(&plane, sort_key, sort_descending).await?;
+                    last_revision = plane.mem().revision();
                     selected = 0;
                     scroll = 0;
                     detail = None;
@@ -355,6 +365,8 @@ async fn run_event_loop(
                 KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
                     rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
+                    rows = query_plane(&plane, sort_key, sort_descending).await?;
+                    last_revision = plane.mem().revision();
                     selected = 0;
                     scroll = 0;
                     detail = None;
