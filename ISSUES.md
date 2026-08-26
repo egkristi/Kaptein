@@ -45,12 +45,6 @@ Per the convention above, live bugs are GitHub issues.
 **Open:**
 
 - **#16** `dry_run_apply_patch force:true` must not carry into the Phase 2 write path.
-- **#32** Architecture drift — dual sort/filter implementations (`core::discovery` vs
-  `viewmodel::table`), the CLI references `kaptein_core` ~95× vs `kaptein_viewmodel`
-  ~45×, and the TUI used `core::discovery::SortKey` directly. The TUI `SortKey` usage is
-  fixed (frontend-local `SortColumn`), and CI now enforces "no `core::discovery` sort/
-  filter types in frontends". Remaining: collapsing the two sort/filter implementations
-  and re-basing the CLI's sort/filter path on the view-model.
 
 **Closed since the last cycle:** #17 (`kaptein edit` redaction round-trip — fixed by
 `RedactionPolicy::Unredacted` + `SecretViewed` audit, commit 42ce99f) and #18 (watch
