@@ -454,10 +454,6 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             context,
         } => {
             let gvk = parse_gvk(&gvk);
-            let sort_key = sort
-                .as_deref()
-                .map(kaptein_core::discovery::SortKey::parse)
-                .unwrap_or(None);
             // Use the context-specific client when --context is supplied.
             let client = match context.as_deref() {
                 Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
@@ -485,21 +481,63 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 }
                 all
             } else {
-                kaptein_core::discovery::list_with(
-                    &client,
-                    &gvk,
-                    namespace.as_deref(),
-                    sort_key,
-                    descending,
-                    filter.as_deref(),
-                )
-                .await?
+                kaptein_core::discovery::list(&client, &gvk, namespace.as_deref()).await?
             };
-            for item in items {
-                let created = item.created.map(|t| t.0.to_string()).unwrap_or_default();
+
+            // Sort + filter in the view-model (the single sort/filter implementation —
+            // the CLI/TUI consume the same semantics; no core-side duplicate, issue #32).
+            // Map each `ResourceSummary` to a render-contract `Row` with the 4 standard
+            // columns (name/namespace/status/created), then apply the view-model sort/filter.
+            let column_ids: Vec<String> = ["name", "namespace", "status", "created"]
+                .map(String::from)
+                .to_vec();
+            let mut rows: Vec<kaptein_viewmodel::Row> = items
+                .into_iter()
+                .map(|s| kaptein_viewmodel::Row {
+                    id: kaptein_viewmodel::RowId(s.uid.clone().unwrap_or_else(|| {
+                        if s.namespace.is_empty() {
+                            s.name.clone()
+                        } else {
+                            format!("{}/{}", s.namespace, s.name)
+                        }
+                    })),
+                    cells: vec![
+                        kaptein_viewmodel::Cell::Text { value: s.name },
+                        kaptein_viewmodel::Cell::Text { value: s.namespace },
+                        kaptein_viewmodel::Cell::Text { value: s.status },
+                        kaptein_viewmodel::Cell::Text {
+                            value: s.created.map(|t| t.0.to_string()).unwrap_or_default(),
+                        },
+                    ],
+                })
+                .collect();
+
+            let sort_spec = sort.as_deref().and_then(|s| {
+                let column = match s.to_ascii_lowercase().as_str() {
+                    "name" => "name",
+                    "namespace" | "ns" => "namespace",
+                    "kind" => "kind",
+                    "created" | "age" => "created",
+                    _ => return None,
+                };
+                Some(kaptein_viewmodel::SortSpec {
+                    column: column.to_string(),
+                    descending,
+                })
+            });
+            kaptein_viewmodel::sort_rows(&mut rows, &column_ids, sort_spec.as_ref());
+            let filter_spec = filter.as_deref().map(|f| kaptein_viewmodel::Filter {
+                expression: f.to_string(),
+            });
+            rows = kaptein_viewmodel::filter_rows(rows, filter_spec.as_ref());
+
+            for row in rows {
                 println!(
                     "{}\t{}\t{}\t{}",
-                    item.namespace, item.kind, item.name, created
+                    kaptein_viewmodel::cell_text(&row.cells[1]), // namespace
+                    gvk.kind,                                    // kind
+                    kaptein_viewmodel::cell_text(&row.cells[0]), // name
+                    kaptein_viewmodel::cell_text(&row.cells[3]), // created
                 );
             }
             Ok(())

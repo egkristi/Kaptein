@@ -117,9 +117,11 @@ jobs:
 
       # Enforce the "semantics vs geometry" rule at the source level: a frontend must
       # not import a `kaptein_core::discovery` type for sorting/filtering (the view-model
-      # owns that meaning — AGENTS.md "frontends render, never compute"). A frontend
-      # reaching for `core::discovery::SortKey`/`sort_summaries`/`filter_summaries`/`list_with`
-      # is the drift the architecture exists to prevent (issue #32).
+      # owns that meaning — AGENTS.md "frontends render, never compute"). The core-side
+      # sort/filter duplicate (`SortKey`/`sort_summaries`/`filter_summaries`/`list_with`)
+      # was removed (issue #32), so this grep is a tripwire: if any of those symbols ever
+      # reappear in a frontend, or a frontend reaches for the `SortSpec`/sort semantics
+      # via core, CI fails.
       - run: |
           set -euo pipefail
           if grep -rn "kaptein_core::discovery::SortKey\|kaptein_core::discovery::sort_summaries\|kaptein_core::discovery::filter_summaries\|kaptein_core::discovery::list_with" crates/frontend-* 2>/dev/null; then
