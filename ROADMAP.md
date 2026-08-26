@@ -106,11 +106,11 @@ Milestones:
       There is no log-redaction function in the workspace. This is the half of the DoD
       that is written but unmet, and logs are where credentials actually leak in practice.
       Needs a line-level redactor (well-known key=value and JSON-field shapes, plus the
-      `SENSITIVE_KEYS` set) applied at the same `kaptein-core` choke point.
+      `SENSITIVE_KEYS` set) applied at the same `kaptein-core` choke point (issue #22).
     - **Secret annotations are over-redacted** — masking *every* annotation value also
       hides Helm/Argo tracking metadata and makes `describe` on a Secret much less useful.
       Narrow it to `last-applied-configuration` plus sensitive-named annotation keys
-      (`ISSUES.md` finding J).
+      (`ISSUES.md` finding J, issue #29).
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
@@ -123,7 +123,7 @@ Milestones:
     `MemPlane::query` deep-clones the entire row `Vec` and sorts it before windowing. The
     clone-and-sort, not the allocation, is what the p99 budget will trip over. The TUI
     needs `page.total` for `rows.len()`/`G` navigation, so the fix is to query the visible
-    window and carry `total` separately (`ISSUES.md` finding I).
+    window and carry `total` separately (`ISSUES.md` finding I, issue #28).
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
@@ -179,7 +179,7 @@ GitOps write path, time machine, or fleet.
     resolve the plural the *request* will use (`ApiResource::from_gvk(&gvk).plural`, or
     the discovery API) so the gate and the call can never disagree. Add to the DoD: *a
     test asserts the preflight plural equals the plural of the `Api` the tool actually
-    calls, for a built-in, a subresource, and a CRD* (`ISSUES.md` finding F).
+    calls, for a built-in, a subresource, and a CRD* (`ISSUES.md` finding F, issue #21).
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
   does not have. The M1b.4 DoD holds, not just the happy path.
@@ -220,7 +220,7 @@ Milestones:
     and `store::run_informer` are reached only from `kaptein-cli` subcommands. A caller
     added to satisfy an audit is not the same as the shipped path taking it. Close this
     milestone when `LivePlane` seeds through the bounded metadata store — with a test that
-    fails if the seed reverts to an unbounded list (`ISSUES.md` finding H).
+    fails if the seed reverts to an unbounded list (`ISSUES.md` finding H, issue #27).
 - **M2.0c Watch resilience & informer lifecycle** *(new per re-audit — ADR-0006 is ~30 %
   implemented)*
   - Relist-on-410, reconnect with backoff, `WatchEvent::Error` handling, and bookmark
@@ -235,7 +235,7 @@ Milestones:
     config file under `[informer]` (ADR-0006 requires the cap to be a configurable
     policy) and validated by `kaptein config validate`.*
   - **Open (re-audit v0.27.0) — three gaps keep this milestone from closing.** See
-    `ISSUES.md` findings A–C.
+    `ISSUES.md` findings A–C (issues #20, #25, #26).
     1. **Reconnect must relist, not just re-watch.** `LivePlane::watch_loop` currently
        reads a resourceVersion via `list_metadata(limit(1))` and watches from there.
        Objects deleted during the gap are never removed from the `MemPlane`, so the TUI
@@ -485,7 +485,7 @@ Milestones:
       `dist` job asserts only that `uri`/`sha256`/`bin` are *truthy* — placeholders pass,
       so CI reports the manifest valid. Needs a release-time render (version + real
       per-target digests from `SHA256SUMS`) **and** a CI assertion that no field matches
-      `PLACEHOLDER_*` (`ISSUES.md` finding D).
+      `PLACEHOLDER_*` (`ISSUES.md` finding D, issue #23).
     - **`install.sh` ignores the signatures the release produces.** It fetches
       `SHA256SUMS` from the same release URL as the archive and verifies the archive
       against it — integrity against corruption, not authenticity: whoever serves a bad
@@ -494,11 +494,24 @@ Milestones:
       is the one place that skips it. Either verify the bundle (with the documented
       `--certificate-identity` / `--certificate-oidc-issuer`, degrading with a clear
       warning when `cosign` is absent) or say plainly in the script banner that it does
-      not establish authenticity (`ISSUES.md` finding E).
+      not establish authenticity (`ISSUES.md` finding E, issue #24).
+    - **The container image is documented but never published.** `README.md` advertises
+      `docker run ghcr.io/egkristi/kaptein …`; no workflow builds or pushes an image
+      (`grep -rn 'ghcr\|docker\|buildx' .github/workflows/` is empty) and the `Dockerfile`
+      only builds locally from a release tarball. Add a release job that builds and pushes
+      to GHCR with `packages: write` and the same cosign signing as the binaries, or drop
+      the claim (`ISSUES.md` finding L — not yet filed as an issue).
+    - Also: `install.sh` computes an unused `VERSION_TAG` (issue #30).
+    - **Taken together, all three advertised install paths are currently broken or
+      unverified** — that is one release-blocking item, not three cosmetic ones. Until it
+      is fixed, `README.md` must describe build-from-source as the supported path and mark
+      the others as not-yet-available (done in the v0.27.0 README pass).
     - **DoD (falsifiable):** a clean machine runs `install.sh` and gets a binary whose
       signature was checked against the release identity; `kubectl krew install --manifest
-      krew/kaptein.yaml` succeeds against a real tag; and CI fails if either the Krew
-      manifest carries a placeholder or the installer's verification step is removed.
+      krew/kaptein.yaml` succeeds against a real tag; `docker run ghcr.io/egkristi/kaptein
+      --version` succeeds against a published image; and CI fails if the Krew manifest
+      carries a placeholder, if the installer's verification step is removed, or if the
+      README advertises a channel that has no publishing job.
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
   pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store

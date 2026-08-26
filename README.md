@@ -294,6 +294,13 @@ inference, actions, and health checks. This is how Strimzi, KubeVirt, cert-manag
 Keycloak, Tekton, Velero, Karpenter, and Knative are supported *without hardcoding
 anything* — and your teams can write their own for internal CRDs and check them into Git.
 
+*Status:* the schema, validator, status/condition rule evaluation, `render_row`, the
+`extension.yaml` manifest and its `list/validate/enable/disable` lifecycle, and a lens set
+for all eight targets above ship today under [`extensions/`](./extensions) — exercised via
+`kaptein viewdef validate|schema|render` and `kaptein extension`. **No frontend discovers
+or displays a lens yet**: the TUI still navigates a fixed set of kinds, so the lens set is
+proven as *data* but not as *navigation*. Closing that gap is the remaining half of M2.2.
+
 When a lens isn't enough, escalate to a **WASM plugin** (tier 2) or a **shell-out
 integration** (tier 3) — see *Extensibility* above. Data first, code second: **this is
 the only way "and more" scales.**
@@ -346,8 +353,16 @@ the only way "and more" scales.**
   self-contained. The browser UI is a **wasm bundle** served by `serve`, not a binary.
 - **No telemetry, no account, works in airgaps.**
 - **Read-only default** for unknown contexts.
-- **Signed releases with SBOM** — practice what we scan for.
-- **Informer-based, not polling.**
+- **Signed releases with SBOM** — practice what we scan for. *Implemented: cosign keyless
+  signatures, `SHA256SUMS`, a cosign-signed CycloneDX SBOM, and SLSA provenance on every
+  release. The installer does not yet check the signature it ships alongside — see
+  [#24](https://github.com/egkristi/Kaptein/issues/24).*
+- **Informer-based, not polling.** *Implemented for the TUI's live view (a bounded seed
+  plus a reconnecting watch feeds an in-memory data plane; no per-keystroke `api.list`).
+  The ADR-0006 lifecycle policy — lazy per-view watches, TTL eviction, a hard cap with
+  degradation to on-demand list — exists as a validated, config-backed policy that is not
+  yet consulted by the watch path
+  ([#25](https://github.com/egkristi/Kaptein/issues/25)).*
 - **Same keymap** in the TUI and GUI.
 - **i18n** and a screen-reader-friendly GUI.
 - **Kubernetes version support**: target the latest three minors; older API versions
@@ -408,26 +423,55 @@ prod/unknown contexts) a break-glass justification. Everything else is read-only
 See [`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
 [`ISSUES.md`](./ISSUES.md) for known issues; Phases 1b–3b are tracked as GitHub issues.
 
+**Known limitations you should read before relying on this** (all tracked, all open):
+
+- **Log output is not yet redacted.** Resource output is — `describe` and the MCP
+  `describe` tool mask `Secret` values and sensitive-named fields — but `logs`,
+  multi-pod logs, and `--follow` return raw lines, including through the MCP `logs`
+  tool. Do not point an agent at logs you would not paste into a chat window
+  ([#22](https://github.com/egkristi/Kaptein/issues/22)).
+- **The governed MCP surface refuses many CRDs.** RBAC preflight guesses a resource
+  plural that can differ from the one the request uses, and because preflight fails
+  closed the call is rejected rather than allowed
+  ([#21](https://github.com/egkristi/Kaptein/issues/21)).
+- **The TUI can show stale rows after a watch expires** (~5 min): reconnect re-watches
+  without relisting, so objects deleted during the gap linger until the view is rebuilt
+  ([#20](https://github.com/egkristi/Kaptein/issues/20)).
+- **Lenses are data, not navigation yet.** The lens engine and the shipped lens set
+  validate and render via `kaptein viewdef`, but no frontend discovers or displays them
+  — the TUI still lists a fixed set of kinds (M2.2).
+- **Performance targets are not yet measured.** The budget in `ROADMAP.md` is a
+  commitment, not a benchmark result; the kwok harness that will prove or disprove it is
+  M1.8.
+
 ### Install
 
-Prebuilt, signed binaries ship on every release. The fastest path is the install
-script (no `cargo` required — it downloads the binary, verifies its SHA-256 checksum
-against the release's `SHA256SUMS`, and installs to `~/.local/bin`):
+> **Build from source is currently the only supported path.** The binary release
+> channels below are staged but **not yet usable** — see
+> [#23](https://github.com/egkristi/Kaptein/issues/23) and
+> [#24](https://github.com/egkristi/Kaptein/issues/24). They are listed here so the
+> intent is public, not because they work today.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
-# pick a version / install dir:
-KAPTEIN_VERSION=v0.27.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
-```
+**From source** (supported) — `cargo build --release`; see *Build & test* below for the
+full command surface.
 
-Alternatives:
+Staged, not yet working:
 
-- **kubectl plugin**: `kubectl krew install kaptein` (see `krew/kaptein.yaml`).
-- **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod` (see `Dockerfile`).
-- **From source**: see *Build & test* below.
+- **Install script** — `install.sh` downloads a release binary and checks it against the
+  release's `SHA256SUMS`. That verifies **integrity, not authenticity**: the checksum
+  file is fetched from the same place as the binary, so it does not prove who built it.
+  Until the script verifies the cosign bundle
+  ([#24](https://github.com/egkristi/Kaptein/issues/24)), verify by hand with the
+  commands in [`SECURITY.md`](./SECURITY.md#verifying-a-release).
+- **kubectl plugin** — `krew/kaptein.yaml` still contains `PLACEHOLDER_VERSION` and
+  placeholder digests, so `kubectl krew install kaptein` cannot succeed
+  ([#23](https://github.com/egkristi/Kaptein/issues/23)).
+- **Container image** — no workflow publishes `ghcr.io/egkristi/kaptein` yet; the
+  `Dockerfile` builds locally from a release tarball (`ISSUES.md` finding L).
 
-Verify a downloaded artifact with cosign and checksums as described in
-[`SECURITY.md`](./SECURITY.md#verifying-a-release).
+Every release *does* ship cosign-signed artifacts, a `SHA256SUMS` file, a CycloneDX SBOM,
+and SLSA provenance — see [`SECURITY.md`](./SECURITY.md#verifying-a-release) for the
+exact `cosign verify-blob` and `slsa-verifier` invocations.
 
 ### Build & test
 

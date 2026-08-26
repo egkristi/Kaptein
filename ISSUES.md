@@ -52,11 +52,11 @@ reconnect — `LivePlane::watch_loop` now reconnects with backoff and `run_infor
 caller, commit 59b421a). See *Re-audit findings* below for what those fixes did **not**
 cover.
 
-### Re-audit findings (v0.27.0) — to file as issues
+### Re-audit findings (v0.27.0) — filed as #20–#30 (L not yet filed)
 
 Found by an external re-audit of the shipped v0.27.0 artifact. Each is a defect in code
 that ships today, so each is issue material rather than a milestone; the milestone column
-names where the fix belongs. **Filed as GitHub issues #20–#30.**
+names where the fix belongs. All are open.
 
 | # | Issue | Severity | Finding | Owner |
 |---|-------|----------|---------|-------|
@@ -71,27 +71,46 @@ names where the fix belongs. **Filed as GitHub issues #20–#30.**
 | I | #28 | Medium | **`query_plane` still asks for 50 000 rows at ~10 Hz.** Rendering is windowed now (only `scroll..scroll+page_height` becomes ratatui `Row`s — the fix that landed), but `frontend-tui::query_plane` still issues `Query { start: 0, end: 50_000 }` on every loop iteration, and `MemPlane::query` deep-clones the whole row `Vec` and sorts it before windowing. The per-frame allocation is fixed; the per-frame clone-and-sort is not. The TUI needs `page.total` for `rows.len()`/`G`, so the fix is to query the visible window and carry `total` separately. | M1.8 |
 | J | #29 | Low | **Secret annotations are over-redacted.** The `last-applied-configuration` leak is fixed by masking *every* annotation value on a Secret — which also masks `meta.helm.sh/*`, Argo CD tracking ids, and `kubectl.kubernetes.io/last-applied-configuration`'s harmless neighbours, making `describe` on a Secret much less useful. Prefer masking `last-applied-configuration` plus sensitive-named annotation keys. | M1.7 |
 | K | #30 | Low | **`install.sh` computes `VERSION_TAG` and never uses it** (dead variable, line 64). | Distribution |
+| L | *unfiled* | High | **The documented container image is never published.** `README.md` advertises `docker run ghcr.io/egkristi/kaptein …`, but no workflow builds or pushes an image — `grep -rn 'ghcr\|docker\|buildx' .github/workflows/` returns nothing, and the `Dockerfile` only builds locally from a release tarball. The documented command fails for every user. Either add a release job that builds and pushes to GHCR (with `packages: write` and the same cosign signing as the binaries) or remove the claim until it does. | Distribution |
+
+Together, D, E, and L mean **all three advertised install paths in `README.md` are either
+unverified or non-functional**: the script checks integrity but not authenticity, the Krew
+manifest is a placeholder template, and the container image does not exist. Treat that
+cluster as one release-blocking item, not three cosmetic ones.
 
 ## Remaining review backlog (owned by milestones)
 
 The external review ranked these; they are now **milestones in `ROADMAP.md`** rather than
 unowned debt. Done items are struck through.
 
-1. ~~**M1b.4 — MCP governance conformance**~~ (done, commit 1cbe417): RBAC preflight +
-   context classification + read-only guardrail run per tool call; audit emits
-   `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
-2. ~~**M2.0 — wire `DataPlane` + informer store**~~ (done, commits ad1cb5b → 13d8aae):
+1. **M1b.4 — MCP governance conformance** — *mostly done, one gap.* (commit 1cbe417):
+   RBAC preflight + context classification + read-only guardrail run per tool call; audit
+   emits `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
+   **Open: #21** — the preflight's kind→plural guess disagrees with the plural the request
+   uses, and because RBAC fails closed the governed surface *refuses* most CRDs.
+2. **M2.0 — wire `DataPlane` + informer store** — *re-opened.* (commits ad1cb5b → 13d8aae):
    `MemPlane` + `table` (view-model DataPlane), `InformerStore`/`run_informer` +
    `list_metadata_bounded` (core), `KubernetesPlane`/`LivePlane` (integration), the TUI
    renders from a live informer-backed `DataPlane`, and a live `#[tokio::test]` exercises
-   the real kube client when `KUBECONFIG` is present.
+   the real kube client when `KUBECONFIG` is present. **Open: #27** — the DoD requires the
+   *shipped frontend path* to use the bounded store, and `LivePlane::seed` still calls the
+   unbounded `discovery::list`. Giving `run_informer` a CLI caller closed #18 but did not
+   satisfy this half of the DoD.
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
    kind/envtest tier and Kubernetes-minor conformance remain open. A live integration-test
    tier (`crates/kaptein-core/tests/live.rs`, gated on `KAPTEIN_LIVE_TESTS=1`) now
    exercises the read path and the delete write path against a real cluster.*
+3b. **M2.0c — watch resilience & informer lifecycle** *(added by the v0.27.0 re-audit)*:
+   relist-on-reconnect, and the ADR-0006 lifecycle policy actually enforced.
+   *`InformerManager` landed with a config-backed `[informer]` policy.* **Open: #20**
+   (reconnect re-watches without relisting → ghost rows), **#25** (the manager has no
+   caller, so the cap is policy without enforcement), **#26** (it is TTL-only despite the
+   "LRU + TTL" name).
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
-   aspirational.
+   aspirational. **Related: #28** — `query_plane` still requests 50 000 rows at ~10 Hz and
+   `MemPlane::query` clones-and-sorts the whole set per frame; that is the hot spot the
+   harness will trip over first.
 5. ~~**Signed releases + SBOM**~~ (done, commit eba14d9 + SLSA provenance in
    `.github/workflows/release.yml`): cosign keyless + CycloneDX SBOM + SHA256SUMS, the
    SBOM is cosign-signed, and SLSA provenance is generated per release.
@@ -100,8 +119,16 @@ unowned debt. Done items are struck through.
 7. ~~**Redaction-aware error boundary**~~ (done, commit 98a39cc): `kaptein-integration`
    maps core errors into a real enum instead of passing through.
 8. **Distribution & release sync** (cross-cutting): Homebrew/Krew/container/checksums +
-   site/docs/tag sync. *Landed: `install.sh`, `krew/kaptein.yaml`, and `Dockerfile`; the
-   Homebrew tap and the release-triggered site/README version bump remain open.*
+   site/docs/tag sync. *Landed as files: `install.sh`, `krew/kaptein.yaml`, and
+   `Dockerfile`.* **Open — none of the three advertised install paths works end to end:**
+   **#24** (the installer verifies integrity, not authenticity — it never uses the cosign
+   bundle the release publishes), **#23** (the Krew manifest still carries
+   `PLACEHOLDER_*`, and CI's truthiness check passes it), **finding L** (no workflow
+   publishes the `ghcr.io/egkristi/kaptein` image the README documents — not yet filed),
+   plus **#30** (dead
+   `VERSION_TAG`). The Homebrew tap and the release-triggered site/README version bump
+   also remain open. *Files existing is not the same as a distribution channel working —
+   this is the clearest instance of the pattern in* Audit provenance *below.*
 9. ~~**Contract-version enforcement**~~ (done, commit 485045c): MCP server advertises the
    contract version and refuses a client whose declared `_meta["io.kaptein/apiVersion"]`
    has a different major; rule in `kaptein-viewmodel::versioned` (lens/WIT gates land
