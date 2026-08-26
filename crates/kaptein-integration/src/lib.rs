@@ -248,27 +248,49 @@ pub struct LivePlane {
     client: kube::Client,
     gvk: kube::core::GroupVersionKind,
     namespace: Option<String>,
+    /// The informer lifecycle manager (ADR-0006): the hard cap, LRU+TTL eviction, and
+    /// degrade-to-list path. Shared across clones so the cap is enforced across *all*
+    /// live planes in a process, not per plane (issue #25).
+    informers: std::sync::Arc<kaptein_core::informer::InformerManager>,
 }
 
 impl Clone for LivePlane {
-    /// Clone shares the same in-memory `MemPlane` and Kubernetes client — two handles to
-    /// one live data plane (the watch task and the TUI both hold a handle).
+    /// Clone shares the same in-memory `MemPlane`, Kubernetes client, and informer
+    /// manager — two handles to one live data plane (the watch task and the TUI both
+    /// hold a handle).
     fn clone(&self) -> Self {
         Self {
             mem: self.mem.clone(),
             client: self.client.clone(),
             gvk: self.gvk.clone(),
             namespace: self.namespace.clone(),
+            informers: self.informers.clone(),
         }
     }
 }
 
 impl LivePlane {
-    /// Create a live plane for `group/version/kind`.
+    /// Create a live plane for `group/version/kind` with the default informer policy.
     pub fn new(
         client: kube::Client,
         gvk: kube::core::GroupVersionKind,
         namespace: Option<String>,
+    ) -> Self {
+        Self::new_with_policy(
+            client,
+            gvk,
+            namespace,
+            kaptein_core::informer::InformerPolicy::default(),
+        )
+    }
+
+    /// Create a live plane for `group/version/kind` with an explicit informer policy
+    /// (from the `[informer]` config section, ADR-0006).
+    pub fn new_with_policy(
+        client: kube::Client,
+        gvk: kube::core::GroupVersionKind,
+        namespace: Option<String>,
+        policy: kaptein_core::informer::InformerPolicy,
     ) -> Self {
         let mem = kaptein_viewmodel::MemPlane::new(kaptein_viewmodel::Schema {
             column_ids: RESOURCE_COLUMNS.iter().map(|s| s.to_string()).collect(),
@@ -278,6 +300,7 @@ impl LivePlane {
             client,
             gvk,
             namespace,
+            informers: std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy)),
         }
     }
 
@@ -327,12 +350,32 @@ impl LivePlane {
     /// store and reconciles** — removing rows absent from the fresh relist — then watches
     /// from the relist's resourceVersion, so no deleted object lingers as a ghost row
     /// (issue #20).
+    ///
+    /// The informer lifecycle is **enforced here** (issue #25): the watch key is
+    /// registered with the shared [`InformerManager`] first; if the hard cap is reached
+    /// (`Denied`), the plane **degrades to a one-shot on-demand list** (seeded, no live
+    /// watch) instead of opening another socket.
     pub async fn watch_loop(&self) -> Result<(), IntegrationError> {
         let ar = kube::core::ApiResource::from_gvk(&self.gvk);
         let api: kube::Api<kube::core::DynamicObject> = match self.namespace.as_deref() {
             Some(ns) => kube::Api::namespaced_with(self.client.clone(), ns, &ar),
             None => kube::Api::all_with(self.client.clone(), &ar),
         };
+
+        let watch_key = kaptein_core::informer::WatchKey {
+            group: self.gvk.group.clone(),
+            version: self.gvk.version.clone(),
+            kind: self.gvk.kind.clone(),
+            namespace: self.namespace.clone().unwrap_or_default(),
+        };
+        use kaptein_core::informer::Registration;
+        if self.informers.register(watch_key.clone()) == Registration::Denied {
+            // Degrade to on-demand list (ADR-0006): the hard cap is reached, so this view
+            // gets a bounded snapshot rather than a live watch socket.
+            let _ = self.relist_and_reconcile(&api).await?;
+            return Ok(());
+        }
+
         use futures_util::StreamExt;
         let mut backoff_ms: u64 = 100;
 

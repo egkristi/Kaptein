@@ -123,8 +123,7 @@ async fn run_event_loop(
     // An informer-backed live data plane (ADR-0006): seeded once, kept fresh by a
     // background watch task. Sorting/filtering and the table itself read the in-memory
     // plane — the TUI does *not* re-list the cluster per keystroke.
-    let mut plane =
-        kaptein_integration::LivePlane::new(client.clone(), kind.gvk(), namespace.clone());
+    let mut plane = new_plane(client, kind.gvk(), namespace.clone());
     plane
         .seed()
         .await
@@ -631,7 +630,7 @@ async fn rebuild_plane(
     if let Some(handle) = watch.take() {
         handle.abort();
     }
-    *plane = kaptein_integration::LivePlane::new(client.clone(), kind.gvk(), namespace);
+    *plane = new_plane(client, kind.gvk(), namespace);
     plane
         .seed()
         .await
@@ -641,6 +640,17 @@ async fn rebuild_plane(
         async move { p.watch_loop().await }
     }));
     Ok(())
+}
+
+/// Build a `LivePlane` honoring the `[informer]` config policy (ADR-0006's configurable
+/// watch cap + idle TTL), so the TUI's watch budget is operator-tunable.
+fn new_plane(
+    client: &Client,
+    gvk: kube::core::GroupVersionKind,
+    namespace: Option<String>,
+) -> kaptein_integration::LivePlane {
+    let policy = kaptein_core::config::load().informer.to_policy();
+    kaptein_integration::LivePlane::new_with_policy(client.clone(), gvk, namespace, policy)
 }
 
 /// Query the live plane (sort + filter in the view-model, window in the data plane) and
