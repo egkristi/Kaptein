@@ -84,7 +84,7 @@ pub async fn pod_logs(
         };
         let logs = pods.logs(name, &lp).await.map_err(Error::Api)?;
         for line in logs.lines() {
-            out.push((cname.clone(), line.to_string()));
+            out.push((cname.clone(), crate::redact::redact_line(line)));
         }
     }
     Ok(out)
@@ -145,7 +145,7 @@ pub async fn multi_pod_logs(
                     pod: pod_name.clone(),
                     namespace: namespace.to_string(),
                     container: cname.clone(),
-                    line: line.to_string(),
+                    line: crate::redact::redact_line(line),
                 });
             }
         }
@@ -186,7 +186,9 @@ pub fn follow_logs<'a>(
                 let value = cname.clone();
                 async move {
                     match lines.next().await {
-                        Some(Ok(line)) => Some((Ok((value, line)), lines)),
+                        Some(Ok(line)) => {
+                            Some((Ok((value, crate::redact::redact_line(&line))), lines))
+                        }
                         Some(Err(e)) => Some((Err(Error::Internal(e.to_string())), lines)),
                         None => None,
                     }

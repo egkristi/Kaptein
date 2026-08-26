@@ -135,6 +135,64 @@ fn is_sensitive_key(key: &str) -> bool {
     })
 }
 
+/// Redact a single **log line**, returning the line with sensitive values masked.
+///
+/// This is the log-path half of M1.7 (issue #22): `pod_logs`/`multi_pod_logs`/
+/// `follow_logs` and the MCP `logs` tool return raw lines, and logs are where credentials
+/// leak in practice. The redaction is structural and conservative — it masks the *value*
+/// in `key=value`, `key: value`, JSON `"key":"value"`, and `Authorization: Bearer <tok>`
+/// shapes where the key is sensitive, without rewriting unrelated text. Returns the
+/// (possibly unchanged) line.
+pub fn redact_line(line: &str) -> String {
+    let mut out = line.to_string();
+
+    // 1. `Authorization: <scheme> <token>` (and `authorization=Bearer ...`): mask the
+    //    token after a Bearer/Basic scheme.
+    let auth = regex::Regex::new(
+        r#"(?i)\b(authorization|auth[_-]?token)(\s*[:=]\s*)(bearer|basic)\s+([^\s,;]+)"#,
+    )
+    .expect("auth log redaction regex is valid");
+    let ranges: Vec<(usize, usize)> = auth
+        .captures_iter(&out)
+        .map(|c| {
+            let v = c.get(4).expect("token group");
+            (v.start(), v.end())
+        })
+        .collect();
+    for (s, e) in ranges.into_iter().rev() {
+        out.replace_range(s..e, REDACTED);
+    }
+
+    // 2. `key=value`, `key: value`, and JSON `"key": "value"` (whitespace-tolerant),
+    //    where the key is sensitive. The key is matched directly (no greedy prefix/
+    //    suffix that would swallow it); the optional `"?` before the separator handles
+    //    the JSON quoted-key form `"api_key": "…"`.
+    const SENSITIVE_KEY_ALT: &str = r"(?:password|passwd|passphrase|token|secret|api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|private[_-]?key|credentials?|credential|cookie|session|jwt|ssh[_-]?key)";
+    let kv = regex::Regex::new(&format!(
+        r#"(?i)\b{SENSITIVE_KEY_ALT}"?(\s*[:=]\s*)("[^"]*"|[^\s,;]+)"#
+    ))
+    .expect("log redaction regex is valid");
+    let ranges: Vec<(usize, usize)> = kv
+        .captures_iter(&out)
+        .map(|c| {
+            let v = c.get(2).expect("value group");
+            // Strip a trailing/leading quote so only the value text is replaced.
+            let raw = v.as_str();
+            let (s, e) = if raw.starts_with('"') && raw.ends_with('"') {
+                (v.start() + 1, v.end() - 1)
+            } else {
+                (v.start(), v.end())
+            };
+            (s, e)
+        })
+        .collect();
+    for (s, e) in ranges.into_iter().rev() {
+        out.replace_range(s..e, REDACTED);
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +296,34 @@ mod tests {
         let s = serde_json::to_string(&o.data).unwrap();
         assert!(s.contains("BEGIN CERTIFICATE"));
         assert!(!s.contains(REDACTED));
+    }
+
+    #[test]
+    fn log_line_redacts_key_value_shapes() {
+        // key=value
+        let out = redact_line("connecting with password=hunter2 to db");
+        assert!(!out.contains("hunter2"));
+        assert!(out.contains(REDACTED));
+        // key: value
+        let out = redact_line("authorization: Bearer supersecrettoken");
+        assert!(!out.contains("supersecrettoken"));
+        // JSON shape
+        let out = redact_line(r#"{"api_key": "abc123", "mode": "prod"}"#);
+        assert!(!out.contains("abc123"));
+        assert!(out.contains("prod")); // non-sensitive survives
+    }
+
+    #[test]
+    fn log_line_leaves_non_sensitive_text_untouched() {
+        let out = redact_line("GET /healthz 200 OK");
+        assert_eq!(out, "GET /healthz 200 OK");
+    }
+
+    #[test]
+    fn log_line_redaction_masks_nested_keys() {
+        let out = redact_line("client_secret=xyz tls.private_key=abc");
+        assert!(!out.contains("xyz"));
+        assert!(!out.contains("abc"));
+        assert!(out.contains(REDACTED));
     }
 }
