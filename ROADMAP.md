@@ -96,12 +96,34 @@ Milestones:
     proves a `kubectl apply`-created Secret does not leak via its annotation, and the
     `logs` path is redaction-aware. The `Cell::Redacted` / `SecretViewed` bullets stay
     **open** until they have a real unmask path, not an implicit "done".
+  - *Landed: the resource path. `redact::redact_object` masks `Secret` `data`/`stringData`,
+    sensitive-named fields anywhere in the object, and a Secret's `metadata.annotations`
+    (closing the `last-applied-configuration` leak); `describe::RedactionPolicy` gives
+    `kaptein edit` an explicit `Unredacted` path with a `SecretViewed` audit event.*
+  - **Open (re-audit v0.27.0):**
+    - **The log path is still unredacted** — `pod_logs`, `multi_pod_logs`, and
+      `follow_logs` return raw lines, and the MCP `logs` tool forwards them to a model.
+      There is no log-redaction function in the workspace. This is the half of the DoD
+      that is written but unmet, and logs are where credentials actually leak in practice.
+      Needs a line-level redactor (well-known key=value and JSON-field shapes, plus the
+      `SENSITIVE_KEYS` set) applied at the same `kaptein-core` choke point.
+    - **Secret annotations are over-redacted** — masking *every* annotation value also
+      hides Helm/Argo tracking metadata and makes `describe` on a Secret much less useful.
+      Narrow it to `last-applied-configuration` plus sensitive-named annotation keys
+      (`ISSUES.md` finding J).
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
     cross-cutting performance budget; CI runs the benches and fails on regression
   - Owns the p99 <16 ms, RSS <250 MB, cold-start <500 ms targets *in Phase 1*, while the
     design can still change to meet them
+  - **Known hot spot to fix before the harness can pass (re-audit v0.27.0):** the TUI's
+    per-frame *rendering* is now windowed, but `frontend-tui::query_plane` still issues
+    `Query { start: 0, end: 50_000 }` on every loop iteration (~10 Hz) and
+    `MemPlane::query` deep-clones the entire row `Vec` and sorts it before windowing. The
+    clone-and-sort, not the allocation, is what the p99 budget will trip over. The TUI
+    needs `page.total` for `rows.len()`/`G` navigation, so the fix is to query the visible
+    window and carry `total` separately (`ISSUES.md` finding I).
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
@@ -144,6 +166,20 @@ GitOps write path, time machine, or fleet.
     are derived from the tool call's own arguments** — a test asserts
     `describe(gvk=v1/Secret, ns=kube-system)` is refused for an agent scoped to pods in
     `default`, and that `describe` of a pod in `default` is allowed.
+  - *Landed: `preflight_target` now derives `(verb, resource, group, namespace)` from the
+    call's own arguments instead of a hardcoded `pods`/`default`; refusals audit as
+    `Rejected` with a real target and per-session id.*
+  - **Open (re-audit v0.27.0) — the preflight and the request disagree on the resource
+    name.** `resource_from_kind` maps kind → plural from a 21-entry table and otherwise
+    guesses `lowercase + "s"`, so `NetworkPolicy` → `networkpolicys`, `PriorityClass` →
+    `priorityclasss`, and most CRDs get a plural the API server never uses. Because
+    `auth::can` fails **closed**, a wrong plural means no rule matches and the call is
+    **refused** — the governed surface silently rejects `list_resources`/`describe` for a
+    large class of CRDs, including several the shipped lens set targets. Preflight must
+    resolve the plural the *request* will use (`ApiResource::from_gvk(&gvk).plural`, or
+    the discovery API) so the gate and the call can never disagree. Add to the DoD: *a
+    test asserts the preflight plural equals the plural of the `Api` the tool actually
+    calls, for a built-in, a subresource, and a CRD* (`ISSUES.md` finding F).
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
   does not have. The M1b.4 DoD holds, not just the happy path.
@@ -176,10 +212,15 @@ Milestones:
     is the `PartialObjectMetadata` path; `kaptein-integration::LivePlane` is an
     informer-backed `DataPlane` with a real `subscribe`, and the TUI renders from it
     (a background watch task applies deltas; no per-key `api.list`). A live `#[tokio::test]`
-    exercises the store/client against a cluster when `KUBECONFIG` is present. **Note:
-    the bounded `InformerStore`/`run_informer` is still unreferenced outside tests (issue
-    #18) — the shipped TUI uses `LivePlane`, which reconnects with backoff but does not
-    use the bounded store.**
+    exercises the store/client against a cluster when `KUBECONFIG` is present.
+  - **Re-opened (re-audit v0.27.0): the second half of the DoD does not hold.** Issue #18
+    was closed by giving `run_informer` a CLI caller, but the DoD says *"the shipped
+    frontend path uses the bounded/`PartialObjectMetadata` store"* — and it does not.
+    `LivePlane::seed` still calls the unbounded `discovery::list`; `list_metadata_bounded`
+    and `store::run_informer` are reached only from `kaptein-cli` subcommands. A caller
+    added to satisfy an audit is not the same as the shipped path taking it. Close this
+    milestone when `LivePlane` seeds through the bounded metadata store — with a test that
+    fails if the seed reverts to an unbounded list (`ISSUES.md` finding H).
 - **M2.0c Watch resilience & informer lifecycle** *(new per re-audit — ADR-0006 is ~30 %
   implemented)*
   - Relist-on-410, reconnect with backoff, `WatchEvent::Error` handling, and bookmark
@@ -188,13 +229,32 @@ Milestones:
   - The ADR-0006 subjects that have no code: lazy-per-view informers, LRU + TTL eviction,
     and a hard cap on concurrent watches with degradation to on-demand list.
   - *Landed (2026-08-25): `kaptein-core::informer::InformerManager` implements the
-    lifecycle policy — lazy per-view `register` (idempotent `touch`), LRU `evict_idle`
+    lifecycle policy — lazy per-view `register` (idempotent `touch`), `evict_idle`
     with TTL, and a hard cap that returns `Denied` (degrade-to-on-demand-list) instead of
     exceeding the cap. The policy (`max_watches`, `idle_ttl_secs`) is exposed in the
     config file under `[informer]` (ADR-0006 requires the cap to be a configurable
-    policy) and validated by `kaptein config validate`. The "simultaneous watches ≤ N"
-    performance-budget criterion is now enforceable and regression-tested. Remaining:
-    wiring the manager into the frontend view lifecycle.*
+    policy) and validated by `kaptein config validate`.*
+  - **Open (re-audit v0.27.0) — three gaps keep this milestone from closing.** See
+    `ISSUES.md` findings A–C.
+    1. **Reconnect must relist, not just re-watch.** `LivePlane::watch_loop` currently
+       reads a resourceVersion via `list_metadata(limit(1))` and watches from there.
+       Objects deleted during the gap are never removed from the `MemPlane`, so the TUI
+       shows ghost rows after every watch expiry. Relist into the store and reconcile
+       (drop keys absent from the relist), then watch from the *list's* RV.
+    2. **The manager needs a caller.** `InformerManager` is referenced only by a
+       doc-comment. Until `LivePlane` (and `rebuild_plane`) `register`/`touch`/`release`
+       through it, the cap, the TTL, and the degrade-to-list path are policy without
+       enforcement, and the "watches ≤ N" budget is asserted only against the manager's
+       own bookkeeping.
+    3. **"LRU + TTL" is currently TTL-only.** `register` never evicts a least-recently-used
+       entry to admit a hot view, so a full cap denies every new view until a TTL expires.
+       Either implement LRU admission (and give `watches` an ordering — it is a `HashMap`
+       today, despite the "insertion order" comment), or amend ADR-0006 and the module docs
+       to say TTL-only and explain why that is sufficient.
+  - **DoD (falsifiable):** a watch that expires mid-session leaves the store *converged* —
+    a test kills a watch, deletes an object out-of-band, and asserts the row disappears
+    after reconnect; and `InformerManager::live()` is observably bounded by `max_watches`
+    while driving the TUI through more distinct views than the cap allows.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -230,6 +290,23 @@ Milestones:
     implemented; the example lens set ships under `extensions/` — CNPG, Strimzi Kafka,
     KubeVirt, cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative (all
     MIT/Apache-2.0).
+  - **Open (re-audit v0.27.0): no frontend consumes a lens.** `validate_viewdef`,
+    `evaluate_status`, and `render_row` are called only from `kaptein viewdef …`
+    subcommands and their tests. The TUI still navigates a hardcoded five-variant `Kind`
+    enum with no lens discovery and no CRD auto-navigation, so ADR-0012's claim — that the
+    three hardest lenses are the *acceptance test* for the schema — is currently proven
+    against a CLI renderer rather than a real surface. The remaining work is the wiring,
+    not the engine:
+    - lens discovery from the configured extension paths at startup, honouring the
+      `enable`/`disable` set
+    - a lens-driven kind list in the TUI (a discovered CRD with a lens becomes navigable
+      without a code change — the whole point of "data first, code second")
+    - `render_row` on the `DataPlane` path so lens columns and lens-inferred status flow
+      through the same `Page`/`Row` the built-in kinds use
+  - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
+    navigable in the TUI with its declared columns and status, **with no recompile** — and
+    a test asserts a lens-declared column reaches a `Row` through the data plane, not only
+    through `viewdef render`.
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile
@@ -401,6 +478,27 @@ Milestones:
   (distroless static image built from the verified release tarball). Remaining: a
   Homebrew tap, a release-triggered site/README version bump, and wiring the Krew
   manifest into a CI publish step.*
+  - **Open (re-audit v0.27.0) — two of the three landed artifacts do not work as shipped.**
+    - **The Krew manifest is a template nobody renders.** `krew/kaptein.yaml` still
+      contains `PLACEHOLDER_VERSION` and `PLACEHOLDER_*_SHA256`; no release step
+      substitutes them, so `kubectl krew install kaptein` cannot succeed. Worse, the CI
+      `dist` job asserts only that `uri`/`sha256`/`bin` are *truthy* — placeholders pass,
+      so CI reports the manifest valid. Needs a release-time render (version + real
+      per-target digests from `SHA256SUMS`) **and** a CI assertion that no field matches
+      `PLACEHOLDER_*` (`ISSUES.md` finding D).
+    - **`install.sh` ignores the signatures the release produces.** It fetches
+      `SHA256SUMS` from the same release URL as the archive and verifies the archive
+      against it — integrity against corruption, not authenticity: whoever serves a bad
+      release serves both files. The release already publishes `SHA256SUMS.bundle`, and
+      `SECURITY.md` documents the `cosign verify-blob` invocation; the official installer
+      is the one place that skips it. Either verify the bundle (with the documented
+      `--certificate-identity` / `--certificate-oidc-issuer`, degrading with a clear
+      warning when `cosign` is absent) or say plainly in the script banner that it does
+      not establish authenticity (`ISSUES.md` finding E).
+    - **DoD (falsifiable):** a clean machine runs `install.sh` and gets a binary whose
+      signature was checked against the release identity; `kubectl krew install --manifest
+      krew/kaptein.yaml` succeeds against a real tag; and CI fails if either the Krew
+      manifest carries a placeholder or the installer's verification step is removed.
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
   pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store
@@ -414,11 +512,27 @@ Milestones:
   precedence config → CLI → env; a unified error enum in `kaptein-viewmodel` that maps raw
   `kube::Error` and subprocess failures to redaction-aware, user-facing messages.
 
-- **Immediate next steps** — *(Phase 0 is long done, M2.0 is done. The live next steps
-  are the remaining **M2.0b** (kind/envtest + latest-three-minors conformance), **M1.8
-  kwok harness**, **M2.1 browser UI**, **M2.2 view-definition/lens engine**, and the
-  cross-cutting **distribution & release sync** item — the SLSA-provenance and
-  release-gate-hygiene pieces are now done.)*
+- **How a milestone closes** *(added after the v0.27.0 re-audit)* — the recurring failure
+  across three audit cycles has not been missing code; it has been **DoDs that a partial
+  implementation satisfies literally**. Bounded-list code that exists but is not on the
+  frontend path (M2.0). A policy manager with no caller (M2.0c). A signed release whose
+  own installer skips verification. A lens engine no surface consumes (M2.2). Before
+  marking anything done, both must hold:
+  1. **The shipped path takes it** — not a test, not a CLI subcommand added to prove
+     reachability, but the code path a user actually exercises.
+  2. **A test fails if someone removes it** — the DoD names an assertion, not a state.
+
+  When a DoD cannot be written that way, that is a signal the milestone is really two
+  milestones.
+
+- **Immediate next steps** — *(Phase 0 is long done. The live next steps are the
+  re-audit re-opens — **M2.0** (bounded seed on the frontend path), **M2.0c** (relist on
+  reconnect, wire `InformerManager`, LRU-or-amend-the-ADR), **M1.7** (log redaction),
+  **M1b.4** (preflight plural must match the request) — then the remaining **M2.0b**
+  (kind/envtest + latest-three-minors conformance), **M1.8 kwok harness**, **M2.1 browser
+  UI**, **M2.2 lens-driven navigation**, and the **distribution** fixes (Krew placeholders,
+  installer signature verification). The SLSA-provenance and release-gate-hygiene pieces
+  are done.)*
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the

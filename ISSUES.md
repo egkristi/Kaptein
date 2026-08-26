@@ -40,14 +40,37 @@ tracker.
 
 ## Known issues (live bugs)
 
-Per the convention above, live bugs are GitHub issues. Currently open:
+Per the convention above, live bugs are GitHub issues.
+
+**Open:**
 
 - **#16** `dry_run_apply_patch force:true` must not carry into the Phase 2 write path.
-- **#17** `kaptein edit` will corrupt Secrets once the write path lands (redacted values
-  round-trip as `[REDACTED]`); needs a redaction policy + `SecretViewed` audit.
-- **#18** watch reconnect: the bounded `store::watch_from` path is still unreferenced
-  (dead code) and lacks relist-on-410; `LivePlane` reconnects but the ADR-0006 store
-  does not.
+
+**Closed since the last cycle:** #17 (`kaptein edit` redaction round-trip — fixed by
+`RedactionPolicy::Unredacted` + `SecretViewed` audit, commit 42ce99f) and #18 (watch
+reconnect — `LivePlane::watch_loop` now reconnects with backoff and `run_informer` has a
+caller, commit 59b421a). See *Re-audit findings* below for what those fixes did **not**
+cover.
+
+### Re-audit findings (v0.27.0) — to file as issues
+
+Found by an external re-audit of the shipped v0.27.0 artifact. Each is a defect in code
+that ships today, so each is issue material rather than a milestone; the milestone column
+names where the fix belongs.
+
+| # | Severity | Finding | Owner |
+|---|----------|---------|-------|
+| A | High | **Reconnect never relists → ghost rows.** `LivePlane::watch_loop` reconnects, but on reconnect it calls `list_metadata(limit(1))` *only to read a resourceVersion* and then watches from there. Objects deleted while the watch was down are never removed from the `MemPlane` — no `Deleted` event will ever arrive for them — so the TUI shows deleted resources indefinitely after any watch expiry (routine, ~5 min). The doc comment claims it "relists and reconnects"; it does not relist. A correct informer relists into the store, reconciles (removing keys absent from the relist), then watches from the *list's* RV. | M2.0c |
+| B | High | **`InformerManager` has no caller.** `kaptein-core::informer` (361 lines) is referenced only by a doc-comment in `config.rs`. `LivePlane` opens watches without consulting it, so the hard cap, TTL eviction, and degrade-to-list path are never exercised against real watch sockets. The "watches ≤ N" budget is asserted only in the manager's own unit test — the policy layer is correct and unenforced. | M2.0c |
+| C | Medium | **The "LRU + TTL" manager has no LRU.** `InformerManager::register` evicts by TTL only. When the cap is full and every entry is fresh, *every* new view is `Denied` until a TTL expires — the first `max_watches` views win permanently. `Registration::Denied`'s doc says "this view was not the most-recently-used", and the `watches` field comment says "in insertion order for LRU scanning", but the field is a `HashMap` (no order) and no least-recently-used entry is ever evicted to admit a hot view. Either implement LRU admission or correct ADR-0006 and the docs to say "TTL-only". | M2.0c |
+| D | High | **Krew manifest ships placeholders and CI passes it.** `krew/kaptein.yaml` contains `PLACEHOLDER_VERSION` and `PLACEHOLDER_*_SHA256`, and no release step substitutes them. The CI `dist` job asserts only that `uri`/`sha256`/`bin` are *truthy*, which the placeholder strings satisfy — so `kubectl krew install kaptein` cannot work, and CI reports the manifest valid. Needs a release-time render step plus a CI assertion that the values are not placeholders. | Distribution |
+| E | High | **`install.sh` ignores the signatures we produce.** It downloads `SHA256SUMS` from the *same* release URL as the archive and checks the archive against it. That is an integrity check against corruption, not authenticity: whoever can serve a bad release serves both files. The release already publishes `SHA256SUMS.bundle`, and `SECURITY.md` documents `cosign verify-blob` — the official installer just never runs it. Add cosign verification (with a documented `--certificate-identity`), or state plainly in the script that it does not verify authenticity. | Distribution |
+| F | Medium | **MCP preflight pluralizes kinds differently from the request.** `mcp.rs::resource_from_kind` falls back to `lowercase + "s"` for anything outside a 21-entry table, so `NetworkPolicy` → `networkpolicys`, `PriorityClass` → `priorityclasss`, and most CRDs get a wrong plural. Because `auth::can` fails **closed**, a wrong plural means the rule never matches and the call is **refused** — the governed MCP surface silently rejects `list_resources`/`describe` for a large class of CRDs. The preflight must use the same plural the request uses (`ApiResource::from_gvk(&gvk).plural`), or resolve it from discovery. | M1b.4 |
+| G | Medium | **Logs are still not redaction-aware.** `describe::pod_logs`, `multi_pod_logs`, and `follow_logs` return raw lines, and the MCP `logs` tool ships them verbatim to a model. There is no log-redaction function in the workspace. M1.7's DoD explicitly requires "the `logs` path is redaction-aware"; the resource path is done, the log path is not. Logs are where credentials leak in practice. | M1.7 |
+| H | Medium | **The bounded list path is still not on the frontend path.** `LivePlane::seed` calls the unbounded `discovery::list`; `list_metadata_bounded` and `store::run_informer` are reached only from CLI commands. M2.0's "bounded" DoD is satisfied by code that exists, not by the path the TUI actually takes. | M2.0 |
+| I | Medium | **`query_plane` still asks for 50 000 rows at ~10 Hz.** Rendering is windowed now (only `scroll..scroll+page_height` becomes ratatui `Row`s — the fix that landed), but `frontend-tui::query_plane` still issues `Query { start: 0, end: 50_000 }` on every loop iteration, and `MemPlane::query` deep-clones the whole row `Vec` and sorts it before windowing. The per-frame allocation is fixed; the per-frame clone-and-sort is not. The TUI needs `page.total` for `rows.len()`/`G`, so the fix is to query the visible window and carry `total` separately. | M1.8 |
+| J | Low | **Secret annotations are over-redacted.** The `last-applied-configuration` leak is fixed by masking *every* annotation value on a Secret — which also masks `meta.helm.sh/*`, Argo CD tracking ids, and `kubectl.kubernetes.io/last-applied-configuration`'s harmless neighbours, making `describe` on a Secret much less useful. Prefer masking `last-applied-configuration` plus sensitive-named annotation keys. | M1.7 |
+| K | Low | **`install.sh` computes `VERSION_TAG` and never uses it** (dead variable, line 64). | Distribution |
 
 ## Remaining review backlog (owned by milestones)
 
@@ -102,8 +125,33 @@ unowned debt. Done items are struck through.
   from Flux/Argo).
 - **OIDC token forwarding** (ADR-0007 mode 1) is a `serve`/hub-mode concern (Phase 2),
   not the MCP stdio server.
+- **No frontend consumes a lens yet.** The M2.2 engine (`kaptein-viewmodel::lens`) and the
+  eight shipped lenses under `extensions/` are validated and rendered only by
+  `kaptein viewdef validate` / `kaptein viewdef render`. The TUI still lists a hardcoded
+  five-kind `Kind` enum and does no lens discovery or CRD auto-navigation, so the lens set
+  is proven as *data* but not yet as *navigation*. This is the remaining half of M2.2, not
+  a defect in the engine — recorded here so "lenses shipped" is not read as "lenses are in
+  the UI".
+- **`Cell::Redacted` and `Operation::SecretViewed` have exactly one producer each.**
+  `SecretViewed` is emitted by `kaptein edit`'s unredacted fetch; `Cell::Redacted` is still
+  only pattern-matched (`table::cell_text`), never constructed, because no surface has an
+  unmask-in-place affordance. M1.7 keeps that bullet open deliberately.
 
 ## Hygiene notes
 
 - `core` / `core.*` dumps are git-ignored; if a process crashes to a core dump in the
   working tree, find and fix the crashing process rather than committing around it.
+  **Two dumps (~240 MB) were present again during the v0.27.0 re-audit** — the ignore rule
+  is doing its job, but something is still crashing repeatedly and nothing tracks what.
+  Worth one session with `coredumpctl`/`gdb` to identify the binary before the next
+  release.
+
+## Audit provenance
+
+The tables above record findings from successive external audits of the shipped artifact.
+When closing one, prefer a **falsifiable** DoD in `ROADMAP.md` over a checkbox here: the
+recurring pattern across three cycles has been a milestone that a partial implementation
+satisfies literally (bounded-list code that exists but is not on the frontend path; a
+policy manager with no caller; a signed release whose own installer skips verification).
+A useful smell test before marking anything done: *does the shipped path take it, and does
+a test fail if someone removes it?*

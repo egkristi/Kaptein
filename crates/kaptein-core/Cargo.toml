@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+readme = "README.md"
 description = "Kaptein core: kube-rs client, watchers/reflectors, CRD discovery, stores"
 
 [dependencies]

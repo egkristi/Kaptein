@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+readme = "README.md"
 description = "Kaptein integration layer: binds kaptein-core to frontends, mapping core errors to a user-facing form"
 
 [dependencies]
