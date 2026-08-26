@@ -148,11 +148,16 @@ jobs:
           assert len(platforms) == 4, f"expected 4 platforms, got {len(platforms)}"
           for p in platforms:
               assert p["uri"] and p["sha256"] and p["bin"], "platform uri/sha256/bin"
-              # The committed template is a *template*: placeholders are expected here,
-              # but the values must be well-formed placeholder markers (not empty).
+              # The committed template is a *template*: `PLACEHOLDER_*` tokens (in the
+              # version or the sha256s) are expected here and rendered at release time.
+              # Assert the values are non-empty and any placeholder token is well-formed
+              # (a `PLACEHOLDER_` prefix, never a bare `PLACEHOLDER`).
+              import re as _re
               for v in (p["uri"], p["sha256"]):
-                  assert "PLACEHOLDER" not in v or v.startswith("PLACEHOLDER"), \
-                      f"malformed placeholder in {v!r}"
+                  assert v, "empty uri/sha256"
+                  if "PLACEHOLDER" in v:
+                      assert _re.search(r"PLACEHOLDER_[A-Za-z0-9_]+", v), \
+                          f"malformed placeholder in {v!r}"
           print(f"Krew template valid ({len(platforms)} platforms)")
           PY
           # The Dockerfile must be present and pin a version arg.
