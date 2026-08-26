@@ -292,16 +292,31 @@ impl LivePlane {
         &self.mem
     }
 
-    /// Seed the plane from a bounded list (the "list" half of list-then-watch). The
-    /// caller then runs `watch_loop` on a background task to apply live deltas.
+    /// Seed the plane from a **bounded** list (the "list" half of list-then-watch), paging
+    /// through `limit` objects at a time so the frontend path never asks the API server
+    /// to materialize the whole cluster in one unbounded `list` (issue #27 / ADR-0006).
+    /// The caller then runs `watch_loop` on a background task to apply live deltas.
     pub async fn seed(&self) -> Result<usize, IntegrationError> {
-        let summaries =
-            kaptein_core::discovery::list(&self.client, &self.gvk, self.namespace.as_deref())
-                .await?;
-        let count = summaries.len();
-        for s in summaries {
-            let row = resource_row(s);
-            self.mem.upsert(row);
+        let mut count = 0usize;
+        let mut continue_token: Option<String> = None;
+        loop {
+            let (summaries, next) = kaptein_core::discovery::list_bounded(
+                &self.client,
+                &self.gvk,
+                self.namespace.as_deref(),
+                500,
+                continue_token.as_deref(),
+            )
+            .await?;
+            count += summaries.len();
+            for s in summaries {
+                let row = resource_row(s);
+                self.mem.upsert(row);
+            }
+            match next {
+                Some(t) => continue_token = Some(t),
+                None => break,
+            }
         }
         Ok(count)
     }
