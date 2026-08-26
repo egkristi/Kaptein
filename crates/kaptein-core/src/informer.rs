@@ -117,9 +117,15 @@ impl InformerManager {
     }
 
     /// Request a watch slot for `key` (lazy-per-view). Returns `Granted` if the watch is
-    /// already live or there is room; `Denied` if the cap is reached. **The caller must
-    /// degrade to an on-demand list on `Denied`** — this is the ADR-0006 degradation
-    /// path, not an error.
+    /// already live or there is room; `Denied` only when the policy has a zero cap
+    /// (a degenerate, config-validation-rejected state). **The caller must degrade to an
+    /// on-demand list on `Denied`** — the ADR-0006 degradation path.
+    ///
+    /// Eviction order when the cap is full (ADR-0006: "LRU eviction with TTL"):
+    /// 1. idle entries past the TTL are evicted first;
+    /// 2. if still full, the **least-recently-used** entry (smallest `last_touched`) is
+    ///    evicted to admit a hot view — so the first `max_watches` views do *not* win
+    ///    permanently (issue #26).
     pub fn register(&self, key: WatchKey) -> Registration {
         let now = Instant::now();
         let mut watches = self.watches.lock().expect("manager poisoned");
@@ -131,10 +137,23 @@ impl InformerManager {
         }
 
         if watches.len() >= self.policy.max_watches {
-            // Evict idle watches first — an idle watch may free a slot for a hot one.
+            // 1. Idle-first eviction.
             self.evict_idle_locked(&mut watches, now);
+            // 2. LRU admission: if still at the cap, evict the least-recently-used entry
+            //    so a hot view is never denied while a cold one holds a slot.
+            if watches.len() >= self.policy.max_watches
+                && let Some(lru_key) = watches
+                    .iter()
+                    .min_by_key(|(_, e)| e.last_touched)
+                    .map(|(k, _)| k.clone())
+            {
+                watches.remove(&lru_key);
+            }
         }
-        if watches.len() >= self.policy.max_watches {
+
+        // A degenerate `max_watches == 0` policy grants nothing (config validation
+        // rejects it; this is a defensive backstop, not the normal path).
+        if self.policy.max_watches == 0 {
             return Registration::Denied;
         }
 
@@ -220,15 +239,36 @@ mod tests {
     }
 
     #[test]
-    fn hard_cap_denies_and_caller_degrades() {
+    fn lru_admission_evicts_coldest_when_cap_full() {
         let mgr = InformerManager::new(InformerPolicy {
             max_watches: 1,
             idle_ttl: Duration::from_secs(60),
         });
         assert_eq!(mgr.register(key("a", "Pod")), Registration::Granted);
-        // A second, different view is denied (degrade to on-demand list).
-        assert_eq!(mgr.register(key("b", "Deployment")), Registration::Denied);
+        // A second view evicts the coldest (only) watch — LRU admission, not denial.
+        assert_eq!(mgr.register(key("b", "Deployment")), Registration::Granted);
         assert_eq!(mgr.live(), 1);
+        // The evicted watch is gone; the admitted one is live.
+        assert!(!mgr.touch(&key("a", "Pod")));
+        assert!(mgr.touch(&key("b", "Deployment")));
+    }
+
+    #[test]
+    fn lru_keeps_most_recently_used_under_cap() {
+        let mgr = InformerManager::new(InformerPolicy {
+            max_watches: 2,
+            idle_ttl: Duration::from_secs(60),
+        });
+        mgr.register(key("a", "Pod"));
+        mgr.register(key("b", "Deployment"));
+        // "a" was touched most recently; "b" is the LRU.
+        mgr.touch(&key("a", "Pod"));
+        mgr.register(key("c", "Service"));
+        assert_eq!(mgr.live(), 2);
+        // "b" (LRU) was evicted; "a" (hot) survived.
+        assert!(!mgr.touch(&key("b", "Deployment")));
+        assert!(mgr.touch(&key("a", "Pod")));
+        assert!(mgr.touch(&key("c", "Service")));
     }
 
     #[test]
@@ -238,7 +278,6 @@ mod tests {
             idle_ttl: Duration::from_secs(60),
         });
         mgr.register(key("a", "Pod"));
-        assert_eq!(mgr.register(key("b", "Deployment")), Registration::Denied);
         assert!(mgr.release(&key("a", "Pod")));
         assert_eq!(mgr.register(key("b", "Deployment")), Registration::Granted);
         assert_eq!(mgr.live(), 1);
@@ -288,9 +327,10 @@ mod tests {
 
     /// The ADR-0006 performance-budget link — "simultaneous watches ≤ N for a given
     /// view set" — is now *enforceable*: no matter how many views request a watch, the
-    /// manager never exceeds `max_watches`, and it degrades the excess to on-demand
-    /// list. This test drives the equivalent of thousands of views (hundreds of CRDs ×
-    /// many namespaces) through a small cap and asserts the invariant holds.
+    /// manager never exceeds `max_watches` (LRU admission evicts the coldest view to
+    /// admit each new hot one). This test drives the equivalent of thousands of views
+    /// (hundreds of CRDs × many namespaces) through a small cap and asserts the
+    /// invariant holds.
     #[test]
     fn concurrent_watches_never_exceed_cap_at_scale() {
         let max = 16;
@@ -300,7 +340,6 @@ mod tests {
         });
 
         // Simulate a fleet-scale view set: 200 kinds × 20 namespaces = 4000 views.
-        let mut granted = 0usize;
         for kind in 0..200 {
             for ns in 0..20 {
                 let k = WatchKey {
@@ -309,15 +348,12 @@ mod tests {
                     kind: format!("Kind{kind}"),
                     namespace: format!("ns-{ns}"),
                 };
-                if mgr.register(k) == Registration::Granted {
-                    granted += 1;
-                }
+                let _ = mgr.register(k);
                 // The invariant: never more than `max` live watches.
                 assert!(mgr.live() <= max, "exceeded watch cap {max}");
             }
         }
-        // The cap holds, and (without touch) the excess views were degraded.
-        assert_eq!(granted, max, "exactly the cap should be granted");
+        // The cap holds even after 4000 admissions.
         assert_eq!(mgr.live(), max);
     }
 
