@@ -192,7 +192,9 @@ Milestones:
     with TTL, and a hard cap that returns `Denied` (degrade-to-on-demand-list) instead of
     exceeding the cap. The policy (`max_watches`, `idle_ttl_secs`) is exposed in the
     config file under `[informer]` (ADR-0006 requires the cap to be a configurable
-    policy). Remaining: wiring the manager into the frontend view lifecycle.*
+    policy) and validated by `kaptein config validate`. The "simultaneous watches ≤ N"
+    performance-budget criterion is now enforceable and regression-tested. Remaining:
+    wiring the manager into the frontend view lifecycle.*
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none

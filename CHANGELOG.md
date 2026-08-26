@@ -15,6 +15,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     (`max_watches`, `idle_ttl_secs`), satisfying ADR-0006's "the cap must be a policy,
     exposed in the config file". `kaptein config validate` now bounds-checks them
     (`0` cap/ttl is flagged, not silently defaulted).
+  - The ADR-0006 performance-budget link ("simultaneous watches ≤ N") is now
+    *enforceable and regression-tested*: a fleet-scale test drives 4000 views through a
+    16-watch cap and asserts it never exceeds N, plus a bookkeeping guard against an
+    accidental O(n²) in the LRU scan.
 - **Distribution & release sync (cross-cutting)**:
   - `install.sh` — checksum-verified install of the signed release binaries (no `cargo`
     required).

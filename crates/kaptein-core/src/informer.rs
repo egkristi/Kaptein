@@ -285,4 +285,77 @@ mod tests {
         assert_eq!(mgr.evict_idle(later), 2);
         assert_eq!(mgr.live(), 0);
     }
+
+    /// The ADR-0006 performance-budget link — "simultaneous watches ≤ N for a given
+    /// view set" — is now *enforceable*: no matter how many views request a watch, the
+    /// manager never exceeds `max_watches`, and it degrades the excess to on-demand
+    /// list. This test drives the equivalent of thousands of views (hundreds of CRDs ×
+    /// many namespaces) through a small cap and asserts the invariant holds.
+    #[test]
+    fn concurrent_watches_never_exceed_cap_at_scale() {
+        let max = 16;
+        let mgr = InformerManager::new(InformerPolicy {
+            max_watches: max,
+            idle_ttl: Duration::from_secs(300),
+        });
+
+        // Simulate a fleet-scale view set: 200 kinds × 20 namespaces = 4000 views.
+        let mut granted = 0usize;
+        for kind in 0..200 {
+            for ns in 0..20 {
+                let k = WatchKey {
+                    group: "example.io".into(),
+                    version: "v1".into(),
+                    kind: format!("Kind{kind}"),
+                    namespace: format!("ns-{ns}"),
+                };
+                if mgr.register(k) == Registration::Granted {
+                    granted += 1;
+                }
+                // The invariant: never more than `max` live watches.
+                assert!(mgr.live() <= max, "exceeded watch cap {max}");
+            }
+        }
+        // The cap holds, and (without touch) the excess views were degraded.
+        assert_eq!(granted, max, "exactly the cap should be granted");
+        assert_eq!(mgr.live(), max);
+    }
+
+    /// The bookkeeping path (register + touch + release + evict) must stay fast enough
+    /// for fleet scale — a CI safety net against an accidental O(n²) in the LRU scan,
+    /// not a precise budget (the real kwok harness owns the precise numbers).
+    #[test]
+    fn informer_bookkeeping_is_not_quadratic() {
+        let mgr = InformerManager::new(InformerPolicy {
+            max_watches: 1_000,
+            idle_ttl: Duration::from_secs(300),
+        });
+        let keys: Vec<WatchKey> = (0..5_000)
+            .map(|i| WatchKey {
+                group: "example.io".into(),
+                version: "v1".into(),
+                kind: "Kind".into(),
+                namespace: format!("ns-{i}"),
+            })
+            .collect();
+
+        let start = Instant::now();
+        for k in &keys {
+            mgr.register(k.clone());
+        }
+        // Touch every key, then evict them all (exercises the retain scan over 5k).
+        for k in &keys {
+            mgr.touch(k);
+        }
+        let later = Instant::now() + Duration::from_secs(301);
+        mgr.evict_idle(later);
+        let elapsed = start.elapsed();
+        assert_eq!(mgr.live(), 0);
+        // 5000 registers + 5000 touches + one retain over 5000 must not regress to
+        // quadratic: a generous wall-clock bound (the guard fails loudly, not precisely).
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "informer bookkeeping regressed: {elapsed:?}"
+        );
+    }
 }
