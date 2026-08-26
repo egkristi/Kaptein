@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.27.0] - 2026-08-25
 
 ### Added
+- **M2.2 — the CLI consumes a lens (lens-driven `get`)**:
+  - `kaptein get --gvk <gvk> --lens <file>` lists full objects
+    (`core::discovery::list_objects`) and renders each through `render_row` — lens
+    columns + lens-inferred status, the first real surface that consumes a lens (not
+    just the `viewdef render` fixture path).
 - **M2.0c — informer lifecycle policy (ADR-0006)**:
   - `kaptein-core::informer::InformerManager` — lazy per-view `register`/`touch`/
     `release`, LRU `evict_idle` with TTL, and a hard cap that returns `Denied`

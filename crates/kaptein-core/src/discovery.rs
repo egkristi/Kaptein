@@ -209,6 +209,26 @@ pub async fn list(
     Ok(list.into_iter().map(|obj| summary_of(&obj, gvk)).collect())
 }
 
+/// List the **full** `DynamicObject`s of a given `group/version/kind`, without reducing
+/// them to summaries. This is the data source for lens-driven rendering (M2.2): a lens
+/// reads `spec`/`status` fields directly, so the full object body must be available — not
+/// the metadata-only summary. Namespaced or cluster-scoped, via `DynamicObject` so any
+/// built-in resource or CRD works uniformly.
+pub async fn list_objects(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+) -> Result<Vec<DynamicObject>, Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+    let list: ObjectList<DynamicObject> =
+        api.list(&Default::default()).await.map_err(Error::Api)?;
+    Ok(list.items)
+}
+
 /// Convert a `DynamicObject` into a display-neutral `ResourceSummary`.
 pub fn summary_of(obj: &DynamicObject, gvk: &GroupVersionKind) -> ResourceSummary {
     let kind = obj

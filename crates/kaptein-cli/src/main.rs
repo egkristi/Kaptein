@@ -42,6 +42,10 @@ enum Command {
         /// kubeconfig context to use (context switching)
         #[arg(long)]
         context: Option<String>,
+        /// render each object through a view-definition (lens) file — lens columns +
+        /// lens-inferred status instead of the built-in four-column view (M2.2).
+        #[arg(short = 'l', long)]
+        lens: Option<String>,
     },
     /// RBAC preflight: check whether the current user may perform a verb.
     Can {
@@ -452,6 +456,7 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             filter,
             metadata,
             context,
+            lens,
         } => {
             let gvk = parse_gvk(&gvk);
             // Use the context-specific client when --context is supplied.
@@ -459,6 +464,50 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
                 None => client.clone(),
             };
+
+            // Lens-driven rendering (M2.2): list the full objects and render each through
+            // the lens — lens columns + lens-inferred status, the same `render_row` a
+            // frontend uses. This is the first real surface that *consumes* a lens.
+            if let Some(lens_file) = lens {
+                let lens_text = std::fs::read_to_string(&lens_file).map_err(|e| {
+                    kaptein_core::Error::Internal(format!("cannot read {lens_file}: {e}"))
+                })?;
+                let lens_value: serde_json::Value =
+                    serde_yaml::from_str(&lens_text).map_err(|e| {
+                        kaptein_core::Error::Internal(format!("cannot parse {lens_file}: {e}"))
+                    })?;
+                let vd: kaptein_viewmodel::ViewDefinition = serde_json::from_value(lens_value)
+                    .map_err(|e| {
+                        kaptein_core::Error::Internal(format!(
+                            "cannot deserialize {lens_file}: {e}"
+                        ))
+                    })?;
+                let problems = kaptein_viewmodel::validate_viewdef(&vd);
+                if !problems.is_empty() {
+                    for p in &problems {
+                        eprintln!("error: {p}");
+                    }
+                    return Err(kaptein_core::Error::Internal(format!(
+                        "lens {lens_file} is invalid ({} problem(s))",
+                        problems.len()
+                    )));
+                }
+
+                let objs =
+                    kaptein_core::discovery::list_objects(&client, &gvk, namespace.as_deref())
+                        .await?;
+                for obj in objs {
+                    let value = serde_json::to_value(&obj).map_err(|e| {
+                        kaptein_core::Error::Internal(format!("serialize object: {e}"))
+                    })?;
+                    let row = kaptein_viewmodel::render_row(&vd, &value);
+                    let cells: Vec<String> =
+                        row.cells.iter().map(kaptein_viewmodel::cell_text).collect();
+                    println!("{}", cells.join("\t"));
+                }
+                return Ok(());
+            }
+
             // Metadata-only listing (ADR-0006) is the bounded, cheap path for
             // list-heavy views: the API server returns `metadata` only.
             let items = if metadata {

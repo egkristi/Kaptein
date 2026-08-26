@@ -303,6 +303,11 @@ Milestones:
       without a code change — the whole point of "data first, code second")
     - `render_row` on the `DataPlane` path so lens columns and lens-inferred status flow
       through the same `Page`/`Row` the built-in kinds use
+  - *Landed (2026-08-26): the CLI now consumes a lens — `kaptein get --gvk <gvk> --lens
+    <file>` lists full objects (`core::discovery::list_objects`) and renders each through
+    `render_row` (lens columns + lens-inferred status), verified against the live cluster.
+    This is a real surface consuming a lens (the first such path). Remaining: lens
+    *discovery* from configured paths at startup and the TUI's lens-driven kind list.*
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
