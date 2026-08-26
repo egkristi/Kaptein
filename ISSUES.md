@@ -52,26 +52,26 @@ reconnect — `LivePlane::watch_loop` now reconnects with backoff and `run_infor
 caller, commit 59b421a). See *Re-audit findings* below for what those fixes did **not**
 cover.
 
-### Re-audit findings (v0.27.0) — filed as #20–#30 (L not yet filed)
+### Re-audit findings (v0.27.0) — all fixed (issues #20–#31)
 
-Found by an external re-audit of the shipped v0.27.0 artifact. Each is a defect in code
-that ships today, so each is issue material rather than a milestone; the milestone column
-names where the fix belongs. All are open.
+Found by an external re-audit of the shipped v0.27.0 artifact. Every finding is now
+**fixed and closed** (commits 9645c58 → 81fea67). The table records the fix for history;
+the milestone column names where the fix landed.
 
-| # | Issue | Severity | Finding | Owner |
-|---|-------|----------|---------|-------|
-| A | #20 | High | **Reconnect never relists → ghost rows.** `LivePlane::watch_loop` reconnects, but on reconnect it calls `list_metadata(limit(1))` *only to read a resourceVersion* and then watches from there. Objects deleted while the watch was down are never removed from the `MemPlane` — no `Deleted` event will ever arrive for them — so the TUI shows deleted resources indefinitely after any watch expiry (routine, ~5 min). The doc comment claims it "relists and reconnects"; it does not relist. A correct informer relists into the store, reconciles (removing keys absent from the relist), then watches from the *list's* RV. | M2.0c |
-| B | #25 | High | **`InformerManager` has no caller.** `kaptein-core::informer` (361 lines) is referenced only by a doc-comment in `config.rs`. `LivePlane` opens watches without consulting it, so the hard cap, TTL eviction, and degrade-to-list path are never exercised against real watch sockets. The "watches ≤ N" budget is asserted only in the manager's own unit test — the policy layer is correct and unenforced. | M2.0c |
-| C | #26 | Medium | **The "LRU + TTL" manager has no LRU.** `InformerManager::register` evicts by TTL only. When the cap is full and every entry is fresh, *every* new view is `Denied` until a TTL expires — the first `max_watches` views win permanently. `Registration::Denied`'s doc says "this view was not the most-recently-used", and the `watches` field comment says "in insertion order for LRU scanning", but the field is a `HashMap` (no order) and no least-recently-used entry is ever evicted to admit a hot view. Either implement LRU admission or correct ADR-0006 and the docs to say "TTL-only". | M2.0c |
-| D | #23 | High | **Krew manifest ships placeholders and CI passes it.** `krew/kaptein.yaml` contains `PLACEHOLDER_VERSION` and `PLACEHOLDER_*_SHA256`, and no release step substitutes them. The CI `dist` job asserts only that `uri`/`sha256`/`bin` are *truthy*, which the placeholder strings satisfy — so `kubectl krew install kaptein` cannot work, and CI reports the manifest valid. Needs a release-time render step plus a CI assertion that the values are not placeholders. | Distribution |
-| E | #24 | High | **`install.sh` ignores the signatures we produce.** It downloads `SHA256SUMS` from the *same* release URL as the archive and checks the archive against it. That is an integrity check against corruption, not authenticity: whoever can serve a bad release serves both files. The release already publishes `SHA256SUMS.bundle`, and `SECURITY.md` documents `cosign verify-blob` — the official installer just never runs it. Add cosign verification (with a documented `--certificate-identity`), or state plainly in the script that it does not verify authenticity. | Distribution |
-| F | #21 | Medium | **MCP preflight pluralizes kinds differently from the request.** `mcp.rs::resource_from_kind` falls back to `lowercase + "s"` for anything outside a 21-entry table, so `NetworkPolicy` → `networkpolicys`, `PriorityClass` → `priorityclasss`, and most CRDs get a wrong plural. Because `auth::can` fails **closed**, a wrong plural means the rule never matches and the call is **refused** — the governed MCP surface silently rejects `list_resources`/`describe` for a large class of CRDs. The preflight must use the same plural the request uses (`ApiResource::from_gvk(&gvk).plural`), or resolve it from discovery. | M1b.4 |
-| G | #22 | Medium | **Logs are still not redaction-aware.** `describe::pod_logs`, `multi_pod_logs`, and `follow_logs` return raw lines, and the MCP `logs` tool ships them verbatim to a model. There is no log-redaction function in the workspace. M1.7's DoD explicitly requires "the `logs` path is redaction-aware"; the resource path is done, the log path is not. Logs are where credentials leak in practice. | M1.7 |
-| H | #27 | Medium | **The bounded list path is still not on the frontend path.** `LivePlane::seed` calls the unbounded `discovery::list`; `list_metadata_bounded` and `store::run_informer` are reached only from CLI commands. M2.0's "bounded" DoD is satisfied by code that exists, not by the path the TUI actually takes. | M2.0 |
-| I | #28 | Medium | **`query_plane` still asks for 50 000 rows at ~10 Hz.** Rendering is windowed now (only `scroll..scroll+page_height` becomes ratatui `Row`s — the fix that landed), but `frontend-tui::query_plane` still issues `Query { start: 0, end: 50_000 }` on every loop iteration, and `MemPlane::query` deep-clones the whole row `Vec` and sorts it before windowing. The per-frame allocation is fixed; the per-frame clone-and-sort is not. The TUI needs `page.total` for `rows.len()`/`G`, so the fix is to query the visible window and carry `total` separately. | M1.8 |
-| J | #29 | Low | **Secret annotations are over-redacted.** The `last-applied-configuration` leak is fixed by masking *every* annotation value on a Secret — which also masks `meta.helm.sh/*`, Argo CD tracking ids, and `kubectl.kubernetes.io/last-applied-configuration`'s harmless neighbours, making `describe` on a Secret much less useful. Prefer masking `last-applied-configuration` plus sensitive-named annotation keys. | M1.7 |
-| K | #30 | Low | **`install.sh` computes `VERSION_TAG` and never uses it** (dead variable, line 64). | Distribution |
-| L | *unfiled* | High | **The documented container image is never published.** `README.md` advertises `docker run ghcr.io/egkristi/kaptein …`, but no workflow builds or pushes an image — `grep -rn 'ghcr\|docker\|buildx' .github/workflows/` returns nothing, and the `Dockerfile` only builds locally from a release tarball. The documented command fails for every user. Either add a release job that builds and pushes to GHCR (with `packages: write` and the same cosign signing as the binaries) or remove the claim until it does. | Distribution |
+| # | Issue | Severity | Finding (fixed) | Owner |
+|---|-------|----------|-----------------|-------|
+| A | #20 | High | Reconnect never relisted → ghost rows. `watch_loop` now relists + reconciles on every reconnect. | M2.0c |
+| B | #25 | High | `InformerManager` had no caller. Now wired into `LivePlane` (shared `Arc`, config-driven policy, degrade-to-list on `Denied`). | M2.0c |
+| C | #26 | Medium | LRU admission implemented (`register` evicts the least-recently-used entry when the cap is full). | M2.0c |
+| D | #23 | High | Krew manifest now rendered at release time (tag + real sha256s); CI asserts placeholders. | Distribution |
+| E | #24 | High | `install.sh` now cosign-verifies `SHA256SUMS` against the OIDC identity (degrades with a warning if cosign absent). | Distribution |
+| F | #21 | Medium | MCP preflight pluralizes via `ApiResource::from_gvk` (kube's pluralizer). | M1b.4 |
+| G | #22 | Medium | Logs redacted via `redact::redact_line` in `pod_logs`/`multi_pod_logs`/`follow_logs`. | M1.7 |
+| H | #27 | Medium | `LivePlane::seed` now pages through `list_bounded` (bounded frontend path). | M2.0 |
+| I | #28 | Medium | TUI re-queries the plane only on a revision change (no per-frame 50k clone+sort). | M1.8 |
+| J | #29 | Low | Secret annotation redaction narrowed to data-embedding + sensitive keys. | M1.7 |
+| K | #30 | Low | Dead `VERSION_TAG` removed from `install.sh`. | Distribution |
+| L | #31 | High | Release workflow now builds, pushes, and cosign-signs `ghcr.io/egkristi/kaptein`. | Distribution |
 
 Together, D, E, and L mean **all three advertised install paths in `README.md` are either
 unverified or non-functional**: the script checks integrity but not authenticity, the Krew
