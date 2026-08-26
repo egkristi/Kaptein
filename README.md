@@ -446,32 +446,29 @@ See [`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
 
 ### Install
 
-> **Build from source is currently the only supported path.** The binary release
-> channels below are staged but **not yet usable** — see
-> [#23](https://github.com/egkristi/Kaptein/issues/23) and
-> [#24](https://github.com/egkristi/Kaptein/issues/24). They are listed here so the
-> intent is public, not because they work today.
+Prebuilt, signed binaries ship on every release, and the install script verifies them.
+The fastest path (no `cargo` required — it downloads the binary, verifies its SHA-256
+checksum against the release's `SHA256SUMS`, and cosign-verifies that file's signature
+against the GitHub Actions OIDC identity, then installs to `~/.local/bin`):
 
-**From source** (supported) — `cargo build --release`; see *Build & test* below for the
-full command surface.
+```bash
+curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
+# pick a version / install dir:
+KAPTEIN_VERSION=v0.27.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+```
 
-Staged, not yet working:
+Alternatives:
 
-- **Install script** — `install.sh` downloads a release binary and checks it against the
-  release's `SHA256SUMS`. That verifies **integrity, not authenticity**: the checksum
-  file is fetched from the same place as the binary, so it does not prove who built it.
-  Until the script verifies the cosign bundle
-  ([#24](https://github.com/egkristi/Kaptein/issues/24)), verify by hand with the
-  commands in [`SECURITY.md`](./SECURITY.md#verifying-a-release).
-- **kubectl plugin** — `krew/kaptein.yaml` still contains `PLACEHOLDER_VERSION` and
-  placeholder digests, so `kubectl krew install kaptein` cannot succeed
-  ([#23](https://github.com/egkristi/Kaptein/issues/23)).
-- **Container image** — no workflow publishes `ghcr.io/egkristi/kaptein` yet; the
-  `Dockerfile` builds locally from a release tarball (`ISSUES.md` finding L).
+- **kubectl plugin**: `kubectl krew install kaptein` — the release workflow renders
+  `krew/kaptein.yaml` with the real tag and per-platform sha256 checksums.
+- **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod` — the
+  release workflow builds a static image from the verified tarball, pushes it to GHCR,
+  and cosign-signs the digest.
+- **From source**: `cargo build --release` (see *Build & test* below).
 
-Every release *does* ship cosign-signed artifacts, a `SHA256SUMS` file, a CycloneDX SBOM,
-and SLSA provenance — see [`SECURITY.md`](./SECURITY.md#verifying-a-release) for the
-exact `cosign verify-blob` and `slsa-verifier` invocations.
+Verify a downloaded artifact with cosign and checksums as described in
+[`SECURITY.md`](./SECURITY.md#verifying-a-release). Every release ships cosign-signed
+binaries, a `SHA256SUMS` file, a CycloneDX SBOM, and SLSA provenance.
 
 ### Build & test
 
