@@ -81,10 +81,14 @@ pub fn redact_object(obj: &mut DynamicObject) {
         // A Secret's metadata annotations (notably `last-applied-configuration`, which
         // `kubectl apply` embeds as a full plaintext copy of the object) must be masked
         // too — otherwise the plaintext leaks through `describe`/MCP even though `data`
-        // is redacted. Mask the whole annotations map value, not just its keys.
+        // is redacted. Mask only the *sensitive* annotation keys, not every annotation:
+        // masking all of them hides `meta.helm.sh/*`, Argo CD tracking ids, and other
+        // harmless metadata, making `describe` on a Secret much less useful (issue #29).
         if let Some(annotations) = obj.metadata.annotations.as_mut() {
-            for value in annotations.values_mut() {
-                *value = REDACTED.to_string();
+            for (key, value) in annotations.iter_mut() {
+                if is_sensitive_annotation(key) {
+                    *value = REDACTED.to_string();
+                }
             }
         }
     }
@@ -133,6 +137,24 @@ fn is_sensitive_key(key: &str) -> bool {
             || lower.starts_with(&format!("{s}."))
             || lower.contains(&format!(".{s}."))
     })
+}
+
+/// Whether a Secret annotation key should be masked. Masks the keys that actually embed
+/// a plaintext copy of secret data (`last-applied-configuration`, Helm's rendered
+/// `helm.sh/values`/`meta.helm.sh/release-values`), plus any annotation whose name is
+/// itself sensitive — while leaving tracking/harmless metadata (`meta.helm.sh/*` owners,
+/// Argo CD sync ids, etc.) visible (issue #29).
+fn is_sensitive_annotation(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    // The two annotations that embed a full plaintext copy of the object's data.
+    if lower.ends_with("last-applied-configuration")
+        || lower.ends_with("release-values")
+        || lower.contains(".values")
+    {
+        return true;
+    }
+    // Any annotation whose own name is a sensitive key.
+    is_sensitive_key(key)
 }
 
 /// Redact a single **log line**, returning the line with sensitive values masked.
@@ -282,6 +304,42 @@ mod tests {
         let s = serde_yaml::to_string(&o).unwrap();
         assert!(!s.contains("c3VwZXJzZWNyZXQ"));
         assert!(s.contains(REDACTED));
+    }
+
+    #[test]
+    fn harmless_secret_annotations_are_preserved() {
+        // Issue #29: tracking metadata (Helm owners, Argo CD sync ids) must survive —
+        // only the data-embedding and sensitive-named annotations are masked.
+        let mut o = obj("Secret", json!({ "data": { "k": "v" } }));
+        o.metadata.annotations = Some(
+            [
+                (
+                    "meta.helm.sh/release-name".to_string(),
+                    "my-release".to_string(),
+                ),
+                (
+                    "argocd.argoproj.io/tracking-id".to_string(),
+                    "apps/Secret:ns/name".to_string(),
+                ),
+                (
+                    "kubectl.kubernetes.io/last-applied-configuration".to_string(),
+                    "{\"data\":{\"k\":\"v\"}}".to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        redact_object(&mut o);
+        let s = serde_yaml::to_string(&o).unwrap();
+        assert!(s.contains("my-release"), "helm release name must survive");
+        assert!(
+            s.contains("tracking-id"),
+            "Argo CD tracking id must survive"
+        );
+        assert!(
+            !s.contains("\"data\":{\"k\":\"v\"}"),
+            "last-applied must be masked"
+        );
     }
 
     #[test]
