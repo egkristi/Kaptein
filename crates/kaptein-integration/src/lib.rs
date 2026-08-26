@@ -308,8 +308,10 @@ impl LivePlane {
 
     /// Run the watch loop until cancelled, applying deltas to the `MemPlane`. This is the
     /// "watch" half — drive it on a `tokio::spawn`ed task. On watch expiry/error
-    /// (routinely after ~5 min server timeouts or a 410 Gone) it **relists and
-    /// reconnects with backoff** rather than going silently stale.
+    /// (routinely after ~5 min server timeouts or a 410 Gone) it **relists into the
+    /// store and reconciles** — removing rows absent from the fresh relist — then watches
+    /// from the relist's resourceVersion, so no deleted object lingers as a ghost row
+    /// (issue #20).
     pub async fn watch_loop(&self) -> Result<(), IntegrationError> {
         let ar = kube::core::ApiResource::from_gvk(&self.gvk);
         let api: kube::Api<kube::core::DynamicObject> = match self.namespace.as_deref() {
@@ -320,18 +322,13 @@ impl LivePlane {
         let mut backoff_ms: u64 = 100;
 
         loop {
-            // Get a fresh resourceVersion via a metadata-only, bounded list — not a full
-            // object list (we already seeded in `seed`; this is just the "watch from
-            // here" cursor).
-            let rv = match api
-                .list_metadata(&kube::api::ListParams::default().limit(1))
-                .await
-            {
-                Ok(list) => list
-                    .metadata
-                    .resource_version
-                    .clone()
-                    .unwrap_or_else(|| "0".to_string()),
+            // Relist (metadata-only, fully paged) and reconcile before watching: this is
+            // the correct informer shape — remove keys absent from the relist, then watch
+            // from the relist's resourceVersion. A bare `limit(1)` list used only as a
+            // "watch from here" cursor would leave objects deleted during an outage
+            // forever (no `Deleted` event arrives for them).
+            let rv = match self.relist_and_reconcile(&api).await {
+                Ok(rv) => rv,
                 Err(_) => {
                     tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
                     backoff_ms = (backoff_ms * 2).min(5_000);
@@ -371,6 +368,52 @@ impl LivePlane {
             tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
             backoff_ms = (backoff_ms * 2).min(5_000);
         }
+    }
+
+    /// Relist the resource (metadata-only, fully paged) into the `MemPlane`, removing any
+    /// row absent from the fresh list (reconciliation), and return the resourceVersion to
+    /// watch from. This is the "list" half of list-then-watch on every reconnect — not
+    /// just the initial seed.
+    async fn relist_and_reconcile(
+        &self,
+        api: &kube::Api<kube::core::DynamicObject>,
+    ) -> Result<String, IntegrationError> {
+        // Collect the full live object set (metadata-only, paged) and its resourceVersion.
+        let mut live_ids: std::collections::HashSet<kaptein_viewmodel::RowId> =
+            std::collections::HashSet::new();
+        let mut rv: Option<String> = None;
+        let mut continue_token: Option<String> = None;
+        loop {
+            let mut lp = kube::api::ListParams::default().limit(500);
+            if let Some(token) = &continue_token {
+                lp = lp.continue_token(token);
+            }
+            let list = api
+                .list_metadata(&lp)
+                .await
+                .map_err(|e| IntegrationError::from(kaptein_core::Error::Api(e)))?;
+            rv = list.metadata.resource_version.clone().or(rv);
+            for meta in list.items {
+                let id = kaptein_viewmodel::RowId(
+                    meta.metadata.uid.clone().unwrap_or_else(|| meta.name_any()),
+                );
+                live_ids.insert(id);
+            }
+            match list.metadata.continue_.clone() {
+                Some(t) => continue_token = Some(t),
+                None => break,
+            }
+        }
+
+        // Reconcile: remove any row in the plane not present in the fresh relist.
+        let current = self.mem.rows();
+        for row in &current {
+            if !live_ids.contains(&row.id) {
+                self.mem.remove(&row.id);
+            }
+        }
+
+        Ok(rv.unwrap_or_else(|| "0".to_string()))
     }
 }
 
