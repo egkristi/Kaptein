@@ -44,14 +44,18 @@ Per the convention above, live bugs are GitHub issues.
 
 **Open:** *(none currently — the last open bug, #16, was fixed structurally below.)*
 
-**Closed since the last cycle:** #16 (`dry_run_apply_patch force:true` must not carry into
-the Phase 2 write path — the force flag is now a parameter, `apply_patch` refuses
-`force && !dry_run`, and the real write path `apply_patch_real` always applies with
-`force: false`; a test asserts the real path never forces), #17 (`kaptein edit` redaction
-round-trip — fixed by `RedactionPolicy::Unredacted` + `SecretViewed` audit, commit
-42ce99f) and #18 (watch reconnect — `LivePlane::watch_loop` now reconnects with backoff
-and `run_informer` has a caller, commit 59b421a). See *Re-audit findings* below for what
-those fixes did **not** cover.
+**Closed since the last cycle:** #33 (release container cosign signing failed — two root
+causes: the digest was read from `metadata-action` (which has no `digest` output) instead
+of `build-push-action`, and the mixed-case `github.repository` (`egkristi/Kaptein`) was
+used where OCI repository names are lowercase; fixed by signing `steps.build.outputs.digest`
+with the repo name lowercased, verified in v0.28.2), #16 (`dry_run_apply_patch force:true`
+must not carry into the Phase 2 write path — the force flag is now a parameter,
+`apply_patch` refuses `force && !dry_run`, and the real write path `apply_patch_real`
+always applies with `force: false`; a test asserts the real path never forces), #17
+(`kaptein edit` redaction round-trip — fixed by `RedactionPolicy::Unredacted` +
+`SecretViewed` audit, commit 42ce99f) and #18 (watch reconnect — `LivePlane::watch_loop`
+now reconnects with backoff and `run_informer` has a caller, commit 59b421a). See
+*Re-audit findings* below for what those fixes did **not** cover.
 
 ### Re-audit findings (v0.27.0) — all fixed (issues #20–#31)
 
