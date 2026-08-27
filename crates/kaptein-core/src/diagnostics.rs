@@ -68,6 +68,15 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
     if let Some(f) = readiness_probe_finding(status) {
         findings.push(f);
     }
+    // OOM forensics: a container killed by the kernel (exit 137 / reason OOMKilled) is
+    // a distinct signal from a plain crash — even without CrashLoopBackOff, the operator
+    // should see "out of memory", not "crashed". Covers both a currently-terminated
+    // container and a restart whose last_state.terminated was OOM-killed.
+    for cs in status.container_statuses.as_ref().into_iter().flatten() {
+        if let Some(f) = oom_killed_finding(cs) {
+            findings.push(f);
+        }
+    }
     if findings.is_empty() && !is_ready(status) {
         findings.push(Finding {
             code: "not_ready".into(),
@@ -210,6 +219,31 @@ fn container_not_ready_finding(cs: &ContainerStatus) -> Option<Finding> {
     None
 }
 
+/// An out-of-memory kill: the container's current `terminated` state (or its
+/// `last_state.terminated`, when the container restarted) has reason `OOMKilled` or exit
+/// code 137 (SIGKILL, the kernel OOM-killer's exit). This is the "OOM forensics" rule
+/// (README): a memory kill is a capacity signal, not a code bug.
+fn oom_killed_finding(cs: &ContainerStatus) -> Option<Finding> {
+    // Prefer the current terminated state; fall back to the last state (a restart after
+    // an OOM kill has `state.waiting`/`running` and the OOM evidence in `last_state`).
+    let terminated = cs
+        .state
+        .as_ref()
+        .and_then(|s| s.terminated.as_ref())
+        .or_else(|| cs.last_state.as_ref().and_then(|s| s.terminated.as_ref()))?;
+    let is_oom = terminated.reason.as_deref() == Some("OOMKilled") || terminated.exit_code == 137;
+    if !is_oom {
+        return None;
+    }
+    Some(Finding {
+        code: "oom_killed".into(),
+        summary: format!(
+            "Container '{}' was OOM-killed (exit code {}).",
+            cs.name, terminated.exit_code
+        ),
+    })
+}
+
 fn condition<'a>(status: &'a PodStatus, ty: &str) -> Option<&'a PodCondition> {
     status.conditions.as_ref()?.iter().find(|c| c.type_ == ty)
 }
@@ -290,6 +324,64 @@ mod tests {
         assert!(
             findings.iter().any(|f| f.code == "crash_loop"),
             "expected crash_loop finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn oom_killed_is_detected_from_terminated_state() {
+        let mut pod = pod_with("Running", false);
+        if let Some(status) = &mut pod.status {
+            status.container_statuses = Some(vec![ContainerStatus {
+                name: "app".into(),
+                ready: false,
+                restart_count: 0,
+                state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 137,
+                        reason: Some("OOMKilled".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "oom_killed"),
+            "expected oom_killed finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn oom_killed_is_detected_from_last_state_after_restart() {
+        // A restart after an OOM kill: current state is running/waiting, the OOM
+        // evidence is in last_state.terminated. Must still surface as oom_killed.
+        let mut pod = pod_with("Running", false);
+        if let Some(status) = &mut pod.status {
+            status.container_statuses = Some(vec![ContainerStatus {
+                name: "app".into(),
+                ready: false,
+                restart_count: 2,
+                state: Some(ContainerState {
+                    running: Some(Default::default()),
+                    ..Default::default()
+                }),
+                last_state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 137,
+                        reason: Some("OOMKilled".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "oom_killed"),
+            "expected oom_killed from last_state, got {findings:?}"
         );
     }
 

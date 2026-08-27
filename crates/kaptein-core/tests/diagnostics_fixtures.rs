@@ -74,3 +74,10 @@ fn readiness_probe_failure_is_detected() {
     let got = codes(&pod);
     assert!(got.contains(&"readiness_probe".into()), "got {got:?}");
 }
+
+#[test]
+fn oom_killed_is_detected() {
+    let pod = load_fixture("oom_killed.json");
+    let got = codes(&pod);
+    assert!(got.contains(&"oom_killed".into()), "got {got:?}");
+}

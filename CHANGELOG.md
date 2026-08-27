@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **OOM forensics rule** (M1.6 diagnostics): a distinct `oom_killed` finding detects a
+  container killed by the kernel (reason `OOMKilled` or exit 137) from either the current
+  `terminated` state or `last_state.terminated` after a restart — so a memory kill reads
+  as a capacity signal, not a generic crash. Added a fixture (`oom_killed.json`) to the
+  canonical diagnostics corpus.
 - **Lens action graph (M2.2)**: `ViewDefinition::actions_as_semantic` maps a lens's
   declared `actions` into the render contract's `semantic::Action` (lens-native
   `allowed`/`gated`/`forbidden` → `ActionState`), and the TUI surfaces the selected
