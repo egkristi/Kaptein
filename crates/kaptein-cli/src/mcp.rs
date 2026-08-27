@@ -224,9 +224,9 @@ impl KapteinMcp {
                     "properties": {
                         "gvk": {"type": "string", "description": "group/version/kind"},
                         "name": {"type": "string"},
-                        "namespace": {"type": "string"}
+                        "namespace": {"type": "string", "description": "namespace (omit for cluster-scoped)"}
                     },
-                    "required": ["gvk", "name", "namespace"]
+                    "required": ["gvk", "name"]
                 })),
             ),
             Tool::new(
@@ -406,11 +406,16 @@ impl KapteinMcp {
             "blast_radius" => {
                 let gvk = a("gvk").ok_or("missing 'gvk'")?;
                 let name = a("name").ok_or("missing 'name'")?;
-                let namespace = a("namespace").ok_or("missing 'namespace'")?;
+                let namespace = a("namespace");
                 let gvk = parse_gvk(&gvk);
-                let br = kaptein_core::moat::blast_radius(&self.client, &namespace, &gvk, &name)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let br = kaptein_core::moat::blast_radius(
+                    &self.client,
+                    namespace.as_deref(),
+                    &gvk,
+                    &name,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
                 let mut out = vec![format!("{}/{} ({})", br.namespace, br.kind, br.name)];
                 out.push(format!("owners ({}):", br.owners.len()));
                 for o in &br.owners {

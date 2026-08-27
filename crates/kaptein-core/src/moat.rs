@@ -159,12 +159,18 @@ pub struct BlastRadius {
 /// covers the ownership/cascade-delete chain.
 pub async fn blast_radius(
     client: &Client,
-    namespace: &str,
+    namespace: Option<&str>,
     gvk: &kube::core::GroupVersionKind,
     name: &str,
 ) -> Result<BlastRadius, Error> {
+    // `None`/empty namespace = cluster-scoped target (Node, Namespace, cluster-scoped
+    // CRD). The target is fetched via the cluster-scoped API; the dependents traversal
+    // lists namespaced controllers/pods cluster-wide.
     let ar = kube::core::ApiResource::from_gvk(gvk);
-    let api: Api<kube::api::DynamicObject> = Api::namespaced_with(client.clone(), namespace, &ar);
+    let api: Api<kube::api::DynamicObject> = match namespace {
+        Some(ns) if !ns.is_empty() => Api::namespaced_with(client.clone(), ns, &ar),
+        _ => Api::all_with(client.clone(), &ar),
+    };
     let obj = api.get(name).await.map_err(Error::Api)?;
 
     let uid = obj.metadata.uid.clone().unwrap_or_default();
@@ -191,8 +197,10 @@ pub async fn blast_radius(
         let ar = kube::core::ApiResource::from_gvk(&kube::core::GroupVersionKind::gvk(
             group, version, kind,
         ));
-        let api: Api<kube::api::DynamicObject> =
-            Api::namespaced_with(client.clone(), namespace, &ar);
+        let api: Api<kube::api::DynamicObject> = match namespace {
+            Some(ns) if !ns.is_empty() => Api::namespaced_with(client.clone(), ns, &ar),
+            _ => Api::all_with(client.clone(), &ar),
+        };
         let list = match api.list(&ListParams::default()).await {
             Ok(l) => l,
             // The group/kind may not be served (no batch API, RBAC deny) — degrade
@@ -217,7 +225,10 @@ pub async fn blast_radius(
 
     // Match Pods against any transitively-owned uid (the target's own uid, or an
     // intermediate controller it owns).
-    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pods: Api<Pod> = match namespace {
+        Some(ns) if !ns.is_empty() => Api::namespaced(client.clone(), ns),
+        _ => Api::all(client.clone()),
+    };
     let pod_list = pods
         .list(&ListParams::default())
         .await
@@ -234,7 +245,7 @@ pub async fn blast_radius(
     }
 
     Ok(BlastRadius {
-        namespace: namespace.into(),
+        namespace: namespace.unwrap_or_default().into(),
         kind: gvk.kind.clone(),
         name: name.into(),
         owners,

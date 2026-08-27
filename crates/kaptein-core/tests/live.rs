@@ -361,7 +361,7 @@ async fn blast_radius_traverses_deployment_to_pod() {
     assert!(saw_pod, "expected a Pod owned by {deploy_name} to appear");
 
     let gvk = GroupVersionKind::gvk("apps", "v1", "Deployment");
-    let br = kaptein_core::moat::blast_radius(&client, &ns, &gvk, deploy_name)
+    let br = kaptein_core::moat::blast_radius(&client, Some(&ns), &gvk, deploy_name)
         .await
         .expect("blast_radius");
 

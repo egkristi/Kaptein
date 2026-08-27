@@ -18,6 +18,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `name`, `namespace`, `created` (filter: `name`/`namespace`/`status`).
 
 ### Added
+- **`blast_radius` supports cluster-scoped resources** (M1b.3): `namespace` is now optional
+  — pass `None` (or omit it in the MCP tool) to compute the blast radius of a Node,
+  Namespace, or cluster-scoped CRD. The dependents traversal lists controllers/pods
+  cluster-wide for cluster-scoped targets.
 - **Context switching parity across read *and* manifest commands** (M1.2): `describe`,
   `diagnose`, `logs`, `events`, `overview`, `watch`, `apply`, and `edit` now accept
   `--context` (matching `get`), so an operator can target any kubeconfig context without
