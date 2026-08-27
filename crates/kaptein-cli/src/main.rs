@@ -1105,7 +1105,7 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             let _ = kaptein_core::watchring::snapshot_into_ring(&client, &pod_gvk, None, &ring, 50)
                 .await;
 
-            let overview = kaptein_core::overview::overview_with_ring(
+            let overview = kaptein_core::overview::overview_with_health(
                 &client,
                 None,
                 since_ms,
@@ -1124,6 +1124,13 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     "    [WARN] {}/{}\t{}\t{}",
                     w.kind, w.name, w.reason, w.message
                 );
+            }
+            println!("  unhealthy pods: {}", overview.unhealthy_pods.len());
+            for u in overview.unhealthy_pods {
+                println!("    [UNHEALTHY] {}/{}", u.namespace, u.name);
+                for f in u.findings {
+                    println!("        - {f}");
+                }
             }
             println!(
                 "  recent changes (watch): {}",

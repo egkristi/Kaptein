@@ -18,6 +18,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `name`, `namespace`, `created` (filter: `name`/`namespace`/`status`).
 
 ### Added
+- **Landing view surfaces unhealthy pods** (M1.5 + M1.6): `kaptein overview` now lists
+  pods that are not ready, with their diagnostics findings (crash-loop, image-pull, taint,
+  PVC binding, etc.) — answering "is anything broken" directly rather than only via
+  warning events. Degrades gracefully to events-only if pod listing is denied.
 - **Taint/toleration diagnostic** (M1.6): a Pending pod rejected for an untolerated taint
   (`"N node(s) had untolerated taint {key=value: effect}"`) now surfaces as a distinct
   `taint` finding (with the taint extracted), checked before the generic `unschedulable`
