@@ -46,6 +46,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
 
+  bench:
+    name: Perf budget (M1.8 query p99)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The M1.8 budget is *measured*, not aspirational: this runs the release-mode
+      # benchmark over a 50 000-row synthetic plane and the bench exits non-zero on a
+      # p99 regression, failing the job (the budget lives in the bench, not in CI).
+      - run: cargo bench -p kaptein-viewmodel --bench query --locked
+
   msrv:
     name: MSRV (pinned toolchain)
     runs-on: ubuntu-latest

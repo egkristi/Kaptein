@@ -122,7 +122,10 @@ unowned debt. Done items are struck through.
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
    aspirational. **Related: #28** — `query_plane` still requests 50 000 rows at ~10 Hz and
    `MemPlane::query` clones-and-sorts the whole set per frame; that is the hot spot the
-   harness will trip over first.
+   harness will trip over first. *Landed (v0.29.0 →): the view-model half is measured —
+   `benches/query.rs` drives `MemPlane::query` over 50k rows and gates p99 <8 ms via a
+   `bench` CI job. Remaining: the kwok synthetic-cluster harness and end-to-end
+   RSS/cold-start numbers.*
 5. ~~**Signed releases + SBOM**~~ (done, commit eba14d9 + SLSA provenance in
    `.github/workflows/release.yml`): cosign keyless + CycloneDX SBOM + SHA256SUMS, the
    SBOM is cosign-signed, and SLSA provenance is generated per release.

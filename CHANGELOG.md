@@ -4,6 +4,17 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **M1.8 — the query p99 budget is now measured, not aspirational**:
+  `crates/kaptein-viewmodel/benches/query.rs` is a dependency-free, release-mode
+  benchmark that drives `MemPlane::query` (sort + filter + window) over a 50 000-row
+  synthetic plane and reports p50/p99/max over 200 iterations, exiting non-zero if p99
+  exceeds an 8 ms budget. A `bench` job in `ci.yml` runs it and fails on regression.
+  *(The kwok synthetic-cluster harness and end-to-end RSS/cold-start numbers remain the
+  frontend-level Phase 1 tail.)*
+
 ## [0.29.0] - 2026-08-27
 
 ### Fixed

@@ -20,3 +20,10 @@ serde_json = "1"
 
 [dev-dependencies]
 serde_json = "1"
+
+# M1.8: a dependency-free, main()-based benchmark (harness = false) that measures the
+# p99 query latency over 50 000 rows and enforces the budget by exit code, so CI fails
+# on regression without pulling in criterion or a nightly-only feature.
+[[bench]]
+name = "query"
+harness = false

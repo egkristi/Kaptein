@@ -131,6 +131,15 @@ Milestones:
       the `G`/`j` navigation use the true post-filter count, decoupled from the
       materialized window. Still open: querying *only* the visible window (a deeper nav
       refactor), and the kwok harness that measures the p99 budget.*
+    - *Landed (v0.29.0 →): the **view-model half of the budget is now measured, not
+      aspirational**. `crates/kaptein-viewmodel/benches/query.rs` is a dependency-free,
+      release-mode benchmark that drives `MemPlane::query` (sort + filter + window) over a
+      50 000-row synthetic plane and reports p50/p99/max over 200 iterations, exiting
+      non-zero if p99 exceeds an 8 ms budget (half the 16 ms keystroke-to-frame target,
+      of which query is the dominant part). A `bench` job in `ci.yml` runs it and fails on
+      regression. The **kwok** synthetic-cluster harness (thousands of fake nodes/pods) and
+      the end-to-end RSS/cold-start numbers remain the frontend-level Phase 1 tail — this
+      bench gates the one number the view-model owns in isolation.*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
