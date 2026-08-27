@@ -119,6 +119,12 @@ Milestones:
     clone-and-sort, not the allocation, is what the p99 budget will trip over. The TUI
     needs `page.total` for `rows.len()`/`G` navigation, so the fix is to query the visible
     window and carry `total` separately (`ISSUES.md` finding I, issue #28).
+    - *Landed (v0.28.2 →): the sort's per-comparison cost was the dominant allocator —
+      `cmp_cells` cloned two `String`s per comparison via its `cell_text` fallback
+      (~1.7M allocations per 50k-row sort). Text-vs-Text and Status-vs-Status now compare
+      `&str` (identical ordering, zero allocation), with a test pinning the ordering.
+      Still open: windowing `query_plane` (query the visible window + carry `total`), and
+      the kwok harness that measures the p99 budget.*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
