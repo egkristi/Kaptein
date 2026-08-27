@@ -4,6 +4,15 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **#33 — release container cosign signing**: the `Publish container image` job signed
+  `steps.meta.outputs.digest`, but `docker/metadata-action` has no `digest` output (it is
+  emitted by `docker/build-push-action`), so cosign got the empty reference
+  `ghcr.io/egkristi/Kaptein@` and failed. The build step now has `id: build` and the
+  image is signed from `steps.build.outputs.digest`.
+
 ## [0.28.0] - 2026-08-27
 
 ### Added

@@ -276,6 +276,7 @@ jobs:
             type=ref,event=tag
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -286,10 +287,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       # Keyless-sign the pushed image digest with cosign (same OIDC identity as the
-      # binaries), so `cosign verify` works on the image too.
+      # binaries), so `cosign verify` works on the image too. The digest is emitted by
+      # `build-push-action` (not `metadata-action`, which has no `digest` output) — the
+      # empty reference `ghcr.io/...@` was the release v0.28.0 container-job failure.
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.2
       - name: Sign image with cosign (keyless)
         run: |
           cosign sign --yes \
-            "ghcr.io/${{ github.repository }}@${{ steps.meta.outputs.digest }}"
+            "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
