@@ -3,11 +3,13 @@
 //! The CLI drives `kaptein-core` directly; it is a projection, not a home for logic.
 
 mod audit;
+mod completion;
 mod edit;
 mod mcp;
 mod schema;
 
 use clap::{Parser, Subcommand};
+use clap_complete::engine::ArgValueCompleter;
 use kube::core::GroupVersionKind;
 
 #[derive(Parser)]
@@ -22,10 +24,10 @@ enum Command {
     /// List resources of a given kind.
     Get {
         /// group/version/kind, e.g. "v1/Pod" or "apps/v1/Deployment"
-        #[arg(short, long, default_value = "v1/Pod")]
+        #[arg(short, long, default_value = "v1/Pod", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// Namespace (omit for cluster-scoped resources)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// sort by column: name, namespace, created
         #[arg(short, long)]
@@ -43,7 +45,7 @@ enum Command {
         #[arg(long)]
         metadata: bool,
         /// kubeconfig context to use (context switching)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
         /// render each object through a view-definition (lens) file — lens columns +
         /// lens-inferred status instead of the built-in four-column view (M2.2).
@@ -56,7 +58,7 @@ enum Command {
         #[arg(short, long)]
         verb: String,
         /// plural resource name, e.g. "pods", "deployments"
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::resource_completer))]
         resource: String,
         /// API group (empty for core)
         #[arg(short, long, default_value = "")]
@@ -68,7 +70,7 @@ enum Command {
     /// Batch RBAC preflight: check the standard action set for a resource.
     Preflight {
         /// plural resource name, e.g. "pods", "deployments"
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::resource_completer))]
         resource: String,
         /// API group (empty for core)
         #[arg(short, long, default_value = "")]
@@ -86,7 +88,7 @@ enum Command {
     /// Explain why a context is classified the way it is.
     ConfigExplainContext {
         /// context name
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: String,
     },
     /// Validate a view-definition (lens) file against the lens schema.
@@ -129,37 +131,37 @@ enum Command {
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// kubeconfig context to use (context switching)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
     },
     /// YAML-describe a single resource.
     Describe {
         /// group/version/kind
-        #[arg(short, long, default_value = "v1/Pod")]
+        #[arg(short, long, default_value = "v1/Pod", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// resource name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace (omit for cluster-scoped)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// kubeconfig context to use (context switching)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
     },
     /// Tail recent logs from a pod.
     Logs {
         /// pod name (omit to stream all pods via --selector)
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: Option<String>,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// label selector for multi-pod streaming (e.g. app=foo)
         #[arg(short = 'l', long)]
@@ -177,7 +179,7 @@ enum Command {
         #[arg(long)]
         json: bool,
         /// kubeconfig context to use (context switching)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
     },
     /// Run the governed MCP server over stdio (read-only).
@@ -185,7 +187,7 @@ enum Command {
     /// Show recent cluster events ("what changed in the last N minutes").
     Events {
         /// namespace (omit for all namespaces)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// look back this many minutes
         #[arg(long, default_value_t = 15)]
@@ -206,25 +208,25 @@ enum Command {
     /// Watch a resource kind and report changes (in-memory ring buffer, no persistence).
     Watch {
         /// group/version/kind, e.g. v1/Pod
-        #[arg(short, long, default_value = "v1/Pod")]
+        #[arg(short, long, default_value = "v1/Pod", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// namespace (omit for cluster-scoped)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// stop after this many change events
         #[arg(long, default_value_t = 20)]
         max: usize,
         /// kubeconfig context to use (context switching)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
     },
     /// Run the informer-backed bounded store (ADR-0006) for a resource kind.
     WatchStore {
         /// group/version/kind, e.g. v1/Pod
-        #[arg(short, long, default_value = "v1/Pod")]
+        #[arg(short, long, default_value = "v1/Pod", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// namespace (omit for cluster-scoped)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// page size for the bounded (continue-token) seed
         #[arg(long, default_value_t = 500)]
@@ -245,25 +247,25 @@ enum Command {
     /// Edit a resource's YAML in $EDITOR, then dry-run the result (never applies).
     Edit {
         /// group/version/kind, e.g. v1/ConfigMap or apps/v1/Deployment
-        #[arg(short, long, default_value = "v1/ConfigMap")]
+        #[arg(short, long, default_value = "v1/ConfigMap", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// resource name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace (omit for cluster-scoped)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// kubeconfig context to use (context switching)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
     },
     /// Forward a pod port to a local TCP listener (Ctrl-C to stop).
     PortForward {
         /// pod name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         pod: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// target (pod) port
         #[arg(short = 't', long)]
@@ -286,10 +288,10 @@ enum Command {
     /// Run a one-shot command in a pod container (read-only).
     Exec {
         /// pod name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         pod: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// container name (omit for the default/first container)
         #[arg(short = 'c', long)]
@@ -304,13 +306,13 @@ enum Command {
     /// Delete a resource (dry-run by default; requires --confirm).
     Delete {
         /// group/version/kind, e.g. v1/ConfigMap or apps/v1/Deployment
-        #[arg(short, long, default_value = "v1/ConfigMap")]
+        #[arg(short, long, default_value = "v1/ConfigMap", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// resource name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace (omit for cluster-scoped)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: Option<String>,
         /// cascade policy: background (default), foreground, or orphan
         #[arg(long, default_value = "background")]
@@ -325,13 +327,13 @@ enum Command {
     /// Scale a workload's replicas (dry-run by default; requires --confirm).
     Scale {
         /// group/version/kind, e.g. apps/v1/Deployment
-        #[arg(short, long, default_value = "apps/v1/Deployment")]
+        #[arg(short, long, default_value = "apps/v1/Deployment", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// resource name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// target replica count
         #[arg(long)]
@@ -346,13 +348,13 @@ enum Command {
     /// Trigger a rollout restart (annotates the pod template; requires --confirm).
     Restart {
         /// group/version/kind, e.g. apps/v1/Deployment
-        #[arg(short, long, default_value = "apps/v1/Deployment")]
+        #[arg(short, long, default_value = "apps/v1/Deployment", add = ArgValueCompleter::new(completion::gvk_completer))]
         gvk: String,
         /// resource name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// actually restart (restart has no dry-run; this is required)
         #[arg(long)]
@@ -364,7 +366,7 @@ enum Command {
     /// Cordon a node (mark unschedulable; requires --confirm).
     Cordon {
         /// node name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// actually cordon (default is dry-run)
         #[arg(long)]
@@ -376,7 +378,7 @@ enum Command {
     /// Uncordon a node (mark schedulable; requires --confirm).
     Uncordon {
         /// node name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// actually uncordon (default is dry-run)
         #[arg(long)]
@@ -388,10 +390,10 @@ enum Command {
     /// Evict a pod (requires --confirm).
     Evict {
         /// pod name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// actually evict (default is dry-run)
         #[arg(long)]
@@ -403,7 +405,7 @@ enum Command {
     /// Preview what draining a node would evict (read-only; never cordons or evicts).
     Drain {
         /// node name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         name: String,
     },
     /// Shell out to an external tool (krew/kustomize/helm); degrades gracefully if absent.
@@ -418,19 +420,19 @@ enum Command {
     /// List ephemeral containers attached to a pod.
     DebugContainers {
         /// pod name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         pod: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
     },
     /// Attach an ephemeral (debug) container to a running pod (requires --confirm).
     Debug {
         /// pod name
-        #[arg(short = 'p', long)]
+        #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
         pod: String,
         /// namespace
-        #[arg(short = 'n', long, default_value = "default")]
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
         namespace: String,
         /// ephemeral container name
         #[arg(long)]
@@ -479,10 +481,18 @@ enum ExtensionCommand {
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Dynamic shell completion is handled *before* the async runtime starts: when the
+    // shell invokes `COMPLETE=<shell> kaptein -- …`, `CompleteEnv` resolves the
+    // completers (which block on their own single-threaded runtime to query the cluster)
+    // and exits with the candidates on stdout. A runtime cannot be started from within a
+    // runtime, so this must be the synchronous entry point.
+    use clap::CommandFactory as _;
+    clap_complete::CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
-    if let Err(err) = run(cli).await {
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    if let Err(err) = rt.block_on(run(cli)) {
         eprintln!("error: {err}");
         std::process::exit(1);
     }

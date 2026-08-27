@@ -82,6 +82,36 @@ kaptein completions zsh  > "${fpath[1]}/_kaptein"
 kaptein completions fish > ~/.config/fish/completions/kaptein.fish
 ```
 
+**Dynamic (live-cluster) completion.** The static `completions` output covers flags and
+subcommands; for **live values** — namespaces, kubeconfig contexts, pod names, GVKs, and
+plural resources — the CLI also ships a *dynamic* completer that queries the cluster at
+completion time. Source the dynamic registration (which re-invokes `kaptein` as you type)
+instead of, or alongside, the static file:
+
+```bash
+# bash
+source <(COMPLETE=bash kaptein)
+# zsh
+source <(COMPLETE=zsh kaptein)
+# fish
+COMPLETE=fish kaptein | source
+```
+
+What completes dynamically:
+
+| Argument | Candidates |
+|----------|-----------|
+| `--namespace` / `-n` | live namespace names |
+| `--context` | kubeconfig context names (no cluster call) |
+| `--gvk` / `-g` | common built-in GVKs (`v1/Pod`, `apps/v1/Deployment`, …) |
+| `--resource` / `-r` (`can`, `preflight`) | common plural resources (`pods`, `deployments`, …) |
+| `--name` / `-p` / `--pod` | pod names in the `default` namespace |
+
+Known limitation: the pod-name completer completes from the `default` namespace (the
+completer cannot read a sibling `-n` flag you already typed), so `-n <ns>` first to
+complete pods in another namespace. Completion always degrades gracefully — an
+unreachable cluster or a permission denial yields no candidates, never an error or hang.
+
 ---
 
 ## 2. Concepts

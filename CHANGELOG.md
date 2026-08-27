@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+- **Dynamic (live-cluster) shell completion.** `kaptein completions <shell>` only emits
+  static flags/subcommands; now the CLI also ships a dynamic completer
+  (`clap_complete`'s `unstable-dynamic` `CompleteEnv` + `ArgValueCompleter`) that queries
+  the cluster at completion time. Source `source <(COMPLETE=bash kaptein)` (or
+  `zsh`/`fish`) to complete **namespaces** and **pod names** from the live cluster,
+  **kubeconfig contexts** from the local kubeconfig, and **GVKs**/plural **resources**
+  from a fixed built-in set. Completion degrades gracefully to no candidates when the
+  cluster is unreachable (never an error or hang).
+
 ### Fixed
 - **`kaptein get -l` was a silent flag collision with `--lens`.** `-l` was bound to
   `--lens` (a view-definition file path), so `kaptein get -l cnpg` tried to read a file
