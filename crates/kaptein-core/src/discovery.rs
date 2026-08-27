@@ -209,6 +209,32 @@ pub async fn list(
     Ok(list.into_iter().map(|obj| summary_of(&obj, gvk)).collect())
 }
 
+/// List resources of a given `group/version/kind`, optionally filtered by a Kubernetes
+/// label selector (e.g. `app=orders`). `label_selector` is `None` for no filtering; an
+/// empty string also means "no filter" (the API server's `labelSelector=` is a no-op),
+/// so callers pass `None` or a non-empty string. This is the server-side selector path —
+/// a `get -l app=foo` filters at the API server, not by post-filtering a full list.
+pub async fn list_with_selector(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    label_selector: Option<&str>,
+) -> Result<Vec<ResourceSummary>, Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let lp = match label_selector {
+        Some(sel) if !sel.is_empty() => ListParams::default().labels(sel),
+        _ => ListParams::default(),
+    };
+    let list: ObjectList<DynamicObject> = api.list(&lp).await.map_err(Error::Api)?;
+
+    Ok(list.into_iter().map(|obj| summary_of(&obj, gvk)).collect())
+}
+
 /// List the **full** `DynamicObject`s of a given `group/version/kind`, without reducing
 /// them to summaries. This is the data source for lens-driven rendering (M2.2): a lens
 /// reads `spec`/`status` fields directly, so the full object body must be available — not
@@ -226,6 +252,27 @@ pub async fn list_objects(
     };
     let list: ObjectList<DynamicObject> =
         api.list(&Default::default()).await.map_err(Error::Api)?;
+    Ok(list.items)
+}
+
+/// The label-selector form of [`list_objects`] (M1.2 k9s parity): a lens-driven `get
+/// --lens ... -l app=orders` filters full objects at the API server by label.
+pub async fn list_objects_with_selector(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    label_selector: Option<&str>,
+) -> Result<Vec<DynamicObject>, Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+    let lp = match label_selector {
+        Some(sel) if !sel.is_empty() => ListParams::default().labels(sel),
+        _ => ListParams::default(),
+    };
+    let list: ObjectList<DynamicObject> = api.list(&lp).await.map_err(Error::Api)?;
     Ok(list.items)
 }
 
@@ -347,6 +394,49 @@ pub async fn list_metadata_bounded(
                 created: meta.metadata.creation_timestamp.clone(),
                 status: String::new(),
             }
+        })
+        .collect();
+    Ok((summaries, next))
+}
+
+/// The label-selector form of [`list_metadata_bounded`] (M1.2 k9s parity): a `get
+/// --metadata -l app=orders` filters the metadata-only page at the API server.
+pub async fn list_metadata_bounded_with_selector(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    label_selector: Option<&str>,
+    limit: u32,
+    continue_token: Option<&str>,
+) -> Result<(Vec<ResourceSummary>, Option<String>), Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let mut lp = ListParams::default().limit(limit.max(1));
+    if let Some(sel) = label_selector
+        && !sel.is_empty()
+    {
+        lp = lp.labels(sel);
+    }
+    if let Some(token) = continue_token {
+        lp = lp.continue_token(token);
+    }
+
+    let list: ObjectList<PartialObjectMeta<DynamicObject>> =
+        api.list_metadata(&lp).await.map_err(Error::Api)?;
+    let next = list.metadata.continue_.clone();
+    let summaries = list
+        .into_iter()
+        .map(|meta| ResourceSummary {
+            name: meta.name_any(),
+            namespace: meta.namespace().unwrap_or_default(),
+            kind: gvk.kind.clone(),
+            uid: meta.metadata.uid.clone(),
+            created: meta.metadata.creation_timestamp.clone(),
+            status: String::new(),
         })
         .collect();
     Ok((summaries, next))

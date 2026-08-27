@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+- **`kaptein get -l` was a silent flag collision with `--lens`.** `-l` was bound to
+  `--lens` (a view-definition file path), so `kaptein get -l cnpg` tried to read a file
+  named `cnpg` and failed with `cannot read cnpg: No such file or directory` — instead of
+  the kubectl-conventional `-l`/`--selector` label filter the operator expected. `-l` is
+  now `--selector` (a server-side label selector, e.g. `app=orders`), and `--lens` is
+  long-only. Label selection is threaded through `discovery::list_with_selector`,
+  `list_objects_with_selector`, and `list_metadata_bounded_with_selector`, so a `get -l`
+  filters at the API server (matching `kubectl get -l`), across the summary, lens, and
+  metadata paths.
+
 ### Added
 - **M1.8 — the query p99 budget is now measured, not aspirational**:
   `crates/kaptein-viewmodel/benches/query.rs` is a dependency-free, release-mode

@@ -36,6 +36,9 @@ enum Command {
         /// case-insensitive substring filter on name/namespace/status
         #[arg(short, long)]
         filter: Option<String>,
+        /// label selector (server-side, e.g. "app=orders"); kubectl-style `-l`
+        #[arg(short = 'l', long)]
+        selector: Option<String>,
         /// list metadata only (PartialObjectMetadata — no full object bodies)
         #[arg(long)]
         metadata: bool,
@@ -44,7 +47,7 @@ enum Command {
         context: Option<String>,
         /// render each object through a view-definition (lens) file — lens columns +
         /// lens-inferred status instead of the built-in four-column view (M2.2).
-        #[arg(short = 'l', long)]
+        #[arg(long)]
         lens: Option<String>,
     },
     /// RBAC preflight: check whether the current user may perform a verb.
@@ -492,6 +495,7 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             sort,
             descending,
             filter,
+            selector,
             metadata,
             context,
             lens,
@@ -531,9 +535,13 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     )));
                 }
 
-                let objs =
-                    kaptein_core::discovery::list_objects(&client, &gvk, namespace.as_deref())
-                        .await?;
+                let objs = kaptein_core::discovery::list_objects_with_selector(
+                    &client,
+                    &gvk,
+                    namespace.as_deref(),
+                    selector.as_deref(),
+                )
+                .await?;
                 for obj in objs {
                     let value = serde_json::to_value(&obj).map_err(|e| {
                         kaptein_core::Error::Internal(format!("serialize object: {e}"))
@@ -552,14 +560,16 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 let mut all = Vec::new();
                 let mut token: Option<String> = None;
                 loop {
-                    let (page, next) = kaptein_core::discovery::list_metadata_bounded(
-                        &client,
-                        &gvk,
-                        namespace.as_deref(),
-                        500,
-                        token.as_deref(),
-                    )
-                    .await?;
+                    let (page, next) =
+                        kaptein_core::discovery::list_metadata_bounded_with_selector(
+                            &client,
+                            &gvk,
+                            namespace.as_deref(),
+                            selector.as_deref(),
+                            500,
+                            token.as_deref(),
+                        )
+                        .await?;
                     all.extend(page);
                     match next {
                         Some(t) => token = Some(t),
@@ -567,6 +577,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     }
                 }
                 all
+            } else if selector.as_deref().is_some_and(|s| !s.is_empty()) {
+                kaptein_core::discovery::list_with_selector(
+                    &client,
+                    &gvk,
+                    namespace.as_deref(),
+                    selector.as_deref(),
+                )
+                .await?
             } else {
                 kaptein_core::discovery::list(&client, &gvk, namespace.as_deref()).await?
             };

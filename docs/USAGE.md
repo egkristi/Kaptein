@@ -146,6 +146,9 @@ kaptein get --gvk v1/Pod --namespace prod --filter "api-" --descending
 kaptein get --gvk v1/Node
 kaptein get --gvk v1/Namespace
 
+# Label selector (server-side, kubectl-style `-l`)
+kaptein get --gvk v1/Pod -n prod -l app=orders
+
 # Metadata-only listing (bounded, cheap — for list-heavy views)
 kaptein get --gvk v1/Pod --metadata
 
