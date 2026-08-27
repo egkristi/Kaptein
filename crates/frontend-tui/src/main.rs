@@ -23,6 +23,7 @@ use kube::core::GroupVersionKind;
 // The TUI reaches `kaptein-core` only through the integration layer (layer
 // dependency rule: frontend → integration → core, never frontend → core).
 use kaptein_integration::kaptein_core;
+use kaptein_integration::kaptein_viewmodel::{Action, ActionState};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Layout};
@@ -244,6 +245,10 @@ async fn run_event_loop(
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
+    // The selected resource's RBAC-preflighted action graph (M2.2 "per-action RBAC
+    // grey-out"): computed once per (kind, namespace), so an action the operator is not
+    // permitted to take is greyed out *before* they try it, not after a 403.
+    let mut actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
     // Number of table rows visible in the current terminal (set each frame; drives the
     // scroll window instead of a hardcoded constant).
     let mut page_height: usize = 10;
@@ -366,22 +371,31 @@ async fn run_event_loop(
             );
 
             let detail_text = detail.clone().unwrap_or_else(|| {
-                // Surface the selected resource's action graph: a lens-driven kind
-                // declares its actions (e.g. "describe") in the lens; the built-in kinds
-                // expose describe + diagnose. The label_key is the render contract's
-                // i18n key — the TUI shows the action *id* (the stable, executable name),
-                // which maps to the existing bindings (`d` = describe, `i` = diagnose).
-                let actions = match &kind.lens {
-                    Some(vd) => vd
-                        .actions_as_semantic()
+                // Surface the selected resource's RBAC-preflighted action graph (M2.2):
+                // a lens-driven kind declares its actions in the lens; built-ins expose
+                // describe + diagnose. An action the operator may not perform is greyed
+                // out (`Forbidden`) *before* they try it — the preflight ran once per
+                // (kind, namespace), not per keystroke. The label_key is the render
+                // contract's i18n key; the TUI shows the action *id* plus a forbidden
+                // marker for the ones it will refuse.
+                let actions_line = if actions.is_empty() {
+                    "describe, diagnose".to_string()
+                } else {
+                    actions
                         .iter()
-                        .map(|a| a.id.clone())
+                        .map(|a| {
+                            let marker = if matches!(a.state, ActionState::Forbidden { .. }) {
+                                " (forbidden)"
+                            } else {
+                                ""
+                            };
+                            format!("{}{marker}", a.id)
+                        })
                         .collect::<Vec<_>>()
-                        .join(", "),
-                    None => "describe, diagnose".to_string(),
+                        .join(", ")
                 };
                 format!(
-                    "Actions: {actions}\nPress d to describe, i to diagnose the selected resource."
+                    "Actions: {actions_line}\nPress d to describe, i to diagnose the selected resource."
                 )
             });
             let detail_para = Paragraph::new(detail_text)
@@ -496,6 +510,7 @@ async fn run_event_loop(
                     selected = 0;
                     scroll = 0;
                     detail = None;
+                    actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
                 }
                 KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
@@ -508,6 +523,7 @@ async fn run_event_loop(
                     selected = 0;
                     scroll = 0;
                     detail = None;
+                    actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
                 }
                 KeyCode::Char('s') if palette_query.is_none() => {
                     sort_key = next_sort_key(sort_key, kind.headers.len());
@@ -520,12 +536,16 @@ async fn run_event_loop(
                     scroll = 0;
                 }
                 KeyCode::Char('d') if palette_query.is_none() => {
-                    if let Some(r) = rows.get(selected) {
+                    if action_is_forbidden(&actions, "describe") {
+                        detail = Some("describe is forbidden by RBAC preflight.".into());
+                    } else if let Some(r) = rows.get(selected) {
                         detail = describe(client, &kind, r).await.ok();
                     }
                 }
                 KeyCode::Char('i') if palette_query.is_none() => {
-                    if kind.is_pods()
+                    if action_is_forbidden(&actions, "diagnose") {
+                        detail = Some("diagnose is forbidden by RBAC preflight.".into());
+                    } else if kind.is_pods()
                         && let Some(r) = rows.get(selected)
                     {
                         detail = diagnose(client, r).await.ok();
@@ -927,4 +947,44 @@ async fn diagnose(client: &Client, row: &TableRow) -> io::Result<String> {
             .collect::<Vec<_>>()
             .join("\n"))
     }
+}
+
+/// Build the RBAC-preflighted action graph for a kind (M2.2 per-action RBAC grey-out).
+///
+/// A lens-driven kind contributes its declared actions; a built-in kind contributes the
+/// fixed `describe`/`diagnose` pair. Each action's verb is preflighted against the
+/// current user's permissions (via the integration layer, which resolves the GVK to its
+/// plural and runs one `SelfSubjectRulesReview`), and denied actions are downgraded to
+/// `Forbidden`. This is the shipped path — the action graph a frontend renders is the
+/// *governed* one, not the lens's optimistic declaration.
+async fn preflight_actions_for(
+    client: &Client,
+    kind: &Kind,
+    namespace: Option<&str>,
+) -> Vec<Action> {
+    let mut actions = match &kind.lens {
+        Some(vd) => vd.actions_as_semantic(),
+        None => vec![
+            Action {
+                id: "describe".into(),
+                label_key: "action.describe".into(),
+                state: ActionState::Allowed,
+            },
+            Action {
+                id: "diagnose".into(),
+                label_key: "action.diagnose".into(),
+                state: ActionState::Allowed,
+            },
+        ],
+    };
+    kaptein_integration::preflight_actions(client, &kind.gvk, namespace, &mut actions).await;
+    actions
+}
+
+/// Whether an action id is `Forbidden` in the preflighted graph (absent = not declared,
+/// so not forbidden — the caller decides whether an undeclared action is applicable).
+fn action_is_forbidden(actions: &[Action], id: &str) -> bool {
+    actions
+        .iter()
+        .any(|a| a.id == id && matches!(a.state, ActionState::Forbidden { .. }))
 }

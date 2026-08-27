@@ -14,6 +14,15 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   exceeds an 8 ms budget. A `bench` job in `ci.yml` runs it and fails on regression.
   *(The kwok synthetic-cluster harness and end-to-end RSS/cold-start numbers remain the
   frontend-level Phase 1 tail.)*
+- **M2.2 — per-action RBAC grey-out** (the `Forbidden` state was constructed but not
+  preflight-driven): `semantic::action_verb` maps an action id to its RBAC verb
+  (`describe`/`logs`/`exec`/`diagnose` → `get`, `scale`/`restart`/`delete` →
+  `update`/`delete`, unknown → `get`); `downgrade_forbidden` downgrades an action to
+  `Forbidden` (with the structured verb/resource/namespace) when preflight denies its
+  verb. `kaptein-integration::preflight_actions` runs one `SelfSubjectRulesReview` for
+  the target GVK (pluralized via kube's own pluralizer) and downgrades in place — the
+  shipped path — and the TUI renders the forbidden marker and refuses the `d`/`i`
+  bindings for a greyed-out action.
 
 ## [0.29.0] - 2026-08-27
 

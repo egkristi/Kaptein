@@ -89,6 +89,7 @@ pub use kaptein_core;
 /// Re-export the view-model so a frontend depends on exactly one integration crate for
 /// both the render contract (`DataPlane`, `Row`, `Cell`, `Query`) and the core binding.
 pub use kaptein_viewmodel;
+use kaptein_viewmodel::downgrade_forbidden;
 use kube::ResourceExt as _;
 
 /// Build a Kubernetes client for the default context.
@@ -134,6 +135,45 @@ pub fn load_lens(
 /// `created`. The view-model owns *which* columns exist (semantics); the frontend owns
 /// their width in cells (geometry).
 pub const RESOURCE_COLUMNS: [&str; 4] = ["name", "namespace", "status", "created"];
+
+/// RBAC-preflight an action graph **in place**, downgrading each action whose verb the
+/// current user is not permitted to make to `Forbidden` (M2.2 "per-action RBAC
+/// grey-out"). This is the shipped path: it runs one `SelfSubjectRulesReview` for the
+/// target resource (via `kaptein_core::auth::preflight`) and applies the view-model's
+/// [`kaptein_viewmodel::downgrade_forbidden`] — so the TUI greys out an action *before*
+/// the operator tries it, not after a 403.
+///
+/// The `gvk` is resolved to its plural resource + group with kube's own pluralizer
+/// (the same plural the request path uses), so a lens over a CRD preflights the *actual*
+/// resource, not a guess. A preflight failure degrades to "no downgrade" (the actions
+/// keep their declared state) rather than hiding every action — the frontend already
+/// surfaces API errors separately.
+pub async fn preflight_actions(
+    client: &kube::Client,
+    gvk: &kube::core::GroupVersionKind,
+    namespace: Option<&str>,
+    actions: &mut [kaptein_viewmodel::Action],
+) {
+    if actions.is_empty() {
+        return;
+    }
+    let plural = kube::core::ApiResource::from_gvk(gvk).plural;
+    let group = gvk.group.clone();
+    let ns = namespace.unwrap_or_default();
+    let Ok(preflight) = kaptein_core::auth::preflight(client, &plural, &group, ns).await else {
+        return;
+    };
+    // Build a verb → allowed map once, then downgrade each action by its mapped verb.
+    let allowed: std::collections::HashMap<&str, bool> = preflight
+        .actions
+        .iter()
+        .map(|(v, a)| (v.as_str(), *a))
+        .collect();
+    for action in actions.iter_mut() {
+        let verb = kaptein_viewmodel::action_verb(&action.id);
+        downgrade_forbidden(action, allowed.get(verb).copied(), &plural, namespace);
+    }
+}
 
 /// Map a core `ResourceSummary` into a view-model `Row`, using `uid` (or `namespace/name`
 /// when `uid` is absent) as the stable `RowId`. The `status` cell is a typed

@@ -303,9 +303,15 @@ Milestones:
     contract's `semantic::Action` (`allowed`/`gated`/`forbidden` → `ActionState`), and the
     TUI surfaces the selected resource's action graph (the lens's action ids, or
     `describe, diagnose` for built-ins) — the action *id* maps to the existing bindings
-    (`d` = describe, `i` = diagnose). **Still open (Phase 2+):** per-lens action/health
-    surfaces (M2.4+), the browser UI's lens navigation (M2.1), and per-action RBAC
-    grey-out (the `Forbidden` state is constructed but not yet preflight-driven).
+    (`d` = describe, `i` = diagnose). **Landed (v0.29.0 →): per-action RBAC grey-out.**
+    `semantic::action_verb` maps an action id to its RBAC verb (describe/logs/exec/diagnose
+    → `get`, scale/restart/delete → `update`/`delete`, unknown → `get`); `downgrade_forbidden`
+    turns an action `Forbidden` when preflight denies that verb (carrying the structured
+    verb/resource/namespace); `kaptein-integration::preflight_actions` runs one
+    `SelfSubjectRulesReview` for the target GVK (pluralized with kube's own pluralizer) and
+    downgrades in place — the **shipped path** — and the TUI renders the forbidden marker
+    and refuses the `d`/`i` bindings for a greyed-out action. **Still open (Phase 2+):**
+    per-lens action/health surfaces (M2.4+), and the browser UI's lens navigation (M2.1).
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
