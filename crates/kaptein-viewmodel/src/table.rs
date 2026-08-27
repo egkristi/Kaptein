@@ -23,10 +23,20 @@ pub fn cell_text(cell: &Cell) -> String {
 
 /// Total order across heterogeneous cells. Numbers compare numerically, timestamps
 /// chronologically, everything else lexically by display text.
+///
+/// Same-variant comparisons are **allocation-free** (`&str` comparison, not a `String`
+/// clone): this is the M1.8 hot spot — sorting a 50 000-row `Text` (name) or `Status`
+/// column was cloning two `String`s per comparison (~1.7M allocations/query). The
+/// heterogeneous fallback still goes through `cell_text` (numbers/booleans render as
+/// text), which is rare in practice and cheap relative to the sort.
 pub fn cmp_cells(a: &Cell, b: &Cell) -> Ordering {
     match (a, b) {
         (Cell::Number { value: x }, Cell::Number { value: y }) => x.cmp(y),
         (Cell::Timestamp { millis: x }, Cell::Timestamp { millis: y }) => x.cmp(y),
+        (Cell::Text { value: x }, Cell::Text { value: y }) => x.as_str().cmp(y.as_str()),
+        (Cell::Status { label_key: x, .. }, Cell::Status { label_key: y, .. }) => {
+            x.as_str().cmp(y.as_str())
+        }
         _ => cell_text(a).cmp(&cell_text(b)),
     }
 }
@@ -171,5 +181,34 @@ mod tests {
             label_key: "status.running".into(),
         };
         assert_eq!(cell_text(&cell), "status.running");
+    }
+
+    #[test]
+    fn cmp_cells_orders_by_text_and_status_without_rendering_numbers() {
+        // M1.8: the common sort keys (name = Text, status = Status) compare lexically.
+        // Same-variant comparisons are allocation-free (`&str` comparison, not a `String`
+        // clone) — the ordering is identical either way, so this asserts the *semantics*
+        // the allocation-free path must preserve.
+        let a = text("apple");
+        let b = text("banana");
+        assert_eq!(cmp_cells(&a, &b), Ordering::Less);
+        assert_eq!(cmp_cells(&b, &a), Ordering::Greater);
+        assert_eq!(cmp_cells(&a, &a), Ordering::Equal);
+
+        let sa = Cell::Status {
+            level: StatusLevel::Ok,
+            label_key: "status.ok".into(),
+        };
+        let sb = Cell::Status {
+            level: StatusLevel::Warning,
+            label_key: "status.warning".into(),
+        };
+        assert_eq!(cmp_cells(&sa, &sb), Ordering::Less);
+        assert_eq!(cmp_cells(&sb, &sa), Ordering::Greater);
+
+        // Numbers still compare numerically, not lexically.
+        assert_eq!(cmp_cells(&num(9), &num(10)), Ordering::Less);
+        // The heterogeneous fallback (Text vs Number) renders both as text.
+        assert_eq!(cmp_cells(&text("9"), &num(10)), Ordering::Greater); // "9" > "10" lexically
     }
 }
