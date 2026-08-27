@@ -25,13 +25,17 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
         }];
     };
 
-    // Pending: check scheduling reasons first. PVC binding and taints are the *most
-    // specific* unschedulable signals, checked before the generic `unschedulable` fallback.
+    // Pending: check scheduling reasons first. PVC binding, taints, and resource
+    // pressure are the *most specific* unschedulable signals, checked before the generic
+    // `unschedulable` fallback.
     if status.phase.as_deref() == Some("Pending") {
         if let Some(f) = pvc_binding_finding(status) {
             return vec![f];
         }
         if let Some(f) = taint_finding(status) {
+            return vec![f];
+        }
+        if let Some(f) = resource_pressure_finding(status) {
             return vec![f];
         }
         if let Some(f) = unschedulable_finding(status) {
@@ -162,6 +166,41 @@ fn image_pull_finding(status: &PodStatus) -> Option<Finding> {
         }
     }
     None
+}
+
+/// Node resource pressure: the scheduler rejected every node because of insufficient
+/// CPU/memory (`"N Insufficient cpu."` / `"N Insufficient memory."`). This is a *more
+/// specific* unschedulable cause than the generic fallback — the operator needs to resize
+/// requests, add nodes, or preempt, not debug a taint.
+fn resource_pressure_finding(status: &PodStatus) -> Option<Finding> {
+    let c = condition(status, "PodScheduled")?;
+    if c.status != "False" {
+        return None;
+    }
+    let msg = c.message.as_deref()?;
+    let lower = msg.to_ascii_lowercase();
+    if !lower.contains("insufficient") {
+        return None;
+    }
+    // Extract the resource name ("cpu"/"memory"/"ephemeral-storage"/"pods").
+    let resource = lower
+        .split("insufficient")
+        .nth(1)
+        .and_then(|s| {
+            s.trim()
+                .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
+                .next()
+        })
+        .filter(|r| !r.is_empty())
+        .map(|r| r.to_string());
+    let summary = match resource {
+        Some(r) => format!("Pod cannot schedule: insufficient '{r}' on all nodes."),
+        None => "Pod cannot schedule: insufficient node resources.".into(),
+    };
+    Some(Finding {
+        code: "resource_pressure".into(),
+        summary,
+    })
 }
 
 fn pvc_binding_finding(status: &PodStatus) -> Option<Finding> {
@@ -403,6 +442,43 @@ mod tests {
         assert!(
             f.summary.contains("dedicated=critical"),
             "summary should name the taint: {}",
+            f.summary
+        );
+    }
+
+    #[test]
+    fn resource_pressure_is_detected() {
+        // A Pending pod rejected for insufficient CPU must surface as resource_pressure
+        // (a more specific unschedulable cause), with the resource extracted.
+        let mut pod = pod_with("Pending", false);
+        if let Some(status) = &mut pod.status {
+            status.conditions = Some(vec![
+                PodCondition {
+                    type_: "Ready".into(),
+                    status: "False".into(),
+                    ..Default::default()
+                },
+                PodCondition {
+                    type_: "PodScheduled".into(),
+                    status: "False".into(),
+                    reason: Some("Unschedulable".into()),
+                    message: Some("0/3 nodes are available: 3 Insufficient cpu.".into()),
+                    ..Default::default()
+                },
+            ]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "resource_pressure"),
+            "expected resource_pressure finding, got {findings:?}"
+        );
+        let f = findings
+            .iter()
+            .find(|f| f.code == "resource_pressure")
+            .unwrap();
+        assert!(
+            f.summary.contains("cpu"),
+            "summary should name the resource: {}",
             f.summary
         );
     }

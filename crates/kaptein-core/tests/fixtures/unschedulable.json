@@ -12,7 +12,7 @@
         "type": "PodScheduled",
         "status": "False",
         "reason": "Unschedulable",
-        "message": "0/3 nodes are available: 3 Insufficient cpu."
+        "message": "0/3 nodes are available: 1 node(s) had no available volume zone, 2 node(s) didn't match Pod's node affinity/selector."
       },
       { "type": "Ready", "status": "False", "reason": "PodInitializing" }
     ],

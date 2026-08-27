@@ -95,3 +95,10 @@ fn taint_toleration_mismatch_is_detected() {
     let got = codes(&pod);
     assert!(got.contains(&"taint".into()), "got {got:?}");
 }
+
+#[test]
+fn resource_pressure_is_detected() {
+    let pod = load_fixture("resource_pressure.json");
+    let got = codes(&pod);
+    assert!(got.contains(&"resource_pressure".into()), "got {got:?}");
+}

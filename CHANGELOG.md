@@ -18,6 +18,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `name`, `namespace`, `created` (filter: `name`/`namespace`/`status`).
 
 ### Added
+- **Resource-pressure diagnostic** (M1.6): a Pending pod rejected for insufficient
+  CPU/memory (`"N Insufficient cpu/memory."`) now surfaces as a distinct
+  `resource_pressure` finding (resource name extracted), checked before the generic
+  `unschedulable` fallback. Added a fixture (`resource_pressure.json`) to the corpus.
 - **Landing view surfaces unhealthy pods** (M1.5 + M1.6): `kaptein overview` now lists
   pods that are not ready, with their diagnostics findings (crash-loop, image-pull, taint,
   PVC binding, etc.) — answering "is anything broken" directly rather than only via
