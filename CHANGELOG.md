@@ -4,14 +4,31 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.2] - 2026-08-27
+
+### Fixed
+- **#33 — release container cosign signing (complete)**: the `Publish container image`
+  job failed to cosign-sign the pushed image for two reasons, both now fixed:
+  1. it signed `steps.meta.outputs.digest`, but `docker/metadata-action` has no `digest`
+     output (it is emitted by `docker/build-push-action`) — the build step now has
+     `id: build` and is signed from `steps.build.outputs.digest`;
+  2. the reference used the mixed-case `github.repository` (`egkristi/Kaptein`), but OCI
+     repository names are lowercase (`ghcr.io/egkristi/kaptein`), so cosign's reference
+     parse failed — the repo name is now lowercased (`${GITHUB_REPOSITORY,,}`) before
+     signing.
+
 ## [0.28.1] - 2026-08-27
 
 ### Fixed
-- **#33 — release container cosign signing**: the `Publish container image` job signed
-  `steps.meta.outputs.digest`, but `docker/metadata-action` has no `digest` output (it is
-  emitted by `docker/build-push-action`), so cosign got the empty reference
-  `ghcr.io/egkristi/Kaptein@` and failed. The build step now has `id: build` and the
-  image is signed from `steps.build.outputs.digest`.
+- **#33 — release container cosign signing**: the `Publish container image` job failed
+  to cosign-sign the pushed image for two reasons, both now fixed:
+  1. it signed `steps.meta.outputs.digest`, but `docker/metadata-action` has no `digest`
+     output (it is emitted by `docker/build-push-action`) — the build step now has
+     `id: build` and is signed from `steps.build.outputs.digest`;
+  2. the reference used the mixed-case `github.repository` (`egkristi/Kaptein`), but OCI
+     repository names are lowercase (`ghcr.io/egkristi/kaptein`), so cosign's reference
+     parse failed — the repo name is now lowercased (`${GITHUB_REPOSITORY,,}`) before
+     signing.
 
 ## [0.28.0] - 2026-08-27
 

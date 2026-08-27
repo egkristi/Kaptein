@@ -15,8 +15,8 @@ name = "kaptein"
 path = "src/main.rs"
 
 [dependencies]
-kaptein-core = { version = "0.28.1", path = "../kaptein-core" }
-kaptein-viewmodel = { version = "0.28.1", path = "../kaptein-viewmodel" }
+kaptein-core = { version = "0.28.2", path = "../kaptein-core" }
+kaptein-viewmodel = { version = "0.28.2", path = "../kaptein-viewmodel" }
 kube = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 futures-util = { workspace = true }
