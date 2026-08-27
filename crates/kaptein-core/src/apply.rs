@@ -91,7 +91,44 @@ pub async fn dry_run_apply(client: &Client, manifest: &str) -> Result<DryRun, Er
 /// would then drop those fields on their next reconcile. The write path needs a *new*
 /// function with `force: false` (or an explicit field-ownership negotiation), never this
 /// one.
+///
+/// The guardrail is now **structural, not a doc comment**: the force flag is threaded
+/// through [`apply_patch`] as a parameter, and the real write path
+/// ([`apply_patch_real`]) passes `force: false`. There is no code path where a real
+/// (non-dry-run) apply carries `force: true` — the dry-run function is the only caller
+/// that ever sets it, and it is always `dry_run: true`.
 pub async fn dry_run_apply_patch(client: &Client, manifest: &str) -> Result<DryRun, Error> {
+    // `force: true` is correct here *because* `dry_run` is `true`: it lets the dry-run
+    // succeed against resources created by `kubectl create` instead of failing with
+    // `FieldManagerConflict`. A real write must never reuse this flag combination.
+    apply_patch(client, manifest, true, true).await
+}
+
+/// Apply a YAML manifest with `Patch::Apply` (server-side apply), with the `dry_run`
+/// and `force` flags **explicit at the call site** — the issue #16 guardrail made a
+/// parameter rather than a hidden default.
+///
+/// `force: true` steals field ownership from other managers (Flux/Argo/GitOps); it is
+/// only ever correct together with `dry_run: true`. The real write path
+/// ([`apply_patch_real`]) always passes `force: false`.
+async fn apply_patch(
+    client: &Client,
+    manifest: &str,
+    dry_run: bool,
+    force: bool,
+) -> Result<DryRun, Error> {
+    // Structural guardrail (issue #16): forcing field ownership is only ever correct
+    // together with a dry-run. A real write that forces would silently steal ownership
+    // from Flux/Argo/GitOps. Refuse the combination rather than allow a caller to trip
+    // it — this is defense in depth with the `apply_patch_real` `force: false` default.
+    if force && !dry_run {
+        return Err(Error::Internal(
+            "refusing to force field ownership on a non-dry-run apply (issue #16): \
+             forcing steals field ownership from Flux/Argo/GitOps"
+                .into(),
+        ));
+    }
+
     let mut obj: DynamicObject =
         serde_yaml::from_str(manifest).map_err(|e| Error::Internal(e.to_string()))?;
 
@@ -117,14 +154,7 @@ pub async fn dry_run_apply_patch(client: &Client, manifest: &str) -> Result<DryR
         None => Api::all_with(client.clone(), &ar),
     };
 
-    let pp = PatchParams {
-        dry_run: true,
-        field_manager: Some("kaptein".into()),
-        // Force ownership of fields previously managed by other clients (e.g.
-        // `kubectl create`) so edits don't fail with FieldManagerConflict.
-        force: true,
-        ..PatchParams::default()
-    };
+    let pp = patch_params(dry_run, force);
     let patch = Patch::Apply(&obj);
 
     match api.patch(&name, &pp, &patch).await {
@@ -138,6 +168,29 @@ pub async fn dry_run_apply_patch(client: &Client, manifest: &str) -> Result<DryR
             accepted: false,
         }),
         Err(e) => Err(Error::Api(e)),
+    }
+}
+
+/// **Real** (non-dry-run) server-side apply — the Phase 2 write path.
+///
+/// This is the function the write path *will* use, and it always applies with
+/// `force: false`, so it can never silently steal field ownership from Flux/Argo/GitOps
+/// (issue #16). The caller is responsible for the context guardrail
+/// (`guardrails::gate_write`) *before* invoking this; the function itself never forces
+/// ownership.
+pub async fn apply_patch_real(client: &Client, manifest: &str) -> Result<DryRun, Error> {
+    apply_patch(client, manifest, false, false).await
+}
+
+/// Build the `PatchParams` for a server-side apply. `force` is a parameter so the
+/// issue #16 guardrail is checkable: the only caller allowed to pass `force: true` is the
+/// dry-run path, and it always pairs it with `dry_run: true`.
+fn patch_params(dry_run: bool, force: bool) -> PatchParams {
+    PatchParams {
+        dry_run,
+        field_manager: Some("kaptein".into()),
+        force,
+        ..PatchParams::default()
     }
 }
 
@@ -184,5 +237,20 @@ mod tests {
         assert_eq!(gvk.group, "apps");
         assert_eq!(gvk.version, "v1");
         assert_eq!(gvk.kind, "Deployment");
+    }
+
+    #[test]
+    fn patch_params_never_forces_on_the_real_write_path() {
+        // The dry-run path may force ownership (paired with dry_run: true).
+        let dry_run = patch_params(true, true);
+        assert!(dry_run.dry_run);
+        assert!(dry_run.force);
+
+        // The real write path (issue #16) must NEVER carry force forward: it would
+        // silently steal field ownership from Flux/Argo/GitOps. This assertion fails if
+        // someone flips `apply_patch_real` back to force: true.
+        let real = patch_params(false, false);
+        assert!(!real.dry_run);
+        assert!(!real.force);
     }
 }

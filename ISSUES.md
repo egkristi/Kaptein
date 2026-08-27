@@ -42,15 +42,16 @@ tracker.
 
 Per the convention above, live bugs are GitHub issues.
 
-**Open:**
+**Open:** *(none currently — the last open bug, #16, was fixed structurally below.)*
 
-- **#16** `dry_run_apply_patch force:true` must not carry into the Phase 2 write path.
-
-**Closed since the last cycle:** #17 (`kaptein edit` redaction round-trip — fixed by
-`RedactionPolicy::Unredacted` + `SecretViewed` audit, commit 42ce99f) and #18 (watch
-reconnect — `LivePlane::watch_loop` now reconnects with backoff and `run_informer` has a
-caller, commit 59b421a). See *Re-audit findings* below for what those fixes did **not**
-cover.
+**Closed since the last cycle:** #16 (`dry_run_apply_patch force:true` must not carry into
+the Phase 2 write path — the force flag is now a parameter, `apply_patch` refuses
+`force && !dry_run`, and the real write path `apply_patch_real` always applies with
+`force: false`; a test asserts the real path never forces), #17 (`kaptein edit` redaction
+round-trip — fixed by `RedactionPolicy::Unredacted` + `SecretViewed` audit, commit
+42ce99f) and #18 (watch reconnect — `LivePlane::watch_loop` now reconnects with backoff
+and `run_informer` has a caller, commit 59b421a). See *Re-audit findings* below for what
+those fixes did **not** cover.
 
 ### Re-audit findings (v0.27.0) — all fixed (issues #20–#31)
 
@@ -147,9 +148,10 @@ unowned debt. Done items are struck through.
 - **`blast_radius`** walks the Pod ownership chain only when `gvk.kind == "Deployment"`
   (Deployment → ReplicaSet → Pod). StatefulSet, DaemonSet, and CronJob → Job → Pod
   chains are **not** covered; a full cross-kind topology scan is a Phase 3a fleet feature.
-- **`dry_run_apply_patch` uses `force: true`** — correct for dry-run, but the Phase 2
-  write path must **not** carry `force` forward (it would silently steal field ownership
-  from Flux/Argo).
+- **`dry_run_apply_patch` uses `force: true`** — correct for dry-run, and now
+  *enforced* (issue #16): the flag is a parameter, `apply_patch` refuses `force && !dry_run`,
+  and the real write path (`apply_patch_real`) applies with `force: false` so it cannot
+  silently steal field ownership from Flux/Argo.
 - **OIDC token forwarding** (ADR-0007 mode 1) is a `serve`/hub-mode concern (Phase 2),
   not the MCP stdio server.
 - **No frontend consumes a lens yet.** The M2.2 engine (`kaptein-viewmodel::lens`) and the

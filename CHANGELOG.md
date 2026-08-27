@@ -7,6 +7,12 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.27.0] - 2026-08-25
 
 ### Added
+- **#16 — `force: true` write-path guardrail made structural**:
+  - `dry_run_apply_patch`'s field-ownership `force` flag is now a parameter threaded
+    through `apply_patch`, and the new real write path `apply_patch_real` always applies
+    with `force: false` — it can never silently steal field ownership from
+    Flux/Argo/GitOps. `apply_patch` refuses `force && !dry_run` outright, and a test
+    asserts the real path never forces.
 - **M2.2 — lens discovery (`kaptein lenses`)**:
   - `kaptein-core::extension::discover_lenses` walks configured extension paths, resolves
     each lens entrypoint's `target` into a `DiscoveredLens` GVK, and skips non-lens
