@@ -402,10 +402,14 @@ extensions/        # example extensions (lenses, plugins, integrations)
 docs/
   adr/             # architecture decision records (see ADR-0001)
   architecture.md  # architecture overview
+  USAGE.md         # usage manual (CLI, TUI, MCP, config, lenses)
 CONTRIBUTING.md    # contributing guide
 SECURITY.md        # security policy & disclosure (the canonical threat model)
 LICENSE            # BUSL-1.1 (source-available; converts to MIT on Change Date)
 ```
+
+The full operator's manual — CLI reference, TUI keybindings, the governed MCP server,
+configuration, and the lens/extension system — is in [`docs/USAGE.md`](docs/USAGE.md).
 
 ---
 
@@ -437,6 +441,10 @@ Fixed in the v0.27.0 re-audit (closed issues, kept here for context): log redact
 guardrail ([#16](https://github.com/egkristi/Kaptein/issues/16)).
 
 ### Install
+
+> **Looking for how to *use* Kaptein?** See [`docs/USAGE.md`](docs/USAGE.md) — the
+> operator's manual with the full CLI reference, TUI keybindings, the governed MCP
+> server, configuration, and the lens/extension system.
 
 Prebuilt, signed binaries ship on every release, and the install script verifies them.
 The fastest path (no `cargo` required — it downloads the binary, verifies its SHA-256
