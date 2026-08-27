@@ -17,7 +17,7 @@ use futures_util::{Stream, StreamExt};
 
 use crate::error::Error;
 use crate::render::{DataPlane, Page, Query, Revision, Row, RowId, RowPatch};
-use crate::table::{filter_rows, sort_rows};
+use crate::table::{filter_indices, sort_indices};
 
 /// The column schema of a `MemPlane`: the cell index of each named column. `query`
 /// resolves `SortSpec.column` against this; the frontend owns layout, never this list.
@@ -163,17 +163,32 @@ impl MemPlane {
 impl DataPlane for MemPlane {
     async fn query(&self, query: &Query) -> Result<Page, Error> {
         let revision = self.revision();
-        let mut rows = {
+        // Sort/filter an **index permutation** over the live rows instead of
+        // deep-cloning the whole `Vec<Row>` (M1.8): a 50k-row view sorts 50k `usize`s
+        // (allocation-free same-variant comparison), then clones only the windowed rows.
+        let indices = {
             let state = self.state.lock().expect("mem plane poisoned");
-            state.rows.clone()
+            let mut indices: Vec<usize> = (0..state.rows.len()).collect();
+            sort_indices(
+                &mut indices,
+                &state.rows,
+                &self.schema.column_ids,
+                query.sort.as_ref(),
+            );
+            filter_indices(indices, &state.rows, query.filter.as_ref())
         };
-        sort_rows(&mut rows, &self.schema.column_ids, query.sort.as_ref());
-        rows = filter_rows(rows, query.filter.as_ref());
 
-        let total = rows.len();
+        // `indices` is sorted+filtered; `total` counts *matching* rows (post-filter).
+        let total = indices.len();
         let start = query.start.min(total);
         let end = query.end.min(total).max(start);
-        let page_rows: Vec<Row> = rows.into_iter().skip(start).take(end - start).collect();
+        let page_rows: Vec<Row> = {
+            let state = self.state.lock().expect("mem plane poisoned");
+            indices[start..end]
+                .iter()
+                .map(|&i| state.rows[i].clone())
+                .collect()
+        };
         Ok(Page {
             rows: page_rows,
             total,

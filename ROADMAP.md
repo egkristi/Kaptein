@@ -123,8 +123,12 @@ Milestones:
       `cmp_cells` cloned two `String`s per comparison via its `cell_text` fallback
       (~1.7M allocations per 50k-row sort). Text-vs-Text and Status-vs-Status now compare
       `&str` (identical ordering, zero allocation), with a test pinning the ordering.
-      Still open: windowing `query_plane` (query the visible window + carry `total`), and
-      the kwok harness that measures the p99 budget.*
+      **`MemPlane::query` no longer deep-clones the whole row set:** it sorts/filters an
+      index permutation (`sort_indices`/`filter_indices`, same semantics as
+      `sort_rows`/`filter_rows`) and clones only the windowed rows — a 50k-row view now
+      clones the visible window, not 50k `Row`s per frame. Still open: windowing
+      `query_plane` in the TUI (query the visible window + carry `total`), and the kwok
+      harness that measures the p99 budget.*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 

@@ -62,6 +62,28 @@ pub fn filter_rows(rows: Vec<Row>, filter: Option<&Filter>) -> Vec<Row> {
         .collect()
 }
 
+/// Filter a permutation of row indices by the same `Filter` semantics as
+/// [`filter_rows`], without cloning any `Row`. `indices` is the (possibly sorted)
+/// permutation; it is retained in place, dropping indices whose row does not match.
+pub fn filter_indices(indices: Vec<usize>, rows: &[Row], filter: Option<&Filter>) -> Vec<usize> {
+    let Some(filter) = filter else {
+        return indices;
+    };
+    let needle = filter.expression.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return indices;
+    }
+    indices
+        .into_iter()
+        .filter(|&i| {
+            rows[i]
+                .cells
+                .iter()
+                .any(|c| cell_text(c).to_ascii_lowercase().contains(&needle))
+        })
+        .collect()
+}
+
 /// Sort rows by the given `SortSpec`, resolving `column` against the `column_ids`
 /// schema (column id → cell index). An unknown column leaves order unchanged (stable).
 /// The sort is stable, so equal keys keep their identity order — deterministic across
@@ -75,6 +97,36 @@ pub fn sort_rows(rows: &mut [Row], column_ids: &[String], sort: Option<&SortSpec
     };
     rows.sort_by(|a, b| {
         let ord = match (a.cells.get(idx), b.cells.get(idx)) {
+            (Some(x), Some(y)) => cmp_cells(x, y),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        };
+        if sort.descending { ord.reverse() } else { ord }
+    });
+}
+
+/// Sort a permutation of row indices by the same `SortSpec` semantics as [`sort_rows`],
+/// but without cloning any `Row`. This is the allocation-conscious form used by the
+/// informer-backed `MemPlane`: the caller holds `&[Row]` and sorts `indices` into it, so
+/// a 50k-row query sorts 50k `usize`s instead of deep-cloning 50k `Row`s (M1.8).
+///
+/// `indices` must be `0..rows.len()` (any order); after the call it is the stable sort
+/// order of those indices. Same-variant comparison is allocation-free via [`cmp_cells`].
+pub fn sort_indices(
+    indices: &mut [usize],
+    rows: &[Row],
+    column_ids: &[String],
+    sort: Option<&SortSpec>,
+) {
+    let Some(sort) = sort else {
+        return;
+    };
+    let Some(idx) = column_ids.iter().position(|id| id == &sort.column) else {
+        return;
+    };
+    indices.sort_by(|&a, &b| {
+        let ord = match (rows[a].cells.get(idx), rows[b].cells.get(idx)) {
             (Some(x), Some(y)) => cmp_cells(x, y),
             (Some(_), None) => Ordering::Greater,
             (None, Some(_)) => Ordering::Less,

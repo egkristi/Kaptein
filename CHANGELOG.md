@@ -17,6 +17,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - **Context switching parity across the read commands** (M1.2): `describe`, `diagnose`,
   `logs`, `events`, `overview`, and `watch` now accept `--context` (matching `get`), so an
   operator can target any kubeconfig context without switching the whole session.
+- **M1.8 — `MemPlane::query` no longer deep-clones the whole row set**: it now sorts and
+  filters an index permutation (`sort_indices`/`filter_indices`, identical semantics to
+  `sort_rows`/`filter_rows`) and clones only the windowed rows — a 50k-row view clones the
+  visible window per query instead of 50k `Row`s.
 - **PVC-binding diagnostic** (M1.6): a Pending pod whose `PodScheduled` condition carries
   `persistentvolumeclaim "<name>" not found` now surfaces as `pvc_binding` (with the claim
   name extracted) — checked before the generic `unschedulable` fallback. Added a fixture
