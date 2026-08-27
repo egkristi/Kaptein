@@ -429,10 +429,25 @@ guardrail ([#16](https://github.com/egkristi/Kaptein/issues/16)).
 > operator's manual with the full CLI reference, TUI keybindings, the governed MCP
 > server, configuration, and the lens/extension system.
 
-Prebuilt, signed binaries ship on every release, and the install script verifies them.
-The fastest path (no `cargo` required — it downloads the binary, verifies its SHA-256
-checksum against the release's `SHA256SUMS`, and cosign-verifies that file's signature
-against the GitHub Actions OIDC identity, then installs to `~/.local/bin`):
+Two binaries ship:
+
+| Binary | Purpose | Installed by |
+|--------|---------|--------------|
+| `kaptein` | The CLI — scripting, one-shots, MCP server, extension lifecycle. | `cargo install kaptein`, `install.sh`, Krew |
+| `kaptein-tui` | The interactive terminal UI (the daily driver). | `cargo install frontend-tui`, `install.sh` |
+
+**Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
+simplest way to get the CLI is the crate published on crates.io:
+
+```bash
+cargo install kaptein          # the CLI
+cargo install frontend-tui     # the terminal UI (separate crate)
+```
+
+**Recommended — signed release (both binaries, no Rust):** the install script downloads
+the prebuilt, signed binaries for your platform, verifies the SHA-256 checksum against
+the release's `SHA256SUMS`, and cosign-verifies that file's signature against the GitHub
+Actions OIDC identity, then installs to `~/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
@@ -440,7 +455,14 @@ curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | 
 KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
-Alternatives:
+Which to use: `cargo install` is the default for CLI-only users who already have Rust
+(one standard command, version-pinned by crates.io, no signature verification to
+configure). `install.sh` is the default when you want **both** binaries and the verified
+signature chain — the path this project's security posture (`SECURITY.md`) is built
+around. The two are complementary: `cargo install` does not ship the TUI, and the
+install script does not require a Rust toolchain.
+
+Other install methods:
 
 - **kubectl plugin (Krew)**: Kaptein is BUSL-1.1 (source-available), and Krew's central
   index is a CNCF project that requires plugins to be **open source under an OSI-approved

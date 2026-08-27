@@ -24,6 +24,15 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   shipped path — and the TUI renders the forbidden marker and refuses the `d`/`i`
   bindings for a greyed-out action.
 
+### Changed
+- **`cargo install kaptein` is now the recommended CLI install path.** The `kaptein`
+  crate is published to crates.io, so `cargo install kaptein` (CLI) and
+  `cargo install frontend-tui` (TUI) install the version-pinned binaries with one
+  standard command. The signed-release `install.sh` path remains the recommended way to
+  get **both** binaries with the verified cosign signature chain (no Rust required).
+  `README.md` and `docs/USAGE.md` now document both as recommended, with a table of
+  which binary each method installs.
+
 ## [0.29.0] - 2026-08-27
 
 ### Fixed

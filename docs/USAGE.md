@@ -11,7 +11,29 @@ For the *why* and the roadmap, see [`README.md`](../README.md) and
 
 ## 1. Installation
 
-Prebuilt, signed binaries ship on every release. The fastest path (no `cargo` needed):
+Two binaries ship:
+
+| Binary | Purpose |
+|--------|---------|
+| `kaptein` | The CLI — scripting, one-shots, MCP server, and extension lifecycle. |
+| `kaptein-tui` | The interactive terminal UI (the daily driver). |
+
+**Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
+simplest way to get the CLI is the crate published on crates.io:
+
+```bash
+cargo install kaptein          # the CLI
+cargo install frontend-tui     # the terminal UI (separate crate)
+```
+
+`cargo install kaptein` installs only the CLI (the `kaptein` crate); the TUI is a
+separate crate, `frontend-tui`. Both are version-pinned on crates.io, so you get the
+same release as the tag.
+
+**Recommended — signed release (both binaries, no Rust):** the install script downloads
+the prebuilt, signed binaries for your platform, verifies the SHA-256 checksum against
+the release's `SHA256SUMS`, cosign-verifies that file's signature against the GitHub
+Actions OIDC identity, and installs to `~/.local/bin` (or `KAPTEIN_INSTALL_DIR`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
@@ -19,26 +41,28 @@ curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | 
 KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
-The installer downloads the binary for your platform, verifies its SHA-256 checksum
-against the release's `SHA256SUMS`, cosign-verifies that file's signature against the
-GitHub Actions OIDC identity, and installs to `~/.local/bin` (or `KAPTEIN_INSTALL_DIR`).
+Which to use: `cargo install` is the default for CLI-only users who already have Rust.
+`install.sh` is the default when you want **both** binaries and the verified signature
+chain (no Rust required).
 
-Alternatives:
+Other install methods:
 
-- **kubectl plugin**: `kubectl krew install kaptein` — *pending submission to the
-  [krew-index](https://github.com/kubernetes-sigs/krew-index)*. Each release renders
-  `krew/kaptein.yaml` (real tag + per-platform sha256s) as a release asset, but until
-  that manifest is merged into the central index, `krew install` reports the plugin as
-  missing ([#34](https://github.com/egkristi/Kaptein/issues/34)).
+- **kubectl plugin (Krew)**: Kaptein is BUSL-1.1 (source-available), and Krew's central
+  index requires plugins to be open source under an OSI-approved license — so it is not
+  submitted to `kubernetes-sigs/krew-index`. Install from Kaptein's **custom index**, or
+  directly from the release manifest:
+
+  ```bash
+  kubectl krew index add kaptein https://github.com/egkristi/krew-index.git
+  kubectl krew install kaptein/kaptein
+
+  # or, straight from the release asset (no index):
+  kubectl krew install --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml
+  ```
+
+  See [#34](https://github.com/egkristi/Kaptein/issues/34) for the licensing rationale.
 - **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod`.
 - **From source**: `cargo build --release` (requires a Rust toolchain ≥ 1.97).
-
-Two binaries are produced:
-
-| Binary | Purpose |
-|--------|---------|
-| `kaptein` | The CLI — scripting, one-shots, MCP server, and extension lifecycle. |
-| `kaptein-tui` | The interactive terminal UI (the daily driver). |
 
 Verify a download yourself (`cosign` must be installed):
 
