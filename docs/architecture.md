@@ -8,7 +8,7 @@ are recorded as numbered ADRs under `docs/adr/`; this file ties them together.
 **The domain layer is the product.** Layer dependencies are strictly one-directional:
 
 ```
-kaptein-core ──► kaptein-viewmodel ──► frontend-tui (and future frontends)
+kaptein-core ──► kaptein-viewmodel ──► kaptein-tui (and future frontends)
 ```
 
 - `kaptein-core` owns the Kubernetes client (`kube-rs` + `tokio`), watchers/reflectors,
@@ -29,7 +29,7 @@ crates through Phase 1 is weekly friction):
 crates/
   kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
   kaptein-viewmodel/  # renderer-agnostic logic (the product)
-  frontend-tui/       # ratatui
+  kaptein-tui/        # ratatui
   # future (split out when they have code): frontend-gui, serve, headless,
   # viewdef, plugins, ext-sdk
 ```
@@ -110,7 +110,7 @@ the log (ADR-0010, ADR-0007).
 
 ## The projections
 
-- **`frontend-tui`** (ratatui) — terminal, SSH/bastion. The first daily-driver surface.
+- **`kaptein-tui`** (ratatui) — terminal, SSH/bastion. The first daily-driver surface.
 - **`frontend-gui`** (egui + wasm) — native desktop, and a browser bundle that relays
   through `serve` (see ADR-0002). Uses `egui_table` for the virtualized `Table` surface.
 - **`headless`** — agent mode that drives the view-model directly, **no network

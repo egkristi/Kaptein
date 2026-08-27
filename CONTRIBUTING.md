@@ -11,7 +11,7 @@ read it before contributing.
 ## Architecture at a glance
 
 ```
-kaptein-core ──► kaptein-viewmodel ──► frontend-tui
+kaptein-core ──► kaptein-viewmodel ──► kaptein-tui
                                  ──► frontend-gui
                                  ──► headless / serve
 ```

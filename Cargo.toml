@@ -4,7 +4,7 @@ members = [
     "crates/kaptein-core",
     "crates/kaptein-viewmodel",
     "crates/kaptein-integration",
-    "crates/frontend-tui",
+    "crates/kaptein-tui",
     "crates/kaptein-cli",
 ]
 

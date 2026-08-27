@@ -17,11 +17,11 @@ scaffold   core + viewmodel       GUI, view defs,          time machine, fleet,
 **Goal:** a compiling workspace with the layer boundaries enforced from day one.
 
 **Status: done.** ADR-0014 collapsed the Phase 0 crate list from nine to four crates
-(`kaptein-core`, `kaptein-viewmodel`, `frontend-tui`, `kaptein-cli`), later joined by
+(`kaptein-core`, `kaptein-viewmodel`, `kaptein-tui`, `kaptein-cli`), later joined by
 `kaptein-integration` as the native integration layer. The remaining items below are
 kept for history; the crates that "have code" now are exactly those five.
 
-- Cargo workspace under `crates/`: `kaptein-core`, `kaptein-viewmodel`, `frontend-tui`,
+- Cargo workspace under `crates/`: `kaptein-core`, `kaptein-viewmodel`, `kaptein-tui`,
   `kaptein-cli`, `kaptein-integration` (the `frontend-gui`, `headless`, `serve`,
   `plugins`, `viewdef`, `ext-sdk` crates are split out only when they carry real code —
   see ADR-0014)
@@ -36,7 +36,7 @@ kept for history; the crates that "have code" now are exactly those five.
 - CI: `cargo fmt`, `clippy`, `test`, `cargo deny check licenses`, signed release + SBOM
   pipeline stub
 - Definition of Done: `cargo build --workspace` is green; layer deps are one-directional
-  (`frontend-tui` → `kaptein-integration` → `kaptein-core`, with no frontend depending on
+  (`kaptein-tui` → `kaptein-integration` → `kaptein-core`, with no frontend depending on
   `kaptein-core` directly); `cargo deny check licenses` passes on the skeleton
 
 ## Phase 1 — Core + viewmodel + ratatui (k9s parity + RBAC preflight)
@@ -113,7 +113,7 @@ Milestones:
   - Owns the p99 <16 ms, RSS <250 MB, cold-start <500 ms targets *in Phase 1*, while the
     design can still change to meet them
   - **Known hot spot to fix before the harness can pass (re-audit v0.27.0):** the TUI's
-    per-frame *rendering* is now windowed, but `frontend-tui::query_plane` still issues
+    per-frame *rendering* is now windowed, but `kaptein-tui::query_plane` still issues
     `Query { start: 0, end: 50_000 }` on every loop iteration (~10 Hz) and
     `MemPlane::query` deep-clones the entire row `Vec` and sorts it before windowing. The
     clone-and-sort, not the allocation, is what the p99 budget will trip over. The TUI

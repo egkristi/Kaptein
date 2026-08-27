@@ -1,4 +1,4 @@
-# frontend-tui
+# kaptein-tui
 
 The ratatui terminal frontend. It renders a render-intent (columns, rows, actions,
 status) produced by `kaptein-viewmodel` — it never computes meaning, only geometry

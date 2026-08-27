@@ -59,7 +59,7 @@ than releasing every change; never release an untested or unstable build.
 Layer dependencies are strictly one-directional:
 
 ```
-kaptein-core ──► kaptein-viewmodel ──► frontend-tui
+kaptein-core ──► kaptein-viewmodel ──► kaptein-tui
                                  ──► frontend-gui
                                  ──► headless / serve
 ```
@@ -88,7 +88,7 @@ afternoon; holding nine synchronized crates through Phase 1 is weekly friction):
 crates/
   kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
   kaptein-viewmodel/  # renderer-agnostic logic (the product)
-  frontend-tui/       # ratatui
+  kaptein-tui/        # ratatui
   # future (split out when they have code): frontend-gui, serve, headless,
   # viewdef, plugins, ext-sdk
 extensions/        # example extensions (lenses, plugins, integrations)

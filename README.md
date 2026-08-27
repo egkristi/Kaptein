@@ -382,7 +382,7 @@ have code.
 crates/
   kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
   kaptein-viewmodel/  # renderer-agnostic logic: columns, sort/filter, status, action graphs
-  frontend-tui/       # ratatui
+  kaptein-tui/        # ratatui
   # future (split out when they have code): frontend-gui, serve, headless,
   # viewdef, plugins, ext-sdk
 extensions/        # example extensions (lenses, plugins, integrations)
@@ -434,14 +434,14 @@ Two binaries ship:
 | Binary | Purpose | Installed by |
 |--------|---------|--------------|
 | `kaptein` | The CLI — scripting, one-shots, MCP server, extension lifecycle. | `cargo install kaptein`, `install.sh`, Krew |
-| `kaptein-tui` | The interactive terminal UI (the daily driver). | `cargo install frontend-tui`, `install.sh` |
+| `kaptein-tui` | The interactive terminal UI (the daily driver). | `cargo install kaptein-tui`, `install.sh` |
 
 **Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
 simplest way to get the CLI is the crate published on crates.io:
 
 ```bash
 cargo install kaptein          # the CLI
-cargo install frontend-tui     # the terminal UI (separate crate)
+cargo install kaptein-tui      # the terminal UI (separate crate)
 ```
 
 **Recommended — signed release (both binaries, no Rust):** the install script downloads

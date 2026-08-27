@@ -27,11 +27,16 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ### Changed
 - **`cargo install kaptein` is now the recommended CLI install path.** The `kaptein`
   crate is published to crates.io, so `cargo install kaptein` (CLI) and
-  `cargo install frontend-tui` (TUI) install the version-pinned binaries with one
+  `cargo install kaptein-tui` (TUI) install the version-pinned binaries with one
   standard command. The signed-release `install.sh` path remains the recommended way to
   get **both** binaries with the verified cosign signature chain (no Rust required).
   `README.md` and `docs/USAGE.md` now document both as recommended, with a table of
   which binary each method installs.
+- **The `frontend-tui` crate is renamed to `kaptein-tui`** so the crate name matches the
+  `kaptein-tui` binary name — `cargo install kaptein-tui` now works (previously the
+  crate was named `frontend-tui`, so `cargo install` could only find it under that
+  name). This completes the `kaptein-*` naming started in ADR-0009 (the TUI was the odd
+  one out). The ADRs (0009/0014) remain historical records of the earlier name.
 
 ## [0.29.0] - 2026-08-27
 
@@ -434,7 +439,7 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `last_probe_time` surfaces as a `readiness_probe` finding.
 
 ### Changed
-- (CI) Added `kaptein-integration` crate as the integration layer; `frontend-tui` now
+- (CI) Added `kaptein-integration` crate as the integration layer; `kaptein-tui` now
   reaches `kaptein-core` through it (layer rule).
 - (CI) `deny.toml` license allowlist + duplicate-version skip list updated; ratatui
   0.29→0.30 (drops unmaintained `paste`), crossterm 0.28→0.29.

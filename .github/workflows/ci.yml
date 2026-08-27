@@ -117,9 +117,9 @@ jobs:
           # frontend (renderer) may depend on kaptein-core directly — they reach
           # it only through kaptein-integration, which owns and re-exports core.
           # The list is derived from workspace metadata (not hardcoded), so a new
-          # `frontend-*` crate is covered automatically. `kaptein-cli` is exempt:
+          # renderer crate is covered automatically. `kaptein-cli` is exempt:
           # it is a thin CLI projection that drives core directly, not a renderer.
-          frontends = [p["name"] for p in meta["packages"] if p["name"].startswith("frontend-")]
+          frontends = [p["name"] for p in meta["packages"] if p["name"].startswith("frontend-") or p["name"] == "kaptein-tui"]
           for name in frontends:
               deps = {d["name"] for d in packages[name].get("dependencies", [])}
               if "kaptein-core" in deps:
@@ -136,7 +136,7 @@ jobs:
       # via core, CI fails.
       - run: |
           set -euo pipefail
-          if grep -rn "kaptein_core::discovery::SortKey\|kaptein_core::discovery::sort_summaries\|kaptein_core::discovery::filter_summaries\|kaptein_core::discovery::list_with" crates/frontend-* 2>/dev/null; then
+          if grep -rn "kaptein_core::discovery::SortKey\|kaptein_core::discovery::sort_summaries\|kaptein_core::discovery::filter_summaries\|kaptein_core::discovery::list_with" crates/kaptein-tui crates/frontend-* 2>/dev/null; then
             echo "error: a frontend uses core::discovery sort/filter types — sort/filter is view-model semantics (AGENTS.md)" >&2
             exit 1
           fi

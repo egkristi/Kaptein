@@ -5,7 +5,7 @@
 //! `kaptein-core::Error` values into user-facing messages without leaking secrets.
 //!
 //! The TUI reaches `kaptein-core` through this crate, keeping the layer dependency rule
-//! satisfied: `frontend-tui` → `kaptein-integration` → `kaptein-core`, with no frontend
+//! satisfied: `kaptein-tui` → `kaptein-integration` → `kaptein-core`, with no frontend
 //! depending on `kaptein-core` directly (see AGENTS.md / ADR-0005).
 
 #![forbid(unsafe_code)]

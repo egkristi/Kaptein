@@ -23,11 +23,11 @@ simplest way to get the CLI is the crate published on crates.io:
 
 ```bash
 cargo install kaptein          # the CLI
-cargo install frontend-tui     # the terminal UI (separate crate)
+cargo install kaptein-tui      # the terminal UI (separate crate)
 ```
 
 `cargo install kaptein` installs only the CLI (the `kaptein` crate); the TUI is a
-separate crate, `frontend-tui`. Both are version-pinned on crates.io, so you get the
+separate crate, `kaptein-tui`. Both are version-pinned on crates.io, so you get the
 same release as the tag.
 
 **Recommended — signed release (both binaries, no Rust):** the install script downloads
