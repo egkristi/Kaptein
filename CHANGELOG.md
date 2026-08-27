@@ -14,9 +14,9 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   test asserts a Secret lens column yields the `[REDACTED]` marker, not plaintext.
 
 ### Added
-- **Context switching parity for `describe`/`diagnose`/`logs`** (M1.2): the read commands
-  now accept `--context` (like `get` already did), so an operator can describe, diagnose,
-  or tail logs in a non-default kubeconfig context without switching the whole session.
+- **Context switching parity across the read commands** (M1.2): `describe`, `diagnose`,
+  `logs`, `events`, `overview`, and `watch` now accept `--context` (matching `get`), so an
+  operator can target any kubeconfig context without switching the whole session.
 - **PVC-binding diagnostic** (M1.6): a Pending pod whose `PodScheduled` condition carries
   `persistentvolumeclaim "<name>" not found` now surfaces as `pvc_binding` (with the claim
   name extracted) — checked before the generic `unschedulable` fallback. Added a fixture

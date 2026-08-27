@@ -187,12 +187,18 @@ enum Command {
         /// look back this many minutes
         #[arg(long, default_value_t = 15)]
         minutes: i64,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Landing view: is anything broken, and what changed recently?
     Overview {
         /// look back this many minutes
         #[arg(long, default_value_t = 15)]
         minutes: i64,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Watch a resource kind and report changes (in-memory ring buffer, no persistence).
     Watch {
@@ -205,6 +211,9 @@ enum Command {
         /// stop after this many change events
         #[arg(long, default_value_t = 20)]
         max: usize,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Run the informer-backed bounded store (ADR-0006) for a resource kind.
     WatchStore {
@@ -1057,7 +1066,15 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         Command::Mcp => mcp::serve()
             .await
             .map_err(|e| kaptein_core::Error::Internal(e.to_string())),
-        Command::Events { namespace, minutes } => {
+        Command::Events {
+            namespace,
+            minutes,
+            context,
+        } => {
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let since_ms = now_ms().saturating_sub(minutes * 60 * 1000);
             let events =
                 kaptein_core::events::recent_events(&client, namespace.as_deref(), Some(since_ms))
@@ -1070,7 +1087,11 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             }
             Ok(())
         }
-        Command::Overview { minutes } => {
+        Command::Overview { minutes, context } => {
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let since_ms = now_ms().saturating_sub(minutes * 60 * 1000);
             // Feed a small watch ring of pod changes (M1.4) so "what changed" is the
             // informer's view, then compose the landing view from events + ring.
@@ -1112,7 +1133,12 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             gvk,
             namespace,
             max,
+            context,
         } => {
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let gvk = parse_gvk(&gvk);
             let ring = kaptein_core::watchring::WatchRing::new(max.max(1));
             let pushed = kaptein_core::watchring::watch_into_ring(
