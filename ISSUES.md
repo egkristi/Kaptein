@@ -149,9 +149,11 @@ unowned debt. Done items are struck through.
 
 - **PVC-binding diagnostics** need the PVC resources themselves — deferred to a Phase 3a
   rule pack (the scheduler's `PodScheduled` message is the Phase 1 signal).
-- **`blast_radius`** walks the Pod ownership chain only when `gvk.kind == "Deployment"`
-  (Deployment → ReplicaSet → Pod). StatefulSet, DaemonSet, and CronJob → Job → Pod
-  chains are **not** covered; a full cross-kind topology scan is a Phase 3a fleet feature.
+- **`blast_radius`** walks the ownership chain generically now: the intermediate
+  controllers that can be owned by a workload and own Pods (`ReplicaSet`, `Job`) are
+  listed and matched transitively, so `Deployment → ReplicaSet → Pod`,
+  `StatefulSet → Pod`, `DaemonSet → Pod`, and `CronJob → Job → Pod` are all covered.
+  A full cross-kind topology scan (volumes, selectors, RBAC) is a Phase 3a fleet feature.
 - **`dry_run_apply_patch` uses `force: true`** — correct for dry-run, and now
   *enforced* (issue #16): the flag is a parameter, `apply_patch` refuses `force && !dry_run`,
   and the real write path (`apply_patch_real`) applies with `force: false` so it cannot

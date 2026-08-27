@@ -4,6 +4,18 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`blast_radius` walks the full ownership chain** (M1b.3 / M2.4 groundwork): the
+  traversal is now generic over intermediate controllers (`ReplicaSet`, `Job`) rather
+  than hardcoded to `Deployment → ReplicaSet → Pod`, so `StatefulSet → Pod`,
+  `DaemonSet → Pod`, and `CronJob → Job → Pod` are all covered. A live integration test
+  asserts a Deployment's dependents include both its ReplicaSet and its Pod.
+- **M1.8 — sort comparisons are allocation-free** for the common columns: `cmp_cells`
+  compares `Text`-vs-`Text` and `Status`-vs-`Status` by `&str` instead of cloning two
+  `String`s per comparison (~1.7M allocations per 50k-row sort).
+
 ## [0.28.2] - 2026-08-27
 
 ### Fixed

@@ -15,6 +15,7 @@
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::Client;
+use kube::ResourceExt;
 use kube::api::{Api, PostParams};
 use kube::core::GroupVersionKind;
 
@@ -320,6 +321,60 @@ async fn dry_run_apply_validates_without_persisting() {
         .cloned()
         .unwrap_or_default();
     assert_eq!(value, "v", "patch dry-run must not persist a change");
+
+    guard.cleanup().await;
+}
+
+/// The blast radius (M1b.3): a Deployment's dependents must traverse
+/// Deployment → ReplicaSet → Pod — two ownership levels, not just the direct ownerRef.
+/// This is the live assertion for the generalized ownership-chain traversal (the former
+/// Deployment-only hardcode now also covers StatefulSet/DaemonSet/CronJob→Job→Pod).
+#[tokio::test]
+async fn blast_radius_traverses_deployment_to_pod() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let mut guard = Cleanup(&client, ns.clone());
+
+    let deploy_name = "blast-me";
+    let deployments: Api<k8s_openapi::api::apps::v1::Deployment> =
+        Api::namespaced(client.clone(), &ns);
+    deployments
+        .create(&PostParams::default(), &deployment(deploy_name, 1))
+        .await
+        .expect("create Deployment");
+
+    // Wait for the ReplicaSet + Pod to be created (the controller reconciles async).
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &ns);
+    let mut saw_pod = false;
+    for _ in 0..30 {
+        let list = pods
+            .list(&kube::api::ListParams::default())
+            .await
+            .expect("list pods");
+        if list.iter().any(|p| p.name_any().starts_with(deploy_name)) {
+            saw_pod = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(saw_pod, "expected a Pod owned by {deploy_name} to appear");
+
+    let gvk = GroupVersionKind::gvk("apps", "v1", "Deployment");
+    let br = kaptein_core::moat::blast_radius(&client, &ns, &gvk, deploy_name)
+        .await
+        .expect("blast_radius");
+
+    assert!(
+        br.dependents.iter().any(|d| d.starts_with("ReplicaSet/")),
+        "expected a ReplicaSet dependent, got {:?}",
+        br.dependents
+    );
+    assert!(
+        br.dependents.iter().any(|d| d.starts_with("Pod/")),
+        "expected a Pod dependent (via ReplicaSet), got {:?}",
+        br.dependents
+    );
 
     guard.cleanup().await;
 }

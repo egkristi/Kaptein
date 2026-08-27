@@ -144,6 +144,19 @@ pub struct BlastRadius {
 
 /// Compute a read-only blast radius for a resource: report its owners and the resources
 /// that reference it via `ownerReferences` (cascade-delete would remove those).
+///
+/// The traversal is **generic over the ownership chain**, not hardcoded to a single
+/// shape. It handles every common workload controller:
+///
+/// - `Deployment → ReplicaSet → Pod` (two levels via an intermediate controller)
+/// - `StatefulSet → Pod` and `DaemonSet → Pod` (direct `ownerRef`)
+/// - `CronJob → Job → Pod` (two levels via an intermediate controller)
+///
+/// The intermediate controllers that can own Pods and be owned by a workload
+/// (`ReplicaSet`, `Job`) are listed and their UIDs added to the transitive "owned" set,
+/// so a Pod owned by a ReplicaSet owned by the target is still matched. A full
+/// cross-kind topology scan (volumes, selectors, RBAC) is a Phase 3a fleet feature; this
+/// covers the ownership/cascade-delete chain.
 pub async fn blast_radius(
     client: &Client,
     namespace: &str,
@@ -163,48 +176,47 @@ pub async fn blast_radius(
         .map(|o| format!("{}/{}", o.kind, o.name))
         .collect::<Vec<_>>();
 
-    // Find dependents by walking the ownership chain. A Deployment owns ReplicaSets,
-    // which own Pods — so a Deployment's blast radius must traverse two levels, not just
-    // match the direct `ownerRef.uid`.
-    let mut dependents = Vec::new();
-
-    // Collect the set of UIDs transitively owned by this resource, plus the resource's
-    // own uid (for direct children).
+    // The set of UIDs transitively owned by this resource (the resource's own uid plus
+    // any intermediate controllers it owns), used to match dependents at any depth.
     let mut owned_uids: std::collections::HashSet<String> = std::collections::HashSet::new();
     owned_uids.insert(uid.clone());
+    let mut dependents = Vec::new();
 
-    // Walk ReplicaSets owned by this resource, then their Pods.
-    if gvk.kind == "Deployment" {
-        let replicasets: Api<kube::api::DynamicObject> = Api::namespaced_with(
-            client.clone(),
-            namespace,
-            &kube::core::ApiResource::from_gvk(&kube::core::GroupVersionKind::gvk(
-                "apps",
-                "v1",
-                "ReplicaSet",
-            )),
-        );
-        if let Ok(rs_list) = replicasets.list(&ListParams::default()).await {
-            for rs in rs_list.items {
-                let owned_by_this = rs
-                    .metadata
-                    .owner_references
-                    .as_ref()
-                    .is_some_and(|ors| ors.iter().any(|o| o.uid == uid));
-                if owned_by_this {
-                    dependents.push(format!(
-                        "ReplicaSet/{}",
-                        rs.metadata.name.clone().unwrap_or_default()
-                    ));
-                    if let Some(rs_uid) = rs.metadata.uid.clone() {
-                        owned_uids.insert(rs_uid);
-                    }
+    // Intermediate controllers that can be owned by a workload and, in turn, own Pods.
+    // Listing them generically lets Deployment→ReplicaSet→Pod and CronJob→Job→Pod both
+    // resolve without hardcoding the caller's kind.
+    let intermediates: [(&str, &str, &str); 2] =
+        [("apps", "v1", "ReplicaSet"), ("batch", "v1", "Job")];
+    for (group, version, kind) in intermediates {
+        let ar = kube::core::ApiResource::from_gvk(&kube::core::GroupVersionKind::gvk(
+            group, version, kind,
+        ));
+        let api: Api<kube::api::DynamicObject> =
+            Api::namespaced_with(client.clone(), namespace, &ar);
+        let list = match api.list(&ListParams::default()).await {
+            Ok(l) => l,
+            // The group/kind may not be served (no batch API, RBAC deny) — degrade
+            // gracefully: skip the level rather than failing the whole blast radius.
+            Err(_) => continue,
+        };
+        for item in list.items {
+            let is_owned = item
+                .metadata
+                .owner_references
+                .as_ref()
+                .is_some_and(|ors| ors.iter().any(|o| owned_uids.contains(&o.uid)));
+            if is_owned {
+                let item_name = item.metadata.name.clone().unwrap_or_default();
+                dependents.push(format!("{kind}/{item_name}"));
+                if let Some(child_uid) = item.metadata.uid.clone() {
+                    owned_uids.insert(child_uid);
                 }
             }
         }
     }
 
-    // Match Pods against any transitively-owned uid.
+    // Match Pods against any transitively-owned uid (the target's own uid, or an
+    // intermediate controller it owns).
     let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pod_list = pods
         .list(&ListParams::default())
