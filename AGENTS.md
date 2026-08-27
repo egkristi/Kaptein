@@ -23,9 +23,36 @@ The standing workflow for every session, in order:
    that is not fixed in the same change, register it as a GitHub issue (with a repro
    where applicable) rather than leaving it undocumented.
 
+### Repository health checks (run each session)
+
+Check and fix any issues in each of these, before and after landing work:
+
+- **GitHub Actions pipelines** — https://github.com/egkristi/Kaptein/actions. Any
+  failed/red run is a defect to fix, not background noise.
+- **CodeQL code scanning** — https://github.com/egkristi/Kaptein/security/code-scanning.
+  No open findings left unaddressed (fix or dismiss with a reason).
+- **Dependabot alerts / dependency updates** — check for open alerts and unmerged
+  dependency PRs; fix open alerts, and review/merge (or close) Dependabot PRs.
+- **Security advisories & policy** —
+  https://github.com/egkristi/Kaptein/security/advisories. Draft, publish, or respond
+  to advisories as needed; keep the security policy (`SECURITY.md`) accurate.
+- **Repository Insights / pulse** — https://github.com/egkristi/Kaptein/pulse. Review for
+  anomalous activity (e.g. a stalled feature, a runaway diff); fix any issues surfaced.
+
+### Cluster testing
+
+Use the live cluster at `/config/.kube/config` to test and verify features in the
+**`kaptein`** namespace. **Never make destructive changes** to the cluster or its
+existing namespaces — verify with read-only commands and, where a write must be
+exercised, do it against throwaway resources in `kaptein` only.
+
+### Release
+
 Commit and push per completed feature; test and verify before committing (see
 *Build & test commands*); keep `ROADMAP.md`/`ISSUES.md`/`CHANGELOG.md` in sync with each
-change so the issue tracker and the roadmap stay the source of truth.
+change so the issue tracker and the roadmap stay the source of truth. When the shipped
+set is tested and stable, cut a new release (bump `CHANGELOG.md` → tag → push) rather
+than releasing every change; never release an untested or unstable build.
 
 ## Architecture rule (enforce this in every change)
 
