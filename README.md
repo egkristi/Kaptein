@@ -446,7 +446,7 @@ against the GitHub Actions OIDC identity, then installs to `~/.local/bin`):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 # pick a version / install dir:
-KAPTEIN_VERSION=v0.28.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+KAPTEIN_VERSION=v0.28.1 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
 Alternatives:

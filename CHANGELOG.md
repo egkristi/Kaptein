@@ -4,7 +4,7 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.28.1] - 2026-08-27
 
 ### Fixed
 - **#33 — release container cosign signing**: the `Publish container image` job signed

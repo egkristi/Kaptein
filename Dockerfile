@@ -6,13 +6,13 @@
 # no runtime dependencies: a distroless-style static image.
 #
 #   docker build \
-#     --build-arg KAPTEIN_VERSION=v0.28.0 \
+#     --build-arg KAPTEIN_VERSION=v0.28.1 \
 #     -t kaptein:latest .
 #
 # The build downloads the release tarball and verifies it against the release's
 # SHA256SUMS before extracting, so a tampered download fails the build.
 
-ARG KAPTEIN_VERSION=v0.28.0
+ARG KAPTEIN_VERSION=v0.28.1
 
 # ---- download + verify stage ----
 FROM alpine:3.20 AS fetch
