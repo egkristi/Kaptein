@@ -1,4 +1,4 @@
-# Kaptein — *the console that knows what changed — and lets you fix it in Git*
+# Kaptein — *the console that knows what changed — and, next, lets you fix it in Git*
 
 > Website: <https://kaptein.io> · Source: <https://github.com/egkristi/Kaptein>
 
@@ -10,7 +10,9 @@
 **Kaptein** is a unified Kubernetes workbench: a fast terminal UI, a native GUI, and a
 headless agent — all three thin projections of one renderer-agnostic domain layer. It
 is built for operators, SREs, platform engineers, and security teams who live inside
-`kubectl` all day and are tired of juggling a dozen single-purpose tools.
+`kubectl` all day and are tired of juggling a dozen single-purpose tools. *(Today the
+CLI + TUI ship; the GUI and browser UI are on the Phase 2 roadmap — see
+[Status at a glance](#status-at-a-glance).)*
 
 > The mistake most Kubernetes tools make is treating the UI as the product. You either
 > get a fast TUI without depth (k9s) or a heavy GUI you can't use over SSH (Lens,
@@ -28,11 +30,11 @@ differently**:
 
 | What existing tools do well | What Kaptein adds |
 |-----------------------------|-------------------|
-| k9s — fast terminal nav, vim keymap | The same speed *plus* deep diagnostics, GitOps, and fleet — without a second tool |
-| Lens / Headlamp — polished GUI, RBAC, multi-cluster | The same UI *plus* a TUI over SSH, with logic that lives in a shared layer, not the UI |
-| K8Studio / OpenShift Console — topology views | Keyboard-navigable topology, not mouse-first |
-| Popeye / kubescape / SRExpert — scans and reports | Integrated into a daily-driver with a remediation loop, not a one-off report |
-| kubecost — cost allocation | Cost plus capacity simulation and an on-prem TCO model |
+| k9s — fast terminal nav, vim keymap | ✅ The same speed *plus* diagnostics and a governed MCP surface — today; 🛠️ GitOps and fleet on the roadmap |
+| Lens / Headlamp — polished GUI, RBAC, multi-cluster | The *same* logic layer as the TUI — the GUI/browser UI is 🛠️ planned, the TUI ships ✅ |
+| K8Studio / OpenShift Console — topology views | Keyboard-navigable topology, not mouse-first (🛠️ planned) |
+| Popeye / kubescape / SRExpert — scans and reports | Integrated into a daily-driver with a remediation loop, not a one-off report (🛠️ planned) |
+| kubecost — cost allocation | Cost plus capacity simulation and an on-prem TCO model (🛠️ planned) |
 
 The unifying idea: **the domain layer is the product.** The TUI, GUI, and headless agent
 are three thin projections of one view-model, so they cannot drift apart — none of them
@@ -40,34 +42,61 @@ owns any logic.
 
 ---
 
-## The five things that are hard to find elsewhere
+## Status at a glance
 
-These are the differentiators that hit where daily work actually hurts:
+Kaptein is honest about what exists today versus what is on the roadmap. Everything
+below is labelled one of three ways:
 
-1. **Governed MCP surface** — `kaptein mcp` lets AI agents drive Kaptein through the
-   *same* guardrails as a human: RBAC preflight, context guardrails, read-only default,
-   and break-glass, each agent running under its **own dedicated identity** (its own
-   ServiceAccount and narrow RBAC) and landed in the same audit log with the *agent* as
-   the actor. An agent never writes to the API server — it can only open a PR. This is
-   the answer to "Shadow MCP": governed, auditable, scoped agent access (ADR-0010).
+- ✅ **Available** — ships in the latest release, tested against a live cluster.
+- 🧪 **Preview** — ships, but not yet complete or fully integrated across surfaces.
+- 🛠️ **Planned** — on the roadmap (see [`ROADMAP.md`](./ROADMAP.md)); not yet shipped.
 
-2. **GitOps write path, from the operator console** — you edit in the UI *where you
-   already stand during an incident*, with live cluster state beside you; the tool
-   figures out *which file in which repo* owns the resource (via Flux/Argo metadata),
-   makes the change in a branch, and opens a PR — with diff at both manifest level *and*
-   rendered level (`kustomize build` / `helm template`). You write to Git, not to the
-   API server. (IDP portals like Backstage/Port offer self-service actions, but two
-   clicks away from reality; Kaptein does it from the live operator console. And an
-   agent's write path is the *same* PR path.)
+**Available now (Phase 1):** the `kaptein` CLI and `kaptein-tui`, resource navigation
+(list built-ins **and** CRDs, describe, logs, events, watch), diagnostics ("why isn't
+this pod ready"), RBAC preflight, context guardrails (read-only default + break-glass),
+secret masking, a dry-run-gated write path, the read-only **governed MCP server**, and
+**lens-driven navigation** (data-first extensions for any CRD).
 
-3. **Time machine** — the watch stream is persisted locally; scrub backwards, see a
-   resource as it was, diff between two timestamps, *"what changed between 14:20 and
-   14:35"* — with events and deploy markers from Git on the same timeline.
+**Preview:** a cheap *"what changed in the last N minutes"* (in-memory watch ring + the
+events API) — the precursor to the persistent Time Machine.
 
-4. **Fleet query + drift** — one query, all clusters: *"all Deployments without
-   resource limits across 40 clusters"*. Cross-cluster diff and drift matrix. Saved
-   queries in Git, scheduled reports, and **query-as-policy** (a query can fail CI) —
-   the same data layer as drift detection (ADR-0011).
+**Planned (Phase 2 → 3):** the **GitOps write path** (edit → PR, never the API server),
+the persistent **Time Machine**, **fleet query + drift**, the browser/GUI surfaces,
+topology & diff, observability, security/cost analytics, and the rest — all in
+[`ROADMAP.md`](./ROADMAP.md).
+
+---
+
+## The differentiators
+
+These are the capabilities that will hit where daily work actually hurts — with their
+current status stated plainly:
+
+1. ✅ **Governed MCP surface — available** — `kaptein mcp` lets AI agents drive Kaptein
+   through the *same* guardrails as a human: RBAC preflight, context guardrails,
+   read-only default, and break-glass, each agent running under its **own dedicated
+   identity** (its own ServiceAccount and narrow RBAC) and landed in the same audit log
+   with the *agent* as the actor. An agent never writes to the API server — it can only
+   open a PR. This is the answer to "Shadow MCP": governed, auditable, scoped agent
+   access (ADR-0010). *(Ships read-only today; the PR-only write path is M2.7.)*
+
+2. 🛠️ **GitOps write path — planned (Phase 2)** — you edit in the UI *where you already
+   stand during an incident*, with live cluster state beside you; the tool figures out
+   *which file in which repo* owns the resource (via Flux/Argo metadata), makes the
+   change in a branch, and opens a PR — with diff at both manifest level *and* rendered
+   level (`kustomize build` / `helm template`). You write to Git, not to the API server.
+   *(Today `kaptein edit`/`apply` are dry-run only — no write reaches the cluster or Git.
+   The PR path is M2.3.)*
+
+3. 🛠️ **Time machine — planned (Phase 3a)** — the watch stream is persisted locally;
+   scrub backwards, see a resource as it was, diff between two timestamps, *"what changed
+   between 14:20 and 14:35"* — with events and deploy markers from Git on the same
+   timeline. *(🧪 A cheap preview — "what changed in the last N minutes" — ships now.)*
+
+4. 🛠️ **Fleet query + drift — planned (Phase 3a)** — one query, all clusters: *"all
+   Deployments without resource limits across 40 clusters"*. Cross-cluster diff and drift
+   matrix. Saved queries in Git, scheduled reports, and **query-as-policy** (a query can
+   fail CI) — the same data layer as drift detection (ADR-0011).
 
 ---
 
@@ -120,12 +149,13 @@ Everything above it arrives as lenses and integrations, not core code.
 │ frontend      │      │ frontend      │      │ serve         │
 │ terminal,     │      │ native +      │      │ agent, CI,    │
 │ SSH, bastion  │      │ wasm browser  │      │ fleet-hub     │
+│   ✅ ships     │      │   🛠️ planned  │      │   🛠️ planned  │
 └───────────────┘      └───────────────┘      └───────────────┘
 ```
 
 **Consequence:** the TUI, GUI, and headless agent *cannot* drift apart, because none of
-them owns any logic. That is the single decision that determines whether this project
-survives.
+them owns any logic — they are projections of one view-model. *(The TUI ships today; the
+GUI/browser and headless/serve surfaces are Phase 2.)*
 
 Key architectural decisions are recorded as **ADRs** in [`docs/adr/`](docs/adr/) — the
 `egui`-over-`iced` choice is [ADR-0001](docs/adr/0001-egui-over-iced.md).
@@ -136,14 +166,14 @@ Key architectural decisions are recorded as **ADRs** in [`docs/adr/`](docs/adr/)
 declared, versioned way to add capability — and it always comes in one of three tiers,
 chosen data-first:
 
-1. **View definitions (lenses)** — declarative YAML/CUE binding a CRD to panels, columns,
-   status inference, actions, and health checks. No code, PR-reviewable, checked into
-   Git. This is the default and covers the "and more" long tail.
-2. **WASM component-model plugins (WIT)** — sandboxed, language-agnostic code for when
-   real logic is required. Behaves identically in every frontend; no JS plugins
-   (Headlamp) or Go plugins that require recompilation.
-3. **Shell-out integrations** — external binaries (Krew plugins, `kustomize`, `helm`,
-   Trivy/Grype, `istioctl`) invoked when present and degraded gracefully when absent.
+1. ✅ **View definitions (lenses)** — declarative YAML/CUE binding a CRD to panels,
+   columns, status inference, actions, and health checks. No code, PR-reviewable, checked
+   into Git. **Ships today** (the engine + a lens set + lens-driven TUI navigation).
+2. 🛠️ **WASM component-model plugins (WIT)** — sandboxed, language-agnostic code for when
+   real logic is required. Behaves identically in every frontend. *(Planned, M2.6.)*
+3. ✅ **Shell-out integrations** — external binaries (Krew plugins, `kustomize`, `helm`)
+   invoked when present and degraded gracefully when absent. *(Ships today; Trivy/Grype/
+   `istioctl` arrive with the scan features.)*
 
 All three are declared by a shared **extension manifest** (`extension.yaml`) and
 discovered from configurable, Git-backed extension paths — no central marketplace.
@@ -151,19 +181,20 @@ Lifecycle is managed with `kaptein extension {validate,list,enable,disable}`. Ex
 lenses ship under [`extensions/`](extensions/) — CNPG, Strimzi Kafka, KubeVirt,
 cert-manager, Keycloak, Tekton, Velero, Karpenter, and Knative — all MIT/Apache-2.0.
 
-**Sandbox by default.** WASM plugins run with fuel metering, a memory cap, **no network
-and no filesystem** unless a capability is declared in the WIT world *and* in the
+**Sandbox by default.** 🛠️ WASM plugins will run with fuel metering, a memory cap, **no
+network and no filesystem** unless a capability is declared in the WIT world *and* in the
 manifest allowlist. See [ADR-0004](docs/adr/0004-extension-model.md).
 
 ---
 
 ## Authentication & context
 
-Full auth surface:
+Auth surface today:
 
-- `kubeconfig`, exec credential plugins (kubelogin/Entra ID, aws, gcloud)
-- OIDC device flow, client certificates, service account tokens, SPIFFE
-- `--as` impersonation
+- ✅ `kubeconfig` + exec credential plugins (kubelogin/Entra ID, aws, gcloud)
+- ✅ Service-account tokens (the MCP agent identity, ADR-0007)
+- 🛠️ OIDC device flow, client certificates, SPIFFE, `--as` impersonation *(deferred to
+  1b / hub mode)*
 
 Two things nobody does properly, which Kaptein treats as first-class:
 
@@ -177,171 +208,128 @@ Two things nobody does properly, which Kaptein treats as first-class:
 
 ## Feature areas
 
-### 1. Resource navigation (k9s / Lens / Aptakube parity)
-- Command palette + vim keymap + fuzzy jump
-- All built-in resources **and all CRDs** auto-discovered
-- YAML editor with schema validation from OpenAPI/CRD schema, server-side dry-run and
-  diff before apply
-- Describe, scale, restart rollout, cordon/drain, evict, cascade selection on delete
-- **Logs**: multi-pod/multi-container streaming with regex filter, JSON parsing into
-  columns, time windows
-- Exec/attach, ephemeral containers (`kubectl debug`-style profiler), node debug pods
-- Port-forward manager with named, persistent forwards and auto-reconnect
-- Krew compatibility by shelling out to existing plugins
+> Legend: ✅ **Available** · 🧪 **Preview** · 🛠️ **Planned**. A section is marked by the
+> state of its *bulk*; shipped sub-bullets are called out inline. The authoritative
+> milestone-by-milestone state is [`ROADMAP.md`](./ROADMAP.md).
 
-### 2. Topology & diff
+### 1. Resource navigation — ✅ available (core) / 🛠️ planned (some)
+- ✅ Command palette + vim keymap + fuzzy jump
+- ✅ All built-in resources **and all CRDs** auto-discovered
+- ✅ Describe, scale, restart rollout, cordon/drain, evict, cascade selection on delete
+  (all dry-run by default; `--confirm` + break-glass to write)
+- ✅ **Logs**: multi-pod/multi-container streaming with regex filter, JSON parsing into
+  columns, time windows
+- ✅ Exec/attach, ephemeral containers (`kubectl debug`-style profiler), node debug pods
+- ✅ Port-forward manager with named, persistent forwards and auto-reconnect
+- ✅ Krew compatibility by shelling out to existing plugins
+- 🛠️ YAML editor with schema validation from OpenAPI/CRD schema, server-side dry-run and
+  diff before apply *(today: `kaptein edit`/`apply` are dry-run-only handoffs)*
+
+### 2. Topology & diff — 🛠️ planned (Phase 2)
 - Resource graph from ownerRefs, selectors, volumes, and RBAC bindings (K8Studio /
   OpenShift dev-perspective class), but **keyboard-navigable**
 - Diff mode between two namespaces, two clusters, or two points in time
 
-### 3. Observability
+### 3. Observability — 🛠️ planned (Phase 3b)
 - Built-in metrics-server reading + adapter for Prometheus/Thanos/VictoriaMetrics with a
   PromQL console
 - Loki/OpenSearch for historical logs, correlated with the resource you're standing in
 - Traces via Tempo/Jaeger with deep-links from a pod
-- Events deduplicated onto a timeline
+- ✅ Events deduplicated onto a timeline *(ships today)*
 - Alertmanager: active alerts → affected resource, and silences from the UI
 
-### 4. Diagnostics & SRE (Popeye + SRExpert class)
-- Continuous sanity scan with score and trend: missing limits/requests, no PDB, no
+### 4. Diagnostics & SRE (Popeye + SRExpert class) — ✅ available (pod diagnostics) / 🛠️ planned (the rest)
+- ✅ *"Why isn't this pod ready?"* — a rule engine over events, scheduler reasons,
+  node capacity, taints, imagePull, probe config, and PVC binding (`kaptein diagnose`
+  and the MCP `diagnose`/`explain_pod_failure`/`why_is_job_pending` tools)
+- ✅ **Governed MCP surface** (`kaptein mcp`): AI agents drive Kaptein through the same
+  guardrails as a human — read-only today, PR-only writes later (ADR-0010)
+- 🛠️ Continuous sanity scan with score and trend: missing limits/requests, no PDB, no
   probes, `:latest` tags, overly broad roles, orphaned PVC/ConfigMap/Secret
-- *"Why isn't this pod ready?"* as a real decision tree over events, scheduler reasons,
-  node capacity, taints, imagePull, probe config, and PVC binding
-- OOM forensics with `lastTerminatedState` and the memory trend before the kill
-- **Blast-radius preview**: before a change, which pods, PDBs, rollouts, and mesh routes
-  are hit
-- **Governed MCP surface** (`kaptein mcp`): AI agents drive Kaptein through the same
-  guardrails as a human — never writing to the API server, only opening a PR (see the
-  fifth differentiator and ADR-0010).
-- LLM assistance: opt-in, local endpoint possible, secrets redacted. **Never on by
-  default** — disabled per context until explicitly enabled. Redaction is structural
-  (driven by the CRD schema and well-known secret keys like `env`, `data`, and
-  annotations), not regex-only, and the input to any model is always shown for review
-  before it leaves the machine.
+- 🛠️ OOM forensics with `lastTerminatedState` and the memory trend before the kill
+- 🛠️ **Blast-radius preview** *(today: a read-only `blast_radius` MCP tool for
+  Deployment→ReplicaSet→Pod)*
+- 🛠️ LLM assistance: opt-in, local endpoint possible, secrets redacted — never on by
+  default
 
-### 5. Security & compliance (kubescape class)
+### 5. Security & compliance (kubescape class) — 🛠️ planned (Phase 3b)
 - Posture scan against CIS, NSA/CISA, and MITRE ATT&CK — plus NSM's *Grunnprinsipper*
-  (Baseline Principles) as a first-class framework, since that's what you're actually
-  audited on
 - Image scanning (Trivy/Grype), SBOM viewing, cosign/sigstore verification, SLSA
-  provenance
-- **SBOM reconciliation**: run two generators, diff them, and show which package list you
-  trust and why — the mismatch is the signal
-- **VEX filtering**: CVE → *actually reachable* workloads, not a CVE dump
-- **Framework mapping**: CIS, NSA/CISA, MITRE ATT&CK, NSM *Grunnprinsipper*, **plus
-  CRA, NIS2, and DORA** control mappings — a European procurement trigger American tools
-  systematically miss
-- RBAC visualization with effective permissions per ServiceAccount
-- **Policy preflight**: run Kyverno/Gatekeeper/ValidatingAdmissionPolicy rulesets locally
-  against a manifest and show *which policy would block it* before you send anything
-- NetworkPolicy editor with simulation (*"can A reach B?"*)
-- Secrets masked by default, with ESO/Vault/SOPS integration showing the *source*
-  instead of the value
-- CVE → affected workloads, not just affected images
+- **SBOM reconciliation**, **VEX filtering** (CVE → reachable workloads)
+- **Framework mapping**: CIS, NSA/CISA, MITRE ATT&CK, NSM, **CRA, NIS2, DORA**
+- RBAC visualization, **policy preflight** (Kyverno/Gatekeeper/ValidatingAdmissionPolicy),
+  NetworkPolicy editor with *"can A reach B?"*
+- ✅ Secrets masked by default *(ships today)*; ESO/Vault/SOPS source display planned
+- ✅ Signed releases + SBOM *(ships today — the *supply chain we scan for*)*
 
-### 6. Cost & capacity (kubecost+)
-- Allocation per namespace/label/team/workload with showback and chargeback
-- Cloud billing import for Azure/AWS/GCP **and** an on-prem TCO model — nobody handles
-  on-prem OpenShift properly
-- Rightsizing from actual usage, idle/waste report, budgets and alerting, carbon estimate
-- Capacity simulation: *does the cluster survive losing a node or an AZ?*
+### 6. Cost & capacity (kubecost+) — 🛠️ planned (Phase 3b)
+- Allocation per namespace/label/team/workload, cloud billing import + on-prem TCO,
+  rightsizing, budgets, carbon estimate, capacity simulation
 
-### 7. GitOps & lifecycle — **the differentiator**
+### 7. GitOps & lifecycle — 🛠️ planned (Phase 2/3)
 - Flux and Argo CD as first-class citizens: sources, reconciliation status,
   suspend/resume, force reconcile
 - **Write path goes to Git, not the API server.** Edit in the UI → the tool locates the
   owning file/repo (via Flux/Argo metadata) → changes in a branch → opens a PR, with
-  diff at manifest *and* rendered level. No tool in the list does this.
-- Drift detector (live state vs. rendered Git state)
-- Helm releases with values diff and rollback
-- Crossplane XRD/claims with composition trace
-- OLM subscriptions and upgrade channels
-- Deprecated-API scanning before a cluster upgrade
+  diff at manifest *and* rendered level.
+- Drift detector, Helm values diff + rollback, Crossplane XRD/claims, OLM subscriptions,
+  deprecated-API scanning
 
-### 8. Network & mesh
-- Gateway API and Ingress side by side, cross-cluster route table
-- Istio: mTLS status, ambient vs. sidecar, `istioctl analyze` parity, readable proxy
-  config dump
-- Cilium/Hubble flow-map with live traffic
-- DNS and endpoint debugging
+### 8. Network & mesh — 🛠️ planned (Phase 2/3b)
+- Gateway API + Ingress side by side; Istio mTLS/`istioctl analyze`; Cilium/Hubble
+  flow-map; DNS and endpoint debugging
 
-### 8b. AI & GPU workloads (DRA / Kueue / inference)
-- **DRA-native views**: `ResourceSlice`, `ResourceClaim`, and `DeviceClass` as
-  first-class resources (GA in 1.34) — a niche no console renders well yet.
-- **Allocated vs. actual GPU use, with honesty about the measurement**: DCGM Exporter
-  cannot attribute metrics to individual containers under time-slicing, so Kaptein says
-  so — the same "show the source, never the value" honesty as secrets.
-- **"Why isn't this job admitted?"** — the sibling to "why isn't this pod ready?", over
-  ClusterQueue quota, gang scheduling, preemption, and ResourceClaim binding.
-- **Tokens, not just GPU percentage** — Gateway API Inference Extension and `InferencePool`
-  as real resources to render, with TTFT as the north star.
+### 8b. AI & GPU workloads (DRA / Kueue / inference) — 🛠️ planned (Phase 3a)
+- DRA-native views (`ResourceSlice`/`ResourceClaim`/`DeviceClass`), allocated-vs-actual
+  GPU use, *"why isn't this job admitted?"*, Gateway API Inference Extension +
+  `InferencePool`
 
-### 9. Storage & data
-- PV/PVC/StorageClass/VolumeSnapshot, expansion, CSI driver status
-- Velero/VolSync backup overview with restore-test status, plus a **backup-gap report**
-  (which workloads have *no* backup) and RPO/RTO per namespace
-- A proper **CNPG lens**: primary/replica topology, replication lag, switchover/failover,
-  backup to object store, PITR window, WAL archive status, pending restart on parameter
-  changes. *This does not exist today.*
-- **KubeVirt as a first-class lens** (not one bullet): console (VNC/serial), live
-  migration status, snapshot/restore, MTV migration plans with wave progression,
-  VM templates + instance types, hotplug disk/NIC, node placement and evacuation — the
-  VM vocabulary vSphere admins need when they land on Kubernetes.
+### 9. Storage & data — 🛠️ planned (Phase 3a)
+- PV/PVC/StorageClass/VolumeSnapshot, CSI driver status
+- Velero/VolSync backup overview + **backup-gap report**, RPO/RTO per namespace
+- A **CNPG lens**: primary/replica topology, replication lag, switchover/failover, PITR
+- **KubeVirt as a first-class lens**: console, live migration, snapshots, MTV plans,
+  instance types, hotplug
 
-### 10. Workload lenses & extensions (data first, code second)
+### 10. Workload lenses & extensions (data first, code second) — ✅ available
 Declarative **view definitions** (YAML or CUE) that bind a CRD to panels, columns, status
-inference, actions, and health checks. This is how Strimzi, KubeVirt, cert-manager,
-Keycloak, Tekton, Velero, Karpenter, and Knative are supported *without hardcoding
-anything* — and your teams can write their own for internal CRDs and check them into Git.
+inference, actions, and health checks — so Strimzi, KubeVirt, cert-manager, Keycloak,
+Tekton, Velero, Karpenter, and Knative are supported *without hardcoding anything*, and
+your teams can write their own for internal CRDs.
 
-*Status:* the schema, validator, status/condition rule evaluation, `render_row`, the
-`extension.yaml` manifest and its `list/validate/enable/disable` lifecycle, a lens set
-for all eight targets above, and **lens-driven navigation** ship today under
-[`extensions/`](./extensions). `kaptein lenses` discovers the enabled lens set;
-`kaptein get --lens` renders a lens against a live kind; and the **TUI now navigates
-discovered lenses** — a lens file dropped into the extension path makes its CRD
-navigable with no recompile (`KAPTEIN_EXTENSIONS_DIR`, defaulting to `./extensions`).
+✅ Ships today: the schema, validator, status/condition rule evaluation, `render_row`,
+the `extension.yaml` manifest + `list/validate/enable/disable` lifecycle, a lens set for
+all eight targets under [`extensions/`](./extensions), and **lens-driven navigation** —
+`kaptein lenses` discovers the set, `kaptein get --lens` renders one, and the **TUI
+navigates discovered lenses** (drop a lens file into `KAPTEIN_EXTENSIONS_DIR`, default
+`./extensions`, and its CRD becomes navigable with no recompile).
 
 When a lens isn't enough, escalate to a **WASM plugin** (tier 2) or a **shell-out
-integration** (tier 3) — see *Extensibility* above. Data first, code second: **this is
-the only way "and more" scales.**
+integration** (tier 3). Data first, code second: **this is the only way "and more"
+scales.** *(The WASM host + WIT worlds are 🛠️ planned, M2.6.)*
 
-### 11. Fleet
-- **Fleet query**: one query, all clusters — Clusterpedia-class data layer, with saved
-  queries in Git, scheduled reports, and **query-as-policy** (fail CI if a query returns
-  rows)
-- Cross-cluster diff and drift matrix
-- Aggregated compliance, cost, and upgrade dashboards
-- Optional hub mode with a small per-cluster agent, when you don't want N direct laptop
-  connections
+### 11. Fleet — 🛠️ planned (Phase 3a)
+- **Fleet query**: one query, all clusters — Clusterpedia-class data layer, saved
+  queries in Git, scheduled reports, **query-as-policy**; cross-cluster diff and drift
+  matrix; optional hub mode with a per-cluster agent
 
-### 12. Time machine
-- Watch stream persisted locally (redb/SQLite, optionally centralized) with compaction
-  and a configurable retention TTL so local disk stays bounded
-- Scrub backwards, see a resource as it was, diff two timestamps
-- *"What changed between 14:20 and 14:35"* — events and Git deploy markers on the same
+### 12. Time machine — 🧪 preview / 🛠️ planned (Phase 3a)
+- 🧪 *"What changed in the last N minutes"* ships today (`kaptein overview`/`events`, an
+  in-memory watch ring + the events API)
+- 🛠️ Persistent watch stream (redb/SQLite) with compaction and retention; scrub backwards,
+  see a resource as it was, diff two timestamps — events + Git deploy markers on one
   timeline. **During an incident this alone is worth the whole tool.**
 
-### 13. Incident & collaboration
-- Session recording (asciinema-like for TUI, event-log for GUI) exported to an incident
-  timeline in Markdown
-- Shared workspace configs in Git
-- Full local audit log of every write operation, in a single stable format that is also
-  the source for incident-timeline exports (one format, two consumers)
-- **Operational memory**: owner resolution from labels/annotations (incl. Backstage),
-  on-call from PagerDuty/Opsgenie/Grafana OnCall, and runbook from `runbook_url` or a
-  Git-backed markdown folder.
-- The incident timeline records what *you* did **and** what the *cluster* did (deploys,
-  scaling, node events, alerts) — an actual postmortem, not a command log.
+### 13. Incident & collaboration — 🛠️ planned (Phase 3b)
+- Session recording → Markdown incident timeline; shared workspace configs in Git
+- ✅ Full local audit log of every write operation *(ships today)*
+- Operational memory (owner from labels/annotations, on-call, runbook from `runbook_url`)
+- The incident timeline records what *you* did **and** what the *cluster* did
 
-### 14. Cluster lifecycle, certificates & DR
-- **Version matrix and EOL** per cluster, with operator compatibility and PDB blockers
-  before an upgrade
-- **Control-plane health for on-prem**: etcd DB size, defrag, leader elections,
-  apiserver latency
-- **Certificate expiry across the fleet**: kubelet certs, cert-manager, webhook CA
-  bundles, mesh CAs — "what expires in the next 90 days" across 40 clusters
-- **Backup gap, not just backup status**: RPO/RTO per namespace as a DORA compliance hook
+### 14. Cluster lifecycle, certificates & DR — 🛠️ planned (Phase 3b)
+- Version matrix + EOL per cluster; control-plane health for on-prem (etcd size, defrag,
+  leader elections, apiserver latency); certificate expiry across the fleet; backup-gap
+  + RPO/RTO per namespace
 
 ---
 
@@ -354,18 +342,17 @@ the only way "and more" scales.**
   self-contained. The browser UI is a **wasm bundle** served by `serve`, not a binary.
 - **No telemetry, no account, works in airgaps.**
 - **Read-only default** for unknown contexts.
-- **Signed releases with SBOM** — practice what we scan for. *Implemented: cosign keyless
-  signatures, `SHA256SUMS`, a cosign-signed CycloneDX SBOM, and SLSA provenance on every
-  release. The installer does not yet check the signature it ships alongside — see
-  [#24](https://github.com/egkristi/Kaptein/issues/24).*
-- **Informer-based, not polling.** *Implemented for the TUI's live view (a bounded seed
-  plus a reconnecting watch feeds an in-memory data plane; no per-keystroke `api.list`).
-  The ADR-0006 lifecycle policy — lazy per-view watches, TTL eviction, a hard cap with
-  degradation to on-demand list — exists as a validated, config-backed policy that is not
-  yet consulted by the watch path
-  ([#25](https://github.com/egkristi/Kaptein/issues/25)).*
-- **Same keymap** in the TUI and GUI.
-- **i18n** and a screen-reader-friendly GUI.
+- **Signed releases with SBOM** — practice what we scan for. ✅ *Implemented: cosign
+  keyless signatures, `SHA256SUMS`, a cosign-signed CycloneDX SBOM, and SLSA provenance
+  on every release. The installer verifies the `SHA256SUMS` file against the OIDC
+  identity and cosign-verifies the container image.*
+- **Informer-based, not polling.** ✅ *Implemented for the TUI's live view (a bounded
+  seed plus a reconnecting watch that relists-and-reconciles on reconnect feeds an
+  in-memory data plane; no per-keystroke `api.list`). The ADR-0006 lifecycle policy —
+  lazy per-view watches, LRU+TTL eviction, and a hard cap with degradation to on-demand
+  list — is a validated, config-backed policy wired into `LivePlane`.*
+- **Same keymap** in the TUI and GUI. 🛠️ *GUI not yet shipped.*
+- **i18n** and a screen-reader-friendly GUI. 🛠️ *Planned.*
 - **Kubernetes version support**: target the latest three minors; older API versions
   handled via the discovery API's served versions.
 
@@ -413,22 +400,18 @@ configuration, and the lens/extension system — is in [`docs/USAGE.md`](docs/US
 
 ---
 
-## Status
+## Known limitations
 
-**MVP — Phase 1 functional against a live cluster.** The k9s-parity surface is
-implemented and cluster-verified: resource listing (built-ins + CRDs), RBAC preflight,
-context guardrails, diagnostics, describe (with secret redaction), logs, events,
-port-forward, exec, ephemeral containers, and the governed MCP server (`kaptein mcp`) —
-exposed through a CLI (`kaptein`) and a ratatui TUI (`kaptein-tui`).
+**MVP — Phase 1, functional against a live cluster.** See [Status at a
+glance](#status-at-a-glance) for the available/preview/planned breakdown, and
+[`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
+[`ISSUES.md`](./ISSUES.md) for known issues.
 
 Writes are **opt-in and gated**: `delete`, `scale`, `restart`, `cordon`, `uncordon`,
 `evict`, and `debug` default to dry-run, require an explicit `--confirm`, and (for
 prod/unknown contexts) a break-glass justification. Everything else is read-only.
 
-See [`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
-[`ISSUES.md`](./ISSUES.md) for known issues; Phases 1b–3b are tracked as GitHub issues.
-
-**Known limitations you should read before relying on this** (all tracked):
+**Limitations to read before relying on this** (all tracked):
 
 - **Performance targets are not yet measured.** The budget in `ROADMAP.md` is a
   commitment, not a benchmark result; the kwok harness that will prove or disprove it is
