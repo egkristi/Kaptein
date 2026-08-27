@@ -4,7 +4,14 @@
 # Krew installs a *single* binary named after the plugin into
 # ~/.krew/bin/kubectl-kaptein. We ship the `kaptein` CLI (the TUI is not a kubectl
 # subcommand, so it is distributed via install.sh, not Krew).
-apiVersion: krew.googlecontainers.com/v1alpha2
+#
+# NOTE: this file is a *template*. The `PLACEHOLDER_*` values are substituted at
+# release time (see .github/workflows/release.yml) and the rendered manifest is
+# uploaded to the release as `kaptein.yaml`. To appear in `kubectl krew install`,
+# a rendered copy must also be merged into the central krew-index
+# (github.com/kubernetes-sigs/krew-index), which is a separate PR — see the
+# "Distribution" section of ROADMAP.md.
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
 kind: Plugin
 metadata:
   name: kaptein
