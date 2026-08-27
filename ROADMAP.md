@@ -266,19 +266,26 @@ Milestones:
     implemented; the example lens set ships under `extensions/` — CNPG, Strimzi Kafka,
     KubeVirt, cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative (all
     MIT/Apache-2.0).
-  - **Partially resolved (v0.27.0 re-audit):** the CLI now consumes a lens —
+  - **Resolved (v0.27.0 re-audit → lens navigation):** the CLI consumes a lens —
     `kaptein get --gvk <gvk> --lens <file>` lists full objects
     (`core::discovery::list_objects`) and renders each through `render_row` (lens columns +
     lens-inferred status), verified live. **Lens discovery landed:** `kaptein lenses`
     (`core::extension::discover_lenses`) walks configured extension paths, resolves each
-    lens entrypoint's `target` GVK, and honours the `enable`/`disable` set — so the
-    discovered lens set is queryable without recompile. **Still open:** a lens-driven kind
-    list in the TUI (a discovered CRD with a lens becomes navigable with no code change),
-    and `render_row` on the TUI's `DataPlane` path.
+    lens entrypoint's `target` GVK, and honours the `enable`/`disable` set. **Lens-driven
+    TUI navigation landed:** the TUI discovers lens kinds at startup
+    (`KAPTEIN_EXTENSIONS_DIR`, defaulting to `./extensions`) and renders each through a
+    `LivePlane::new_lens` — the lens's declared columns become the table schema and its
+    status rules drive the status chip, so dropping a lens file into the path makes its
+    CRD navigable with **no recompile**. `render_row` is on the TUI's `DataPlane` path
+    (`map_object_with` is the single seed/watch mapping). **Still open (Phase 2+):**
+    per-lens action/health surfaces (M2.4+), the browser UI's lens navigation (M2.1), and
+    the `kaptein` TUI's lens action graph.
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
-    through `viewdef render`.
+    through `viewdef render`. *(Satisfied: `lens_column_reaches_row_through_data_plane` in
+    `kaptein-integration` asserts a lens column reaches a `Row` via `map_object_with`, the
+    live seed/watch path.)*
 - **M2.3 GitOps (the differentiator)**
   - Flux + Argo CD first-class: sources, reconciliation status, suspend/resume, force
     reconcile

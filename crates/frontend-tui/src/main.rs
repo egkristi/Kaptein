@@ -29,99 +29,164 @@ use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
-/// A resource kind the TUI can list.
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    Pods,
-    Deployments,
-    Services,
-    Nodes,
-    Namespaces,
+/// A resource kind the TUI can list. A kind is either one of the built-in kinds, or a
+/// **lens-driven** kind (M2.2): a discovered CRD whose lens supplies its columns, so a
+/// new lens file makes its CRD navigable with no recompile.
+#[derive(Clone)]
+struct Kind {
+    /// Human-readable kind label (shown in the status line).
+    label: String,
+    /// The `group/version/kind` the plane lists.
+    gvk: GroupVersionKind,
+    /// Whether the kind is cluster-scoped (has no namespace column).
+    cluster_scoped: bool,
+    /// The rendered column headers (geometry): fixed for built-ins, the lens's column
+    /// ids for a lens-driven kind.
+    headers: Vec<String>,
+    /// Index of the name column (for describe/jump navigation).
+    name_col: usize,
+    /// Index of the namespace column, or `None` when cluster-scoped.
+    namespace_col: Option<usize>,
+    /// Index of the status column (drives cell color), if any.
+    status_col: Option<usize>,
+    /// The lens driving this kind (its columns become the plane's schema); `None` for
+    /// built-in kinds.
+    lens: Option<kaptein_viewmodel::ViewDefinition>,
 }
 
 impl Kind {
-    const ALL: [Kind; 5] = [
-        Kind::Pods,
-        Kind::Deployments,
-        Kind::Services,
-        Kind::Nodes,
-        Kind::Namespaces,
-    ];
-
-    fn next(self) -> Kind {
-        let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
-        Self::ALL[(i + 1) % Self::ALL.len()]
-    }
-
-    fn gvk(self) -> GroupVersionKind {
-        match self {
-            Kind::Pods => GroupVersionKind::gvk("", "v1", "Pod"),
-            Kind::Deployments => GroupVersionKind::gvk("apps", "v1", "Deployment"),
-            Kind::Services => GroupVersionKind::gvk("", "v1", "Service"),
-            Kind::Nodes => GroupVersionKind::gvk("", "v1", "Node"),
-            Kind::Namespaces => GroupVersionKind::gvk("", "v1", "Namespace"),
+    fn builtin(label: &str, group: &str, version: &str, kind: &str, cluster_scoped: bool) -> Self {
+        Self {
+            label: label.to_string(),
+            gvk: GroupVersionKind::gvk(group, version, kind),
+            cluster_scoped,
+            headers: vec![
+                "NAME".into(),
+                "NAMESPACE".into(),
+                "STATUS".into(),
+                "CREATED".into(),
+            ],
+            name_col: 0,
+            namespace_col: if cluster_scoped { None } else { Some(1) },
+            status_col: Some(2),
+            lens: None,
         }
     }
 
-    fn label(self) -> &'static str {
-        match self {
-            Kind::Pods => "Pods",
-            Kind::Deployments => "Deployments",
-            Kind::Services => "Services",
-            Kind::Nodes => "Nodes",
-            Kind::Namespaces => "Namespaces",
+    /// Build a lens-driven kind from a validated [`kaptein_viewmodel::ViewDefinition`]
+    /// (M2.2). The lens's columns become the plane's schema and the table's headers.
+    fn from_lens(vd: kaptein_viewmodel::ViewDefinition) -> Self {
+        let headers: Vec<String> = vd
+            .columns
+            .iter()
+            .map(|c| c.id.to_ascii_uppercase())
+            .collect();
+        let name_col = vd
+            .columns
+            .iter()
+            .position(|c| c.field.as_deref() == Some("metadata.name"))
+            .unwrap_or(0);
+        let namespace_col = vd
+            .columns
+            .iter()
+            .position(|c| c.field.as_deref() == Some("metadata.namespace"));
+        let status_col = vd
+            .columns
+            .iter()
+            .position(|c| c.kind == kaptein_viewmodel::ColumnKind::Status);
+        let cluster_scoped = namespace_col.is_none();
+        let label = vd.target.kind.clone();
+        Self {
+            label,
+            gvk: GroupVersionKind::gvk(&vd.target.group, &vd.target.version, &vd.target.kind),
+            cluster_scoped,
+            headers,
+            name_col,
+            namespace_col,
+            status_col,
+            lens: Some(vd),
         }
     }
 
-    /// Whether the kind is cluster-scoped (has no namespace column).
-    fn cluster_scoped(self) -> bool {
-        matches!(self, Kind::Nodes | Kind::Namespaces)
+    /// Whether this kind is the built-in `Pod` kind (the only kind with diagnostics).
+    fn is_pods(&self) -> bool {
+        self.gvk.kind == "Pod"
     }
 }
 
-/// Which column the table sorts by. This is a frontend-local *navigation* choice, mapped
-/// onto the view-model's `SortSpec` column id in `query_plane` — the TUI never reaches
-/// for a `kaptein_core::discovery` sort type (the view-model owns sort semantics; the
-/// frontend owns which column is active — issue #32).
+/// The built-in kinds, in Tab order.
+fn builtin_kinds() -> Vec<Kind> {
+    vec![
+        Kind::builtin("Pods", "", "v1", "Pod", false),
+        Kind::builtin("Deployments", "apps", "v1", "Deployment", false),
+        Kind::builtin("Services", "", "v1", "Service", false),
+        Kind::builtin("Nodes", "", "v1", "Node", true),
+        Kind::builtin("Namespaces", "", "v1", "Namespace", true),
+    ]
+}
+
+/// Discover lens-driven kinds (M2.2): walk the extension directory, keep enabled lens
+/// extensions, and load each lens's full `ViewDefinition` so its CRD becomes navigable
+/// with no recompile. A lens that fails to load is skipped (reported to stderr), never
+/// silently added.
+fn discover_lens_kinds() -> Vec<Kind> {
+    let dir = std::env::var("KAPTEIN_EXTENSIONS_DIR").unwrap_or_else(|_| "extensions".to_string());
+    let (lenses, problems) = kaptein_core::extension::discover_lenses(std::path::Path::new(&dir));
+    for p in &problems {
+        eprintln!("lens discovery: {p}");
+    }
+    let config = kaptein_core::config::load();
+    let mut kinds = Vec::new();
+    for lens in lenses {
+        if !config.extensions.is_enabled(&lens.id) {
+            continue;
+        }
+        match kaptein_integration::load_lens(&lens.entrypoint) {
+            Ok(vd) => kinds.push(Kind::from_lens(vd)),
+            Err(e) => eprintln!("skipping lens {}: {e}", lens.id),
+        }
+    }
+    kinds
+}
+
+/// The full kind list: built-ins first, then discovered lens kinds.
+fn all_kinds() -> Vec<Kind> {
+    let mut kinds = builtin_kinds();
+    kinds.extend(discover_lens_kinds());
+    kinds
+}
+
+/// Advance to the next kind in Tab order (wrapping), matched by identity.
+fn next_kind(kinds: &[Kind], current: &Kind) -> Kind {
+    let i = kinds
+        .iter()
+        .position(|k| k.label == current.label && k.gvk == current.gvk)
+        .unwrap_or(0);
+    kinds[(i + 1) % kinds.len()].clone()
+}
+
+/// Which column the table sorts by. This is a frontend-local *navigation* choice — an
+/// index into the current plane's schema (the view-model owns which columns exist and
+/// their order; the frontend owns which index is active — issue #32). The sort key is
+/// resolved to the view-model `SortSpec` column id in `query_plane`.
 #[derive(Clone, Copy, PartialEq)]
-enum SortColumn {
-    Name,
-    Namespace,
-    Kind,
-    Created,
-}
+struct SortColumn(usize);
 
 impl SortColumn {
-    const ALL: [SortColumn; 4] = [
-        SortColumn::Name,
-        SortColumn::Namespace,
-        SortColumn::Kind,
-        SortColumn::Created,
-    ];
-
-    fn next(self) -> SortColumn {
-        let i = Self::ALL.iter().position(|c| *c == self).unwrap_or(0);
-        Self::ALL[(i + 1) % Self::ALL.len()]
-    }
-
-    /// The view-model `SortSpec` column id (the render contract's column schema).
-    fn column_id(self) -> &'static str {
-        match self {
-            SortColumn::Name => "name",
-            SortColumn::Namespace => "namespace",
-            SortColumn::Kind => "kind",
-            SortColumn::Created => "created",
-        }
+    /// Advance the sort column through the plane's schema (wrapping).
+    fn next(self, column_count: usize) -> SortColumn {
+        SortColumn((self.0 + 1) % column_count.max(1))
     }
 }
 
-/// A tabular row (geometry-local, mirrors `kaptein_core::discovery::ResourceSummary`).
+/// A tabular row (geometry-local, mirrors the render contract's `Row`). The cells are
+/// the *display* text of the row's cells, in the view-model's column order — so a
+/// lens-driven kind with N columns has N cells, and the built-in four-column view has 4.
 #[derive(Clone)]
 struct TableRow {
     name: String,
     namespace: String,
-    status: String,
-    created: String,
+    cells: Vec<String>,
 }
 
 #[tokio::main]
@@ -151,15 +216,21 @@ async fn run_event_loop(
     client: &Client,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> io::Result<()> {
-    let mut kind = Kind::Pods;
+    // Discover kinds once at startup: built-ins first, then enabled lens kinds (M2.2) —
+    // a discovered CRD with a lens becomes navigable with no recompile.
+    let kinds = all_kinds();
+    let mut kind = kinds
+        .first()
+        .cloned()
+        .unwrap_or_else(|| Kind::builtin("Pods", "", "v1", "Pod", false));
     let mut namespace: Option<String> = None; // None = all namespaces
-    let mut sort_key = SortColumn::Name;
+    let mut sort_key = SortColumn(0);
     let mut sort_descending = false;
 
     // An informer-backed live data plane (ADR-0006): seeded once, kept fresh by a
     // background watch task. Sorting/filtering and the table itself read the in-memory
     // plane — the TUI does *not* re-list the cluster per keystroke.
-    let mut plane = new_plane(client, kind.gvk(), namespace.clone());
+    let mut plane = new_plane(client, &kind, namespace.clone());
     plane
         .seed()
         .await
@@ -169,7 +240,7 @@ async fn run_event_loop(
         async move { plane.watch_loop().await }
     }));
 
-    let mut rows: Vec<TableRow> = query_plane(&plane, sort_key, sort_descending).await?;
+    let mut rows: Vec<TableRow> = query_plane(&plane, &kind, sort_key, sort_descending).await?;
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
@@ -194,7 +265,7 @@ async fn run_event_loop(
         if jump_query.is_none() && palette_query.is_none() {
             let rev = plane.mem().revision();
             if rev != last_revision {
-                rows = query_plane(&plane, sort_key, sort_descending).await?;
+                rows = query_plane(&plane, &kind, sort_key, sort_descending).await?;
                 last_revision = rev;
             }
         }
@@ -213,9 +284,9 @@ async fn run_event_loop(
         } else {
             format!(
                 " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  ::palette  d:describe  i:diagnose  q:quit ",
-                kind.label(),
+                kind.label,
                 namespace.as_deref().unwrap_or("all"),
-                sort_label(sort_key, sort_descending),
+                sort_label(&kind.headers, sort_key, sort_descending),
                 rows.len()
             )
         };
@@ -253,29 +324,35 @@ async fn run_event_loop(
                     } else {
                         Style::default()
                     };
-                    let status_style = match r.status.as_str() {
-                        "Running" | "Active" | "Ready" => Style::default().fg(Color::Green),
-                        "Pending" | "ContainerCreating" => Style::default().fg(Color::Yellow),
-                        _ => Style::default().fg(Color::Red),
-                    };
-                    Row::new(vec![
-                        Cell::from(r.name.as_str()),
-                        Cell::from(r.namespace.as_str()),
-                        Cell::from(r.status.as_str()).style(status_style),
-                        Cell::from(r.created.as_str()),
-                    ])
-                    .style(base)
+                    // The status column (index `kind.status_col`) drives cell color; the
+                    // level→color mapping is a frontend geometry choice (the view-model
+                    // owns the status *meaning*). For lens kinds, the cell text is the
+                    // lens-inferred status label.
+                    let cells: Vec<Cell> = r
+                        .cells
+                        .iter()
+                        .enumerate()
+                        .map(|(i, text)| {
+                            let cell = Cell::from(text.as_str());
+                            if Some(i) == kind.status_col {
+                                cell.style(status_style(text))
+                            } else {
+                                cell
+                            }
+                        })
+                        .collect();
+                    Row::new(cells).style(base)
                 })
                 .collect();
 
-            let widths = [
-                Constraint::Percentage(35),
-                Constraint::Percentage(25),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-            ];
+            let widths = column_widths(&kind.headers);
+            let header_cells: Vec<Cell> = kind
+                .headers
+                .iter()
+                .map(|h| Cell::from(h.as_str()))
+                .collect();
             let table = Table::new(table_rows, widths)
-                .header(Row::new(vec!["NAME", "NAMESPACE", "STATUS", "CREATED"]))
+                .header(Row::new(header_cells))
                 .block(Block::default().borders(Borders::ALL));
             // The rows are already the visible window, so no `.with_offset` is needed —
             // the selection highlight is computed against the absolute index above.
@@ -343,6 +420,7 @@ async fn run_event_loop(
                         let should_quit = execute_command(
                             cmd,
                             client,
+                            &kinds,
                             &mut kind,
                             &mut namespace,
                             &mut sort_key,
@@ -384,15 +462,14 @@ async fn run_event_loop(
                     scroll = selected.saturating_sub(page_height);
                 }
                 KeyCode::Tab if palette_query.is_none() => {
-                    kind = kind.next();
-                    // Cluster-scoped kinds (Nodes/Namespaces) have no namespace: a
-                    // namespaced list/watch for them 404s. Clear the namespace so the
-                    // plane uses a cluster-scoped API.
-                    if kind.cluster_scoped() {
+                    kind = next_kind(&kinds, &kind);
+                    // Cluster-scoped kinds have no namespace: clear it to avoid a 404 on
+                    // the namespaced list/watch.
+                    if kind.cluster_scoped {
                         namespace = None;
                     }
-                    rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
-                    rows = query_plane(&plane, sort_key, sort_descending).await?;
+                    rebuild_plane(client, &mut plane, &mut watch, &kind, namespace.clone()).await?;
+                    rows = query_plane(&plane, &kind, sort_key, sort_descending).await?;
                     last_revision = plane.mem().revision();
                     selected = 0;
                     scroll = 0;
@@ -400,15 +477,15 @@ async fn run_event_loop(
                 }
                 KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
-                    rebuild_plane(client, &mut plane, &mut watch, kind, namespace.clone()).await?;
-                    rows = query_plane(&plane, sort_key, sort_descending).await?;
+                    rebuild_plane(client, &mut plane, &mut watch, &kind, namespace.clone()).await?;
+                    rows = query_plane(&plane, &kind, sort_key, sort_descending).await?;
                     last_revision = plane.mem().revision();
                     selected = 0;
                     scroll = 0;
                     detail = None;
                 }
                 KeyCode::Char('s') if palette_query.is_none() => {
-                    sort_key = next_sort_key(sort_key);
+                    sort_key = next_sort_key(sort_key, kind.headers.len());
                     selected = 0;
                     scroll = 0;
                 }
@@ -419,11 +496,11 @@ async fn run_event_loop(
                 }
                 KeyCode::Char('d') if palette_query.is_none() => {
                     if let Some(r) = rows.get(selected) {
-                        detail = describe(client, kind, r).await.ok();
+                        detail = describe(client, &kind, r).await.ok();
                     }
                 }
                 KeyCode::Char('i') if palette_query.is_none() => {
-                    if kind == Kind::Pods
+                    if kind.is_pods()
                         && let Some(r) = rows.get(selected)
                     {
                         detail = diagnose(client, r).await.ok();
@@ -471,6 +548,24 @@ async fn run_event_loop(
     Ok(())
 }
 
+/// Map a status display text to a color (frontend geometry; the view-model owns the
+/// status *meaning*).
+fn status_style(status: &str) -> Style {
+    match status {
+        "Running" | "Active" | "Ready" => Style::default().fg(Color::Green),
+        "Pending" | "ContainerCreating" => Style::default().fg(Color::Yellow),
+        _ => Style::default().fg(Color::Red),
+    }
+}
+
+/// Equal-width column constraints (geometry) for the table, one per header.
+fn column_widths(headers: &[String]) -> Vec<Constraint> {
+    headers
+        .iter()
+        .map(|_| Constraint::Percentage(100 / headers.len().max(1) as u16))
+        .collect()
+}
+
 /// Extract a cell's display text by column index (geometry-local mapping of the
 /// view-model `Row` to the TUI table; the view-model owns the *meaning* of each cell).
 fn cell_text(cells: &[kaptein_integration::kaptein_viewmodel::Cell], idx: usize) -> String {
@@ -478,16 +573,6 @@ fn cell_text(cells: &[kaptein_integration::kaptein_viewmodel::Cell], idx: usize)
         .get(idx)
         .map(kaptein_integration::kaptein_viewmodel::cell_text)
         .unwrap_or_default()
-}
-
-/// Format a timestamp cell as a compact, local date-time string (geometry).
-fn timestamp_text(cells: &[kaptein_integration::kaptein_viewmodel::Cell], idx: usize) -> String {
-    match cells.get(idx) {
-        Some(kaptein_integration::kaptein_viewmodel::Cell::Timestamp { millis }) => {
-            format_timestamp(*millis)
-        }
-        _ => String::new(),
-    }
 }
 
 fn format_timestamp(millis: i64) -> String {
@@ -499,9 +584,12 @@ fn format_timestamp(millis: i64) -> String {
         .unwrap_or_default()
 }
 
-fn sort_label(key: SortColumn, descending: bool) -> String {
+/// The sort indicator for the status line: the active column's id (from the plane's
+/// schema) plus a direction arrow.
+fn sort_label(column_ids: &[String], key: SortColumn, descending: bool) -> String {
     let dir = if descending { "↓" } else { "↑" };
-    format!("{}{dir}", key.column_id())
+    let col = column_ids.get(key.0).map(|s| s.as_str()).unwrap_or("?");
+    format!("{col}{dir}")
 }
 
 /// Re-rank rows by fuzzy-jump score against `query`, dropping non-matches. Uses the
@@ -522,8 +610,9 @@ fn fuzzy_rerank(rows: Vec<TableRow>, query: &str) -> Vec<TableRow> {
     out
 }
 
-fn next_sort_key(key: SortColumn) -> SortColumn {
-    key.next()
+/// Advance the sort column through the plane's schema (wrapping).
+fn next_sort_key(key: SortColumn, column_count: usize) -> SortColumn {
+    key.next(column_count)
 }
 
 /// A command-palette action. The palette lists these and fuzzy-matches the typed query;
@@ -588,6 +677,7 @@ fn palette_matches(query: &str) -> Vec<PaletteCommand> {
 async fn execute_command(
     cmd: PaletteCommand,
     client: &Client,
+    kinds: &[Kind],
     kind: &mut Kind,
     namespace: &mut Option<String>,
     sort_key: &mut SortColumn,
@@ -602,10 +692,10 @@ async fn execute_command(
     let mut need_rebuild = false;
     match cmd {
         PaletteCommand::NextKind => {
-            *kind = kind.next();
+            *kind = next_kind(kinds, kind);
             // Cluster-scoped kinds have no namespace — clear it to avoid a 404 on the
             // namespaced list/watch.
-            if kind.cluster_scoped() {
+            if kind.cluster_scoped {
                 *namespace = None;
             }
             need_rebuild = true;
@@ -615,19 +705,19 @@ async fn execute_command(
             need_rebuild = true;
         }
         PaletteCommand::CycleSort => {
-            *sort_key = next_sort_key(*sort_key);
+            *sort_key = next_sort_key(*sort_key, kind.headers.len());
         }
         PaletteCommand::ToggleSortDirection => {
             *sort_descending = !*sort_descending;
         }
         PaletteCommand::DescribeSelected => {
             if let Some(r) = rows.get(*selected) {
-                *detail = describe(client, *kind, r).await.ok();
+                *detail = describe(client, kind, r).await.ok();
             }
             return Ok(false);
         }
         PaletteCommand::DiagnoseSelected => {
-            if *kind == Kind::Pods
+            if kind.is_pods()
                 && let Some(r) = rows.get(*selected)
             {
                 *detail = diagnose(client, r).await.ok();
@@ -643,10 +733,10 @@ async fn execute_command(
         }
     }
     if need_rebuild {
-        rebuild_plane(client, plane, watch, *kind, namespace.clone()).await?;
+        rebuild_plane(client, plane, watch, kind, namespace.clone()).await?;
     }
     // Re-query the (possibly rebuilt) live plane — no new API list.
-    *rows = query_plane(plane, *sort_key, *sort_descending).await?;
+    *rows = query_plane(plane, kind, *sort_key, *sort_descending).await?;
     *selected = 0;
     *scroll = 0;
     *detail = None;
@@ -659,14 +749,14 @@ async fn rebuild_plane(
     client: &Client,
     plane: &mut kaptein_integration::LivePlane,
     watch: &mut Option<tokio::task::JoinHandle<Result<(), kaptein_integration::IntegrationError>>>,
-    kind: Kind,
+    kind: &Kind,
     namespace: Option<String>,
 ) -> io::Result<()> {
     // Stop the old watch task (best-effort; the stream ends on abort).
     if let Some(handle) = watch.take() {
         handle.abort();
     }
-    *plane = new_plane(client, kind.gvk(), namespace);
+    *plane = new_plane(client, kind, namespace);
     plane
         .seed()
         .await
@@ -679,31 +769,53 @@ async fn rebuild_plane(
 }
 
 /// Build a `LivePlane` honoring the `[informer]` config policy (ADR-0006's configurable
-/// watch cap + idle TTL), so the TUI's watch budget is operator-tunable.
+/// watch cap + idle TTL), so the TUI's watch budget is operator-tunable. A lens-driven
+/// kind builds a lens plane (M2.2), so its declared columns become the plane's schema.
 fn new_plane(
     client: &Client,
-    gvk: kube::core::GroupVersionKind,
+    kind: &Kind,
     namespace: Option<String>,
 ) -> kaptein_integration::LivePlane {
     let policy = kaptein_core::config::load().informer.to_policy();
-    kaptein_integration::LivePlane::new_with_policy(client.clone(), gvk, namespace, policy)
+    match &kind.lens {
+        Some(vd) => kaptein_integration::LivePlane::new_lens_with_policy(
+            client.clone(),
+            kind.gvk.clone(),
+            namespace,
+            vd.clone(),
+            policy,
+        ),
+        None => kaptein_integration::LivePlane::new_with_policy(
+            client.clone(),
+            kind.gvk.clone(),
+            namespace,
+            policy,
+        ),
+    }
 }
 
 /// Query the live plane (sort + filter in the view-model, window in the data plane) and
-/// map the resulting `Page` of `Row`s into geometry-local table rows.
+/// map the resulting `Page` of `Row`s into geometry-local table rows. The row's cells are
+/// the plane's schema columns in order — the lens's columns for a lens-driven kind, the
+/// built-in four for a built-in kind.
 async fn query_plane(
     plane: &kaptein_integration::LivePlane,
+    kind: &Kind,
     sort_key: SortColumn,
     descending: bool,
 ) -> io::Result<Vec<TableRow>> {
-    let sort_column = sort_key.column_id();
+    let column_ids = plane.column_ids();
+    let sort_column = column_ids
+        .get(sort_key.0)
+        .cloned()
+        .unwrap_or_else(|| "name".to_string());
     use kaptein_integration::kaptein_viewmodel::DataPlane as _;
     let page = plane
         .query(&kaptein_integration::kaptein_viewmodel::Query {
             start: 0,
             end: 50_000,
             sort: Some(kaptein_integration::kaptein_viewmodel::SortSpec {
-                column: sort_column.to_string(),
+                column: sort_column,
                 descending,
             }),
             filter: None,
@@ -713,11 +825,30 @@ async fn query_plane(
     Ok(page
         .rows
         .into_iter()
-        .map(|r| TableRow {
-            name: cell_text(&r.cells, 0),
-            namespace: cell_text(&r.cells, 1),
-            status: cell_text(&r.cells, 2),
-            created: timestamp_text(&r.cells, 3),
+        .map(|r| {
+            let name = cell_text(&r.cells, kind.name_col);
+            let namespace = kind
+                .namespace_col
+                .and_then(|i| r.cells.get(i))
+                .map(kaptein_integration::kaptein_viewmodel::cell_text)
+                .unwrap_or_default();
+            // The display cells: timestamps formatted, everything else as text.
+            let cells: Vec<String> = r
+                .cells
+                .iter()
+                .enumerate()
+                .map(|(i, c)| match c {
+                    kaptein_integration::kaptein_viewmodel::Cell::Timestamp { millis } => {
+                        format_timestamp(*millis)
+                    }
+                    _ => cell_text(&r.cells, i),
+                })
+                .collect();
+            TableRow {
+                name,
+                namespace,
+                cells,
+            }
         })
         .collect())
 }
@@ -739,14 +870,14 @@ async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result
     Ok(if next.is_empty() { None } else { Some(next) })
 }
 
-async fn describe(client: &Client, kind: Kind, row: &TableRow) -> io::Result<String> {
-    let gvk = kind.gvk();
-    let ns = if kind.cluster_scoped() || row.namespace.is_empty() {
+async fn describe(client: &Client, kind: &Kind, row: &TableRow) -> io::Result<String> {
+    let gvk = &kind.gvk;
+    let ns = if kind.cluster_scoped || row.namespace.is_empty() {
         None
     } else {
         Some(row.namespace.as_str())
     };
-    kaptein_core::describe::describe_dynamic(client, &gvk, ns, &row.name)
+    kaptein_core::describe::describe_dynamic(client, gvk, ns, &row.name)
         .await
         .map_err(|e| io::Error::other(e.to_string()))
 }

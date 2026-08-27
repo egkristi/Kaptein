@@ -154,13 +154,15 @@ unowned debt. Done items are struck through.
   silently steal field ownership from Flux/Argo.
 - **OIDC token forwarding** (ADR-0007 mode 1) is a `serve`/hub-mode concern (Phase 2),
   not the MCP stdio server.
-- **No frontend consumes a lens yet.** The M2.2 engine (`kaptein-viewmodel::lens`) and the
-  eight shipped lenses under `extensions/` are validated and rendered only by
-  `kaptein viewdef validate` / `kaptein viewdef render`. The TUI still lists a hardcoded
-  five-kind `Kind` enum and does no lens discovery or CRD auto-navigation, so the lens set
-  is proven as *data* but not yet as *navigation*. This is the remaining half of M2.2, not
-  a defect in the engine — recorded here so "lenses shipped" is not read as "lenses are in
-  the UI".
+- **Lens-driven navigation landed, but the TUI's lens *rendering* is the built-in table
+  geometry.** The M2.2 engine (`kaptein-viewmodel::lens`) and the shipped lenses under
+  `extensions/` are now *navigable*: `kaptein lenses` discovers the enabled lens set, and
+  the TUI discovers lens kinds at startup (`KAPTEIN_EXTENSIONS_DIR`, defaulting to
+  `./extensions`) so a lens file dropped into the path makes its CRD navigable with no
+  recompile — the lens's declared columns become the table's columns and its status rules
+  drive the status chip. The remaining M2.2 refinement is the *falsifiable* DoD test
+  asserting a lens-declared column reaches a `Row` through the live data plane (added in
+  `kaptein-integration`), and per-lens action/health surfaces (M2.4+).
 - **`Cell::Redacted` and `Operation::SecretViewed` have exactly one producer each.**
   `SecretViewed` is emitted by `kaptein edit`'s unredacted fetch; `Cell::Redacted` is still
   only pattern-matched (`table::cell_text`), never constructed, because no surface has an

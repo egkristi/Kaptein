@@ -7,6 +7,16 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.27.0] - 2026-08-25
 
 ### Added
+- **M2.2 — lens-driven TUI navigation**:
+  - `LivePlane::new_lens` / `new_lens_with_policy` renders objects through a lens's
+    `render_row`, so the lens's declared columns become the plane's schema and its status
+    rules drive the status chip. The TUI discovers lens kinds at startup
+    (`KAPTEIN_EXTENSIONS_DIR`, defaulting to `./extensions`) and navigates them with Tab —
+    a lens file dropped into the path makes its CRD navigable with no recompile.
+  - `core::discovery::list_objects_bounded` pages full objects for lens-driven views
+    (ADR-0006); `core::extension::DiscoveredLens` now carries the resolved entrypoint so a
+    frontend can load the full `ViewDefinition`.
+  - `kaptein-integration::load_lens` is the shared load-and-validate path.
 - **#16 — `force: true` write-path guardrail made structural**:
   - `dry_run_apply_patch`'s field-ownership `force` flag is now a parameter threaded
     through `apply_patch`, and the new real write path `apply_patch_real` always applies

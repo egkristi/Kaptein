@@ -229,6 +229,34 @@ pub async fn list_objects(
     Ok(list.items)
 }
 
+/// A bounded, **full-object** page plus the next `continue` token (or `None` on the
+/// last page). This is the server-side-paginated form of [`list_objects`] for lens-driven
+/// views (M2.2): a lens reads `spec`/`status` fields, so the full body must be available,
+/// but list-heavy views must still page (ADR-0006) rather than materialize the world in
+/// one unbounded `api.list`.
+pub async fn list_objects_bounded(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    limit: u32,
+    continue_token: Option<&str>,
+) -> Result<(Vec<DynamicObject>, Option<String>), Error> {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+
+    let mut lp = ListParams::default().limit(limit.max(1));
+    if let Some(token) = continue_token {
+        lp = lp.continue_token(token);
+    }
+
+    let list: ObjectList<DynamicObject> = api.list(&lp).await.map_err(Error::Api)?;
+    let next = list.metadata.continue_.clone();
+    Ok((list.items, next))
+}
+
 /// Convert a `DynamicObject` into a display-neutral `ResourceSummary`.
 pub fn summary_of(obj: &DynamicObject, gvk: &GroupVersionKind) -> ResourceSummary {
     let kind = obj

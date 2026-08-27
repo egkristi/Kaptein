@@ -94,6 +94,9 @@ pub struct DiscoveredLens {
     pub name: String,
     /// The `group/version/kind` the lens targets (group empty for core).
     pub target: kube::core::GroupVersionKind,
+    /// The resolved path to the lens entrypoint file, so a frontend can load the full
+    /// `ViewDefinition` (columns, status rules, actions) when the kind is selected.
+    pub entrypoint: PathBuf,
 }
 
 /// Discover enabled **lens** extensions in a directory tree: walk `extension.yaml`
@@ -114,6 +117,7 @@ pub fn discover_lenses(root: &Path) -> (Vec<DiscoveredLens>, Vec<String>) {
                 id: ext.manifest.id,
                 name: ext.manifest.name,
                 target: gvk,
+                entrypoint: entry,
             }),
             Err(e) => problems.push(format!("{}: {e}", entry.display())),
         }
@@ -304,6 +308,7 @@ mod tests {
         assert_eq!(lenses[0].target.group, "postgresql.cnpg.io");
         assert_eq!(lenses[0].target.version, "v1");
         assert_eq!(lenses[0].target.kind, "Cluster");
+        assert!(lenses[0].entrypoint.ends_with("lens.yaml"));
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

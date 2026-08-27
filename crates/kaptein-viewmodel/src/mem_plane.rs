@@ -152,6 +152,11 @@ impl MemPlane {
     pub fn rows(&self) -> Vec<Row> {
         self.state.lock().expect("mem plane poisoned").rows.clone()
     }
+
+    /// The column ids of this plane's schema (the cell index of each named column).
+    pub fn schema_column_ids(&self) -> Vec<String> {
+        self.schema.column_ids.clone()
+    }
 }
 
 #[async_trait::async_trait]

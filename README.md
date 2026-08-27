@@ -295,11 +295,12 @@ Keycloak, Tekton, Velero, Karpenter, and Knative are supported *without hardcodi
 anything* — and your teams can write their own for internal CRDs and check them into Git.
 
 *Status:* the schema, validator, status/condition rule evaluation, `render_row`, the
-`extension.yaml` manifest and its `list/validate/enable/disable` lifecycle, and a lens set
-for all eight targets above ship today under [`extensions/`](./extensions) — exercised via
-`kaptein viewdef validate|schema|render` and `kaptein extension`. **No frontend discovers
-or displays a lens yet**: the TUI still navigates a fixed set of kinds, so the lens set is
-proven as *data* but not as *navigation*. Closing that gap is the remaining half of M2.2.
+`extension.yaml` manifest and its `list/validate/enable/disable` lifecycle, a lens set
+for all eight targets above, and **lens-driven navigation** ship today under
+[`extensions/`](./extensions). `kaptein lenses` discovers the enabled lens set;
+`kaptein get --lens` renders a lens against a live kind; and the **TUI now navigates
+discovered lenses** — a lens file dropped into the extension path makes its CRD
+navigable with no recompile (`KAPTEIN_EXTENSIONS_DIR`, defaulting to `./extensions`).
 
 When a lens isn't enough, escalate to a **WASM plugin** (tier 2) or a **shell-out
 integration** (tier 3) — see *Extensibility* above. Data first, code second: **this is
@@ -423,26 +424,17 @@ prod/unknown contexts) a break-glass justification. Everything else is read-only
 See [`ROADMAP.md`](./ROADMAP.md) for the full phased plan and
 [`ISSUES.md`](./ISSUES.md) for known issues; Phases 1b–3b are tracked as GitHub issues.
 
-**Known limitations you should read before relying on this** (all tracked, all open):
+**Known limitations you should read before relying on this** (all tracked):
 
-- **Log output is not yet redacted.** Resource output is — `describe` and the MCP
-  `describe` tool mask `Secret` values and sensitive-named fields — but `logs`,
-  multi-pod logs, and `--follow` return raw lines, including through the MCP `logs`
-  tool. Do not point an agent at logs you would not paste into a chat window
-  ([#22](https://github.com/egkristi/Kaptein/issues/22)).
-- **The governed MCP surface refuses many CRDs.** RBAC preflight guesses a resource
-  plural that can differ from the one the request uses, and because preflight fails
-  closed the call is rejected rather than allowed
-  ([#21](https://github.com/egkristi/Kaptein/issues/21)).
-- **The TUI can show stale rows after a watch expires** (~5 min): reconnect re-watches
-  without relisting, so objects deleted during the gap linger until the view is rebuilt
-  ([#20](https://github.com/egkristi/Kaptein/issues/20)).
-- **Lenses are data, not navigation yet.** The lens engine and the shipped lens set
-  validate and render via `kaptein viewdef`, but no frontend discovers or displays them
-  — the TUI still lists a fixed set of kinds (M2.2).
 - **Performance targets are not yet measured.** The budget in `ROADMAP.md` is a
   commitment, not a benchmark result; the kwok harness that will prove or disprove it is
   M1.8.
+
+Fixed in the v0.27.0 re-audit (closed issues, kept here for context): log redaction
+([#22](https://github.com/egkristi/Kaptein/issues/22)), MCP preflight pluralization
+([#21](https://github.com/egkristi/Kaptein/issues/21)), watch reconnect relisting
+([#20](https://github.com/egkristi/Kaptein/issues/20)), and the `force: true` write-path
+guardrail ([#16](https://github.com/egkristi/Kaptein/issues/16)).
 
 ### Install
 

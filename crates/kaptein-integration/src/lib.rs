@@ -101,6 +101,35 @@ pub async fn client_for_context(context: Option<&str>) -> Result<kube::Client, I
     Ok(kaptein_core::discovery::client_for_context(context).await?)
 }
 
+/// Load and validate a lens file into a [`kaptein_viewmodel::ViewDefinition`] (M2.2).
+///
+/// This is the shared "load a lens the frontend discovered" path: parse YAML/JSON, then
+/// refuse an invalid lens (empty problem list = valid). A lens that fails validation is
+/// surfaced as an error, never silently dropped — the same contract as `kaptein viewdef
+/// validate`.
+pub fn load_lens(
+    path: &std::path::Path,
+) -> Result<kaptein_viewmodel::ViewDefinition, IntegrationError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| IntegrationError::Internal(format!("cannot read {}: {e}", path.display())))?;
+    let value: serde_json::Value = serde_yaml::from_str(&text)
+        .map_err(|e| IntegrationError::Internal(format!("cannot parse {}: {e}", path.display())))?;
+    let vd: kaptein_viewmodel::ViewDefinition = serde_json::from_value(value).map_err(|e| {
+        IntegrationError::Internal(format!("cannot deserialize {}: {e}", path.display()))
+    })?;
+    let problems = kaptein_viewmodel::validate_viewdef(&vd);
+    if problems.is_empty() {
+        Ok(vd)
+    } else {
+        Err(IntegrationError::Internal(format!(
+            "lens {} is invalid ({} problem(s)): {}",
+            path.display(),
+            problems.len(),
+            problems.join("; ")
+        )))
+    }
+}
+
 /// The column schema of a Kubernetes resource view: `name`, `namespace`, `status`,
 /// `created`. The view-model owns *which* columns exist (semantics); the frontend owns
 /// their width in cells (geometry).
@@ -216,6 +245,11 @@ impl kaptein_viewmodel::DataPlane for KubernetesPlane {
 /// Map a watch event over a `DynamicObject` into a `RowPatch`, using the same
 /// `ResourceSummary` → `Row` mapping as `resource_row`. Bookmarks and errors produce no
 /// patch (they carry no resource change).
+///
+/// This is the *non-lens* mapping; `LivePlane::map_watch_event` is the lens-aware
+/// entry point used in production. Kept here (test-only) because it is the exact
+/// `Added`/`Modified`/`Deleted` → `RowPatch` shape the tests assert against.
+#[cfg(test)]
 fn watch_event_to_patch(
     event: &kube::api::WatchEvent<kube::core::DynamicObject>,
     gvk: &kube::core::GroupVersionKind,
@@ -238,11 +272,35 @@ fn watch_event_to_patch(
     }
 }
 
+/// The single `DynamicObject` → `Row` mapping, shared by `LivePlane`'s seed and watch
+/// delta paths. A `Some(lens)` renders through `render_row` (M2.2 — the lens's declared
+/// columns reach the data plane); `None` uses the built-in four-column `resource_row`.
+/// Split out as a free function so the M2.2 DoD is testable without a live `kube::Client`.
+pub(crate) fn map_object_with(
+    lens: Option<&kaptein_viewmodel::ViewDefinition>,
+    obj: &kube::core::DynamicObject,
+    gvk: &kube::core::GroupVersionKind,
+) -> kaptein_viewmodel::Row {
+    match lens {
+        Some(vd) => {
+            let value = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
+            kaptein_viewmodel::render_row(vd, &value)
+        }
+        None => resource_row(kaptein_core::discovery::summary_of(obj, gvk)),
+    }
+}
+
 /// A `DataPlane` that is **informer-backed and live**: it seeds a `MemPlane` from a
 /// bounded list, then a background watch task applies `Added`/`Modified`/`Deleted`
 /// deltas as `RowPatch` upserts/removes. `query` reads the live `MemPlane` (no API call
 /// per keystroke) and `subscribe` streams real deltas — the ADR-0006 "informer-based,
 /// never polling" shape for the TUI.
+///
+/// A plane is either the built-in four-column view (`name`/`namespace`/`status`/`created`)
+/// or a **lens-driven** view: when a [`kaptein_viewmodel::ViewDefinition`] is attached
+/// (M2.2), every object is mapped through `render_row`, so the lens's declared columns and
+/// status inference reach a `Row` through the data plane — not only through
+/// `kaptein viewdef render`.
 pub struct LivePlane {
     mem: kaptein_viewmodel::MemPlane,
     client: kube::Client,
@@ -252,11 +310,15 @@ pub struct LivePlane {
     /// degrade-to-list path. Shared across clones so the cap is enforced across *all*
     /// live planes in a process, not per plane (issue #25).
     informers: std::sync::Arc<kaptein_core::informer::InformerManager>,
+    /// The lens this plane renders through (M2.2). `None` = the built-in four-column
+    /// view. Its columns become the plane's schema; its status rules become the status
+    /// column's inference.
+    lens: Option<kaptein_viewmodel::ViewDefinition>,
 }
 
 impl Clone for LivePlane {
-    /// Clone shares the same in-memory `MemPlane`, Kubernetes client, and informer
-    /// manager — two handles to one live data plane (the watch task and the TUI both
+    /// Clone shares the same in-memory `MemPlane`, Kubernetes client, informer manager,
+    /// and lens — two handles to one live data plane (the watch task and the TUI both
     /// hold a handle).
     fn clone(&self) -> Self {
         Self {
@@ -265,6 +327,7 @@ impl Clone for LivePlane {
             gvk: self.gvk.clone(),
             namespace: self.namespace.clone(),
             informers: self.informers.clone(),
+            lens: self.lens.clone(),
         }
     }
 }
@@ -280,6 +343,24 @@ impl LivePlane {
             client,
             gvk,
             namespace,
+            kaptein_core::informer::InformerPolicy::default(),
+        )
+    }
+
+    /// Create a **lens-driven** live plane (M2.2): objects are rendered through the
+    /// lens's `render_row`, so the lens's declared columns + status inference are the
+    /// plane's schema. The lens's `target` GVK is authoritative — it must match `gvk`.
+    pub fn new_lens(
+        client: kube::Client,
+        gvk: kube::core::GroupVersionKind,
+        namespace: Option<String>,
+        lens: kaptein_viewmodel::ViewDefinition,
+    ) -> Self {
+        Self::new_lens_with_policy(
+            client,
+            gvk,
+            namespace,
+            lens,
             kaptein_core::informer::InformerPolicy::default(),
         )
     }
@@ -301,6 +382,29 @@ impl LivePlane {
             gvk,
             namespace,
             informers: std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy)),
+            lens: None,
+        }
+    }
+
+    /// Create a **lens-driven** live plane with an explicit informer policy. The plane's
+    /// schema is the lens's column ids, so `query` sort/filter resolve against the lens
+    /// columns (M2.2 DoD: a lens-declared column reaches a `Row` through the data plane).
+    pub fn new_lens_with_policy(
+        client: kube::Client,
+        gvk: kube::core::GroupVersionKind,
+        namespace: Option<String>,
+        lens: kaptein_viewmodel::ViewDefinition,
+        policy: kaptein_core::informer::InformerPolicy,
+    ) -> Self {
+        let column_ids: Vec<String> = lens.columns.iter().map(|c| c.id.clone()).collect();
+        let mem = kaptein_viewmodel::MemPlane::new(kaptein_viewmodel::Schema { column_ids });
+        Self {
+            mem,
+            client,
+            gvk,
+            namespace,
+            informers: std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy)),
+            lens: Some(lens),
         }
     }
 
@@ -315,30 +419,90 @@ impl LivePlane {
         &self.mem
     }
 
+    /// The plane's column schema (built-in four-column, or the lens's columns).
+    pub fn column_ids(&self) -> Vec<String> {
+        self.mem.schema_column_ids()
+    }
+
+    /// Map a `DynamicObject` into a `Row`: through the attached lens (M2.2) or the
+    /// built-in four-column `resource_row` mapping. This is the single mapping every
+    /// seed/watch delta goes through, so a lens column reaches the data plane by
+    /// construction, not only through `kaptein viewdef render`.
+    fn map_object(&self, obj: &kube::core::DynamicObject) -> kaptein_viewmodel::Row {
+        map_object_with(self.lens.as_ref(), obj, &self.gvk)
+    }
+
+    /// Map a watch event into a `RowPatch`, through the attached lens when present
+    /// (M2.2), else the built-in mapping. Added/Modified become an upsert rendered via
+    /// `map_object`; Deleted becomes a remove keyed by uid (or name).
+    fn map_watch_event(
+        &self,
+        event: &kube::api::WatchEvent<kube::core::DynamicObject>,
+    ) -> Option<kaptein_viewmodel::RowPatch> {
+        match event {
+            kube::api::WatchEvent::Added(obj) | kube::api::WatchEvent::Modified(obj) => {
+                let row = self.map_object(obj);
+                Some(kaptein_viewmodel::RowPatch::Upsert {
+                    id: row.id.clone(),
+                    row,
+                })
+            }
+            kube::api::WatchEvent::Deleted(obj) => {
+                let id = obj.metadata.uid.clone().unwrap_or_else(|| obj.name_any());
+                Some(kaptein_viewmodel::RowPatch::Remove {
+                    id: kaptein_viewmodel::RowId(id),
+                })
+            }
+            kube::api::WatchEvent::Bookmark(_) | kube::api::WatchEvent::Error(_) => None,
+        }
+    }
+
     /// Seed the plane from a **bounded** list (the "list" half of list-then-watch), paging
     /// through `limit` objects at a time so the frontend path never asks the API server
     /// to materialize the whole cluster in one unbounded `list` (issue #27 / ADR-0006).
     /// The caller then runs `watch_loop` on a background task to apply live deltas.
+    ///
+    /// A lens plane seeds **full objects** (not metadata summaries) so `render_row` can
+    /// read the `spec`/`status` fields its columns bind.
     pub async fn seed(&self) -> Result<usize, IntegrationError> {
         let mut count = 0usize;
         let mut continue_token: Option<String> = None;
         loop {
-            let (summaries, next) = kaptein_core::discovery::list_bounded(
-                &self.client,
-                &self.gvk,
-                self.namespace.as_deref(),
-                500,
-                continue_token.as_deref(),
-            )
-            .await?;
-            count += summaries.len();
-            for s in summaries {
-                let row = resource_row(s);
-                self.mem.upsert(row);
-            }
-            match next {
-                Some(t) => continue_token = Some(t),
-                None => break,
+            if self.lens.is_some() {
+                let (objs, next) = kaptein_core::discovery::list_objects_bounded(
+                    &self.client,
+                    &self.gvk,
+                    self.namespace.as_deref(),
+                    500,
+                    continue_token.as_deref(),
+                )
+                .await?;
+                count += objs.len();
+                for obj in &objs {
+                    self.mem.upsert(self.map_object(obj));
+                }
+                match next {
+                    Some(t) => continue_token = Some(t),
+                    None => break,
+                }
+            } else {
+                let (summaries, next) = kaptein_core::discovery::list_bounded(
+                    &self.client,
+                    &self.gvk,
+                    self.namespace.as_deref(),
+                    500,
+                    continue_token.as_deref(),
+                )
+                .await?;
+                count += summaries.len();
+                for s in summaries {
+                    let row = resource_row(s);
+                    self.mem.upsert(row);
+                }
+                match next {
+                    Some(t) => continue_token = Some(t),
+                    None => break,
+                }
             }
         }
         Ok(count)
@@ -408,7 +572,7 @@ impl LivePlane {
                 match event {
                     Ok(ev) => {
                         backoff_ms = 100; // healthy stream resets backoff
-                        if let Some(patch) = watch_event_to_patch(&ev, &self.gvk) {
+                        if let Some(patch) = self.map_watch_event(&ev) {
                             match patch {
                                 kaptein_viewmodel::RowPatch::Upsert { row, .. } => {
                                     self.mem.upsert(row);
@@ -608,6 +772,70 @@ mod tests {
             row.cells[2],
             kaptein_viewmodel::Cell::Status { .. }
         ));
+    }
+
+    /// The M2.2 DoD, made falsifiable: a lens-declared column reaches a `Row` through the
+    /// data plane (`map_object_with`, the seed/watch mapping), not only through
+    /// `kaptein viewdef render`. Removing the lens path in `map_object_with` fails this.
+    #[test]
+    fn lens_column_reaches_row_through_data_plane() {
+        let lens: kaptein_viewmodel::ViewDefinition = serde_json::from_value(serde_json::json!({
+            "id": "com.example.cnpg-lens",
+            "api_version": 1,
+            "target": { "group": "postgresql.cnpg.io", "version": "v1", "kind": "Cluster" },
+            "columns": [
+                { "id": "name", "header_key": "col.name", "kind": "text", "sortable": true, "field": "metadata.name" },
+                { "id": "instances", "header_key": "col.instances", "kind": "number", "sortable": true, "field": "spec.instances" },
+                { "id": "status", "header_key": "col.status", "kind": "status", "sortable": true }
+            ],
+            "status": [
+                { "field": "status.phase", "op": "eq", "value": "ClusterIsReady", "level": "ok" }
+            ]
+        }))
+        .expect("valid lens");
+
+        // A CNPG Cluster dynamic object with the spec field the `instances` column binds.
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+        let obj = kube::core::DynamicObject {
+            types: Some(kube::core::TypeMeta {
+                api_version: "postgresql.cnpg.io/v1".into(),
+                kind: "Cluster".into(),
+            }),
+            metadata: ObjectMeta {
+                name: Some("cnpg-main".into()),
+                namespace: Some("db".into()),
+                uid: Some("uid-cluster-1".into()),
+                ..Default::default()
+            },
+            data: serde_json::json!({
+                "spec": { "instances": 3 },
+                "status": { "phase": "ClusterIsReady" }
+            }),
+        };
+        let gvk = kube::core::GroupVersionKind::gvk("postgresql.cnpg.io", "v1", "Cluster");
+
+        let row = map_object_with(Some(&lens), &obj, &gvk);
+
+        // The lens's declared columns are the row's cells, in order — the `instances`
+        // number column reached the data plane, not only `viewdef render`.
+        assert_eq!(row.cells.len(), 3);
+        assert_eq!(kaptein_viewmodel::cell_text(&row.cells[0]), "cnpg-main");
+        assert!(matches!(
+            row.cells[1],
+            kaptein_viewmodel::Cell::Number { value: 3 }
+        ));
+        // The status column is inferred (status.phase == ClusterIsReady → ok).
+        assert!(matches!(
+            row.cells[2],
+            kaptein_viewmodel::Cell::Status {
+                level: kaptein_viewmodel::StatusLevel::Ok,
+                ..
+            }
+        ));
+
+        // And the *non-lens* path is unchanged: the built-in four-column mapping.
+        let builtin = map_object_with(None, &obj, &gvk);
+        assert_eq!(builtin.cells.len(), 4);
     }
 
     /// A live integration test (skipped without a cluster): seeds a `LivePlane` from the
