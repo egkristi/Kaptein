@@ -10,8 +10,8 @@ readme = "README.md"
 description = "Kaptein integration layer: binds kaptein-core to frontends, mapping core errors to a user-facing form"
 
 [dependencies]
-kaptein-core = { version = "0.28.2", path = "../kaptein-core" }
-kaptein-viewmodel = { version = "0.28.2", path = "../kaptein-viewmodel" }
+kaptein-core = { version = "0.29.0", path = "../kaptein-core" }
+kaptein-viewmodel = { version = "0.29.0", path = "../kaptein-viewmodel" }
 kube = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
