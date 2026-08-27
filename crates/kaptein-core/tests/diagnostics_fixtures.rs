@@ -88,3 +88,10 @@ fn pvc_binding_failure_is_detected() {
     let got = codes(&pod);
     assert!(got.contains(&"pvc_binding".into()), "got {got:?}");
 }
+
+#[test]
+fn taint_toleration_mismatch_is_detected() {
+    let pod = load_fixture("taint.json");
+    let got = codes(&pod);
+    assert!(got.contains(&"taint".into()), "got {got:?}");
+}

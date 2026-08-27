@@ -18,6 +18,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `name`, `namespace`, `created` (filter: `name`/`namespace`/`status`).
 
 ### Added
+- **Taint/toleration diagnostic** (M1.6): a Pending pod rejected for an untolerated taint
+  (`"N node(s) had untolerated taint {key=value: effect}"`) now surfaces as a distinct
+  `taint` finding (with the taint extracted), checked before the generic `unschedulable`
+  fallback. Added a fixture (`taint.json`) to the diagnostics corpus.
 - **`blast_radius` supports cluster-scoped resources** (M1b.3): `namespace` is now optional
   — pass `None` (or omit it in the MCP tool) to compute the blast radius of a Node,
   Namespace, or cluster-scoped CRD. The dependents traversal lists controllers/pods

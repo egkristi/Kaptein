@@ -25,11 +25,13 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
         }];
     };
 
-    // Pending: check scheduling reasons first. PVC binding is the *most specific*
-    // unschedulable signal (the scheduler tried and failed to bind a claim), so it is
-    // checked before the generic `unschedulable` fallback.
+    // Pending: check scheduling reasons first. PVC binding and taints are the *most
+    // specific* unschedulable signals, checked before the generic `unschedulable` fallback.
     if status.phase.as_deref() == Some("Pending") {
         if let Some(f) = pvc_binding_finding(status) {
+            return vec![f];
+        }
+        if let Some(f) = taint_finding(status) {
             return vec![f];
         }
         if let Some(f) = unschedulable_finding(status) {
@@ -109,6 +111,37 @@ fn unschedulable_finding(status: &PodStatus) -> Option<Finding> {
         });
     }
     None
+}
+
+/// A taint/toleration mismatch: the scheduler rejected every node because of an
+/// untolerated taint (`"N node(s) had untolerated taint {key=value: effect}"`). This is a
+/// *more specific* unschedulable cause than the generic fallback — the operator needs to
+/// add a toleration, not resize a cluster.
+fn taint_finding(status: &PodStatus) -> Option<Finding> {
+    let c = condition(status, "PodScheduled")?;
+    if c.status != "False" {
+        return None;
+    }
+    let msg = c.message.as_deref()?;
+    let lower = msg.to_ascii_lowercase();
+    if !lower.contains("untolerated taint") {
+        return None;
+    }
+    // Extract the `key=value: effect` inside the `{...}` braces, if present.
+    let taint = msg
+        .split("untolerated taint")
+        .nth(1)
+        .and_then(|s| s.split('{').nth(1))
+        .and_then(|s| s.split('}').next())
+        .map(|t| t.trim().to_string());
+    let summary = match taint {
+        Some(t) => format!("Pod cannot schedule: node taint '{t}' is not tolerated."),
+        None => "Pod cannot schedule: a node taint is not tolerated.".into(),
+    };
+    Some(Finding {
+        code: "taint".into(),
+        summary,
+    })
 }
 
 fn image_pull_finding(status: &PodStatus) -> Option<Finding> {
@@ -333,6 +366,43 @@ mod tests {
         assert!(
             f.summary.contains("db-pvc"),
             "summary should name the claim: {}",
+            f.summary
+        );
+    }
+
+    #[test]
+    fn taint_toleration_mismatch_is_detected() {
+        // A Pending pod rejected for an untolerated taint must surface as `taint` (a more
+        // specific unschedulable cause), with the taint extracted from the message.
+        let mut pod = pod_with("Pending", false);
+        if let Some(status) = &mut pod.status {
+            status.conditions = Some(vec![
+                PodCondition {
+                    type_: "Ready".into(),
+                    status: "False".into(),
+                    ..Default::default()
+                },
+                PodCondition {
+                    type_: "PodScheduled".into(),
+                    status: "False".into(),
+                    reason: Some("Unschedulable".into()),
+                    message: Some(
+                        "0/3 nodes are available: 3 node(s) had untolerated taint {dedicated=critical: NoSchedule}."
+                            .into(),
+                    ),
+                    ..Default::default()
+                },
+            ]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "taint"),
+            "expected taint finding, got {findings:?}"
+        );
+        let f = findings.iter().find(|f| f.code == "taint").unwrap();
+        assert!(
+            f.summary.contains("dedicated=critical"),
+            "summary should name the taint: {}",
             f.summary
         );
     }

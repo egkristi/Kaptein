@@ -1,0 +1,20 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": { "name": "pinned-app", "namespace": "default" },
+  "spec": {
+    "containers": [{ "name": "app", "image": "busybox" }]
+  },
+  "status": {
+    "phase": "Pending",
+    "conditions": [
+      { "type": "Ready", "status": "False", "reason": "ContainersNotReady" },
+      {
+        "type": "PodScheduled",
+        "status": "False",
+        "reason": "Unschedulable",
+        "message": "0/3 nodes are available: 3 node(s) had untolerated taint {dedicated=critical: NoSchedule}."
+      }
+    ]
+  }
+}
