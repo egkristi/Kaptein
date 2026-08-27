@@ -27,13 +27,13 @@ enum Command {
         /// Namespace (omit for cluster-scoped resources)
         #[arg(short, long)]
         namespace: Option<String>,
-        /// sort by column: name, namespace, kind, created
+        /// sort by column: name, namespace, created
         #[arg(short, long)]
         sort: Option<String>,
         /// sort descending (newest/last first)
         #[arg(long)]
         descending: bool,
-        /// case-insensitive substring filter on name/namespace/kind
+        /// case-insensitive substring filter on name/namespace/status
         #[arg(short, long)]
         filter: Option<String>,
         /// list metadata only (PartialObjectMetadata — no full object bodies)
@@ -603,7 +603,6 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 let column = match s.to_ascii_lowercase().as_str() {
                     "name" => "name",
                     "namespace" | "ns" => "namespace",
-                    "kind" => "kind",
                     "created" | "age" => "created",
                     _ => return None,
                 };

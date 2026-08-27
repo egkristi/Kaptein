@@ -12,6 +12,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   it, so a lens bound to a secret-shaped field (`data.password`, env `value`) reached the
   `Row` as plaintext. `map_object_with` now redacts the object before rendering, and a
   test asserts a Secret lens column yields the `[REDACTED]` marker, not plaintext.
+- **`kaptein get` sort/filter help was misleading**: the help advertised `--sort kind` and
+  `--filter ...kind`, but a single-GVK list has no `kind` column (every row is the same
+  kind), so `--sort kind` silently no-oped. Corrected the help and sort mapping to
+  `name`, `namespace`, `created` (filter: `name`/`namespace`/`status`).
 
 ### Added
 - **Context switching parity across read *and* manifest commands** (M1.2): `describe`,
