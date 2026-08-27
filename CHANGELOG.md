@@ -20,7 +20,9 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - **M1.8 — `MemPlane::query` no longer deep-clones the whole row set**: it now sorts and
   filters an index permutation (`sort_indices`/`filter_indices`, identical semantics to
   `sort_rows`/`filter_rows`) and clones only the windowed rows — a 50k-row view clones the
-  visible window per query instead of 50k `Row`s.
+  visible window per query instead of 50k `Row`s. The TUI now carries `total` separately
+  (`query_plane` returns `(rows, total)`), so the "N rows" status and `G`/`j` navigation
+  use the true post-filter count, decoupled from the materialized window.
 - **PVC-binding diagnostic** (M1.6): a Pending pod whose `PodScheduled` condition carries
   `persistentvolumeclaim "<name>" not found` now surfaces as `pvc_binding` (with the claim
   name extracted) — checked before the generic `unschedulable` fallback. Added a fixture

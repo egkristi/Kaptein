@@ -126,9 +126,11 @@ Milestones:
       **`MemPlane::query` no longer deep-clones the whole row set:** it sorts/filters an
       index permutation (`sort_indices`/`filter_indices`, same semantics as
       `sort_rows`/`filter_rows`) and clones only the windowed rows — a 50k-row view now
-      clones the visible window, not 50k `Row`s per frame. Still open: windowing
-      `query_plane` in the TUI (query the visible window + carry `total`), and the kwok
-      harness that measures the p99 budget.*
+      clones the visible window, not 50k `Row`s per frame. **The TUI now carries `total`
+      separately** (`query_plane` returns `(rows, total)`), so the "N rows" status line and
+      the `G`/`j` navigation use the true post-filter count, decoupled from the
+      materialized window. Still open: querying *only* the visible window (a deeper nav
+      refactor), and the kwok harness that measures the p99 budget.*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 

@@ -240,7 +240,7 @@ async fn run_event_loop(
         async move { plane.watch_loop().await }
     }));
 
-    let mut rows: Vec<TableRow> = query_plane(&plane, &kind, sort_key, sort_descending).await?;
+    let (mut rows, mut total) = query_plane(&plane, &kind, sort_key, sort_descending).await?;
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
@@ -265,7 +265,10 @@ async fn run_event_loop(
         if jump_query.is_none() && palette_query.is_none() {
             let rev = plane.mem().revision();
             if rev != last_revision {
-                rows = query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                let (new_rows, new_total) =
+                    query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                rows = new_rows;
+                total = new_total;
                 last_revision = rev;
             }
         }
@@ -287,7 +290,7 @@ async fn run_event_loop(
                 kind.label,
                 namespace.as_deref().unwrap_or("all"),
                 sort_label(&kind.headers, sort_key, sort_descending),
-                rows.len()
+                total
             )
         };
 
@@ -458,7 +461,7 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Char('j') | KeyCode::Down if palette_query.is_none() => {
-                    selected = (selected + 1).min(rows.len().saturating_sub(1));
+                    selected = (selected + 1).min(total.saturating_sub(1));
                     if selected >= scroll + page_height {
                         scroll += 1;
                     }
@@ -474,7 +477,7 @@ async fn run_event_loop(
                     scroll = 0;
                 }
                 KeyCode::Char('G') if palette_query.is_none() => {
-                    selected = rows.len().saturating_sub(1);
+                    selected = total.saturating_sub(1);
                     scroll = selected.saturating_sub(page_height);
                 }
                 KeyCode::Tab if palette_query.is_none() => {
@@ -485,7 +488,10 @@ async fn run_event_loop(
                         namespace = None;
                     }
                     rebuild_plane(client, &mut plane, &mut watch, &kind, namespace.clone()).await?;
-                    rows = query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                    let (new_rows, new_total) =
+                        query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                    rows = new_rows;
+                    total = new_total;
                     last_revision = plane.mem().revision();
                     selected = 0;
                     scroll = 0;
@@ -494,7 +500,10 @@ async fn run_event_loop(
                 KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
                     rebuild_plane(client, &mut plane, &mut watch, &kind, namespace.clone()).await?;
-                    rows = query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                    let (new_rows, new_total) =
+                        query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                    rows = new_rows;
+                    total = new_total;
                     last_revision = plane.mem().revision();
                     selected = 0;
                     scroll = 0;
@@ -752,7 +761,9 @@ async fn execute_command(
         rebuild_plane(client, plane, watch, kind, namespace.clone()).await?;
     }
     // Re-query the (possibly rebuilt) live plane — no new API list.
-    *rows = query_plane(plane, kind, *sort_key, *sort_descending).await?;
+    *rows = query_plane(plane, kind, *sort_key, *sort_descending)
+        .await?
+        .0;
     *selected = 0;
     *scroll = 0;
     *detail = None;
@@ -811,15 +822,17 @@ fn new_plane(
 }
 
 /// Query the live plane (sort + filter in the view-model, window in the data plane) and
-/// map the resulting `Page` of `Row`s into geometry-local table rows. The row's cells are
-/// the plane's schema columns in order — the lens's columns for a lens-driven kind, the
-/// built-in four for a built-in kind.
+/// map the resulting `Page` of `Row`s into geometry-local table rows. Returns the rows
+/// **and** the total matching count (`page.total`), so the TUI can show "N rows" and jump
+/// to the bottom (`G`) without materializing the whole set — the M1.8 windowing fix.
+/// The row's cells are the plane's schema columns in order — the lens's columns for a
+/// lens-driven kind, the built-in four for a built-in kind.
 async fn query_plane(
     plane: &kaptein_integration::LivePlane,
     kind: &Kind,
     sort_key: SortColumn,
     descending: bool,
-) -> io::Result<Vec<TableRow>> {
+) -> io::Result<(Vec<TableRow>, usize)> {
     let column_ids = plane.column_ids();
     let sort_column = column_ids
         .get(sort_key.0)
@@ -838,7 +851,8 @@ async fn query_plane(
         })
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
-    Ok(page
+    let total = page.total;
+    let rows = page
         .rows
         .into_iter()
         .map(|r| {
@@ -866,7 +880,8 @@ async fn query_plane(
                 cells,
             }
         })
-        .collect())
+        .collect();
+    Ok((rows, total))
 }
 
 async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result<Option<String>> {
