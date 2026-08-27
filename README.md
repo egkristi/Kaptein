@@ -501,6 +501,25 @@ cargo build --release
 
 Point `KUBECONFIG` at any cluster to test; read-only commands never mutate the cluster.
 
+### Shell completions
+
+`kaptein completions <shell>` emits tab-completion for the whole CLI (subcommands, flags,
+and their arguments), generated from the same clap definitions the parser uses — so it
+never drifts from the command surface:
+
+```bash
+# bash
+kaptein completions bash > ~/.local/share/bash-completion/completions/kaptein
+# zsh
+kaptein completions zsh > "${fpath[1]}/_kaptein"
+# fish
+kaptein completions fish > ~/.config/fish/completions/kaptein.fish
+# PowerShell
+kaptein completions powershell > kaptein.ps1   # then dot-source it in $PROFILE
+```
+
+Supported shells: `bash`, `elvish`, `fish`, `powershell`, `zsh`.
+
 ---
 
 ## License

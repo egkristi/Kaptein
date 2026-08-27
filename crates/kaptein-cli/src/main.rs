@@ -94,6 +94,13 @@ enum Command {
     },
     /// Print the versioned JSON Schema for view definitions (for CI/PR review).
     ViewdefSchema,
+    /// Generate shell completions for a supported terminal (bash, elvish, fish,
+    /// powershell, zsh).
+    Completions {
+        /// shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Render a lens against a live (or fixture) resource as the render contract's Row.
     ViewdefRender {
         /// path to a lens YAML/JSON file
@@ -711,6 +718,17 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             // release implements. Embedded (not `include_str!`) so `cargo publish`
             // packages it correctly.
             print!("{}", schema::VIEWDEF_SCHEMA);
+            Ok(())
+        }
+        Command::Completions { shell } => {
+            // Emit shell completions for the whole CLI (subcommands, flags, and their
+            // arguments) via clap_complete — the same definitions the parser uses, so
+            // completions can never drift from the command surface. `Shell` also derives
+            // `ValueEnum`, so `--shell` is a validated choice rather than a free string.
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
             Ok(())
         }
         Command::ViewdefRender { file, resource } => {
