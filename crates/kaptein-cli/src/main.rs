@@ -229,6 +229,9 @@ enum Command {
         /// page size for the bounded (continue-token) seed
         #[arg(long, default_value_t = 500)]
         limit: u32,
+        /// stop after this many change events (0 = seed only, no watch)
+        #[arg(long, default_value_t = 0)]
+        max: usize,
     },
     /// Server-side dry-run a YAML manifest (validate without mutating the cluster).
     Apply {
@@ -1192,13 +1195,24 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             gvk,
             namespace,
             limit,
+            max,
         } => {
             let gvk = parse_gvk(&gvk);
             let store = kaptein_core::store::InformerStore::new();
             // The bounded, metadata-only informer store (ADR-0006) — this is the caller
             // that proves `run_informer` is reachable outside its own tests (issue #18).
-            kaptein_core::store::run_informer(&client, &gvk, namespace.as_deref(), &store, limit)
-                .await?;
+            // `--max 0` (default) seeds and returns; `--max N` also applies N watch
+            // deltas before returning, so the command terminates instead of watching
+            // forever.
+            kaptein_core::store::run_informer(
+                &client,
+                &gvk,
+                namespace.as_deref(),
+                &store,
+                limit,
+                Some(max),
+            )
+            .await?;
             let snap = store.snapshot();
             println!("watch-store {gvk:?}: {} objects in store", snap.len());
             for s in snap {

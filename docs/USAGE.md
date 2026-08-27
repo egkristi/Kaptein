@@ -156,7 +156,8 @@ kaptein get --gvk v1/Pod --metadata
 kaptein get --context staging --gvk v1/Service
 ```
 
-Sortable columns: `name`, `namespace`, `kind`, `created` (or `age`).
+Sortable columns: `name`, `namespace`, `created` (or `age`). Filtering is a
+case-insensitive substring match over `name`/`namespace`/`status`.
 
 ### 3.2 Describing — `describe`
 
@@ -207,6 +208,8 @@ kaptein watch --gvk v1/Pod --namespace prod --max 50
 
 # Informer-backed bounded store (ADR-0006)
 kaptein watch-store --gvk v1/Pod --namespace prod --limit 500
+# --max 0 (default): seed only, then snapshot and exit (no live watch)
+kaptein watch-store --gvk v1/Pod --namespace prod --max 20  # apply 20 deltas, then exit
 ```
 
 ### 3.7 RBAC preflight — `can` and `preflight`
@@ -256,7 +259,7 @@ kaptein evict --name my-pod -n default --confirm
 kaptein drain --name node-1                                 # read-only preview, never evicts
 
 # Ephemeral debug container
-kaptein debug-containers --name my-pod -n default
+kaptein debug-containers --pod my-pod -n default
 kaptein debug --pod my-pod -n default --name debug --image busybox -- sleep 3600 --confirm
 ```
 
@@ -266,7 +269,13 @@ kaptein debug --pod my-pod -n default --name debug --image busybox -- sleep 3600
 kaptein exec --pod my-pod -n default -- ls -la
 kaptein exec --pod my-pod -n default --container sidecar -- cat /etc/hosts
 kaptein exec --pod my-pod -n default --tty -- /bin/sh        # interactive
+```
 
+`exec` streams combined stdout/stderr and surfaces the remote exit status: a command
+that fails inside the container (e.g. `echo` not found in a distroless image, or a
+non-zero exit) is reported as an error, not a silent empty success.
+
+```bash
 kaptein port-forward --pod my-pod -n default --port 8080
 kaptein port-forward --pod my-pod -n default --port 5432 --local 15432
 kaptein port-forward --pod my-pod -n default --port 80 --name web-dev   # persistent

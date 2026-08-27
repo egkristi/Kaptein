@@ -154,12 +154,17 @@ fn row_key(obj: &DynamicObject) -> RowKey {
 /// `watchring::watch_into_ring`: it seeds the store from a bounded, **metadata-only**
 /// list (ADR-0006 `PartialObjectMetadata`), then applies watch deltas — **reconnecting
 /// with backoff and relisting on watch expiry/410**, so the store never goes stale.
+///
+/// `max_events` bounds the watch: `Some(n)` returns after applying `n` change events
+/// (leaving the store seeded + deltas applied), `None` watches forever (the background
+/// informer shape). A `Some(0)` watches nothing — the store holds only the seed.
 pub async fn run_informer(
     client: &Client,
     gvk: &GroupVersionKind,
     namespace: Option<&str>,
     store: &InformerStore,
     limit: u32,
+    max_events: Option<usize>,
 ) -> Result<(), Error> {
     let ar = ApiResource::from_gvk(gvk);
     let api: Api<DynamicObject> = match namespace {
@@ -199,12 +204,78 @@ pub async fn run_informer(
         match next {
             Some(next) => continue_token = Some(next),
             None => {
-                // Watch from the last page's resource version (and reconnect forever).
                 let rv = rv.unwrap_or_else(|| "0".to_string());
-                watch_from(client, gvk, namespace, store, &rv).await;
-                return Ok(());
+                match max_events {
+                    // Seed-only: no watch.
+                    Some(0) => return Ok(()),
+                    // Bounded watch: apply N events, then return.
+                    Some(n) => {
+                        watch_from_until(client, gvk, namespace, store, &rv, n).await;
+                        return Ok(());
+                    }
+                    // Unbounded background watch (reconnect forever).
+                    None => {
+                        watch_from(client, gvk, namespace, store, &rv).await;
+                        return Ok(());
+                    }
+                }
             }
         }
+    }
+}
+
+/// Watch from `resource_version`, applying at most `max_events` change events before
+/// returning (the bounded form used by `kaptein watch-store` — the store keeps the seed
+/// plus the observed deltas, and the caller snapshots it). Reconnects with backoff on a
+/// transient watch error, but returns as soon as `max_events` have been applied.
+async fn watch_from_until(
+    client: &Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    store: &InformerStore,
+    resource_version: &str,
+    max_events: usize,
+) {
+    let ar = ApiResource::from_gvk(gvk);
+    let api: Api<DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+    let mut backoff_ms: u64 = 100;
+    let mut current_rv = resource_version.to_string();
+    let mut applied = 0usize;
+    use futures_util::StreamExt;
+
+    while applied < max_events {
+        let stream = match api.watch(&WatchParams::default(), &current_rv).await {
+            Ok(s) => s,
+            Err(_) => {
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(5_000);
+                if let Ok(list) = api.list_metadata(&ListParams::default().limit(1)).await
+                    && let Some(rv) = list.metadata.resource_version
+                {
+                    current_rv = rv;
+                }
+                continue;
+            }
+        };
+        let mut stream = Box::pin(stream);
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(ev) => {
+                    backoff_ms = 100;
+                    store.apply(&ev, gvk);
+                    applied += 1;
+                    if applied >= max_events {
+                        return;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(5_000);
     }
 }
 

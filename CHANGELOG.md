@@ -16,6 +16,17 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `list_objects_with_selector`, and `list_metadata_bounded_with_selector`, so a `get -l`
   filters at the API server (matching `kubectl get -l`), across the summary, lens, and
   metadata paths.
+- **`kaptein watch-store` hung forever (#36)** — it called `run_informer`, whose watch
+  loop runs indefinitely, so the seed-then-snapshot code was unreachable and the command
+  never printed or exited. `run_informer` now takes a `max_events: Option<usize>` bound,
+  and `watch-store` gains `--max` (default 0 = seed-only), so it seeds, applies any
+  requested deltas, and returns.
+- **`kaptein exec` silently returned exit 0 with no output on remote failure (#37)** —
+  `exec` awaited `AttachedProcess::join()` but never read the remote exit status, which
+  kube delivers on the separate `take_status()` channel, so a command that failed inside
+  the container (e.g. `echo` not found in a distroless image) was silently discarded.
+  `exec` now reads `take_status()` and surfaces a `Failure` status (`NonZeroExitCode`,
+  `InternalError`, …) as an error.
 
 ### Added
 - **M1.8 — the query p99 budget is now measured, not aspirational**:

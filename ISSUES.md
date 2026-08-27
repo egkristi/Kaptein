@@ -60,9 +60,16 @@ into the Phase 2 write path — the force flag is now a parameter, `apply_patch`
 `force && !dry_run`, and the real write path `apply_patch_real` always applies with
 `force: false`; a test asserts the real path never forces), #17 (`kaptein edit` redaction
 round-trip — fixed by `RedactionPolicy::Unredacted` + `SecretViewed` audit, commit
-42ce99f) and #18 (watch reconnect — `LivePlane::watch_loop` now reconnects with backoff
-and `run_informer` has a caller, commit 59b421a). See *Re-audit findings* below for what
-those fixes did **not** cover.
+42ce99f), #18 (watch reconnect — `LivePlane::watch_loop` now reconnects with backoff
+and `run_informer` has a caller, commit 59b421a), #36 (`kaptein watch-store` hung forever
+— it called `run_informer`, whose watch loop runs indefinitely, so the seed-then-snapshot
+code was never reached; `run_informer` now takes a `max_events` bound, and `watch-store`
+gains `--max` (default 0 = seed-only), so it seeds and returns), and #37 (`kaptein exec`
+silently returned exit 0 with no output when the remote command failed inside the
+container — e.g. `echo` not found in a distroless image — because `AttachedProcess::join`
+does not carry the remote exit status, which arrives on the separate `take_status`
+channel; `exec` now reads that channel and surfaces a `Failure` status). See *Re-audit
+findings* below for what those fixes did **not** cover.
 
 ### Re-audit findings (v0.27.0) — all fixed (issues #20–#31)
 

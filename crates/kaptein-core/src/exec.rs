@@ -79,10 +79,30 @@ pub async fn exec(
     let (out_res, err_res) = tokio::join!(stdout_fut, stderr_fut);
     out_res?;
     err_res?;
+
+    // The remote exit status is delivered on a separate channel (`take_status`), not by
+    // `join()` (which only reports the attach task's own result). Read it and surface a
+    // failure so a command that fails inside the container — e.g. `echo` not found in a
+    // distroless image — is reported instead of silently returning empty with exit 0.
+    let status_fut = attached.take_status();
     attached
         .join()
         .await
         .map_err(|e| Error::Internal(e.to_string()))?;
+    if let Some(status) = status_fut {
+        let status = status.await;
+        if let Some(status) = status
+            && status.status.as_deref() == Some("Failure")
+        {
+            let reason = status.reason.unwrap_or_else(|| "exec failed".into());
+            let message = status
+                .message
+                .unwrap_or_else(|| "remote command failed".into());
+            return Err(Error::Internal(format!(
+                "exec failed ({reason}): {message}"
+            )));
+        }
+    }
 
     let mut output = stdout_buf;
     output.push_str(&stderr_buf);
