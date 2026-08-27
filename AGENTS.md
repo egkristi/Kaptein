@@ -11,6 +11,22 @@ Guidance for AI coding agents working in this repository. The product is **Kapte
   are thin projections of one renderer-agnostic view-model.
 - **Target platforms:** Linux/macOS/Windows native + WASM (browser) + headless/CI.
 
+## Workflow
+
+The standing workflow for every session, in order:
+
+1. **Solve open work** — resolve open GitHub issues
+   (https://github.com/egkristi/Kaptein/issues) and the tracked items in `ISSUES.md`.
+2. **Ship the roadmap** — implement the planned features in `ROADMAP.md`, one milestone
+   at a time, landing on the shared view-model.
+3. **Register new issues** — if any problem, bug, or follow-up arises during the work
+   that is not fixed in the same change, register it as a GitHub issue (with a repro
+   where applicable) rather than leaving it undocumented.
+
+Commit and push per completed feature; test and verify before committing (see
+*Build & test commands*); keep `ROADMAP.md`/`ISSUES.md`/`CHANGELOG.md` in sync with each
+change so the issue tracker and the roadmap stay the source of truth.
+
 ## Architecture rule (enforce this in every change)
 
 Layer dependencies are strictly one-directional:
