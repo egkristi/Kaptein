@@ -276,6 +276,12 @@ fn watch_event_to_patch(
 /// delta paths. A `Some(lens)` renders through `render_row` (M2.2 — the lens's declared
 /// columns reach the data plane); `None` uses the built-in four-column `resource_row`.
 /// Split out as a free function so the M2.2 DoD is testable without a live `kube::Client`.
+///
+/// **Redaction (M1.7):** the object is redacted *before* `render_row` so a lens that
+/// binds a column to a secret-shaped field (`data.password`, a `Secret`'s `data.*`, an
+/// env `value` paired with a sensitive `name`) never reaches a `Row` as plaintext — the
+/// same choke point that protects `describe` and the MCP surface. Without this, a
+/// lens-driven view could leak secret values that the built-in four-column path masks.
 pub(crate) fn map_object_with(
     lens: Option<&kaptein_viewmodel::ViewDefinition>,
     obj: &kube::core::DynamicObject,
@@ -283,7 +289,11 @@ pub(crate) fn map_object_with(
 ) -> kaptein_viewmodel::Row {
     match lens {
         Some(vd) => {
-            let value = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
+            // Redact a *copy* of the object (redact_object is in-place) before rendering,
+            // so lens columns read masked values — never plaintext secrets.
+            let mut redacted = obj.clone();
+            kaptein_core::redact::redact_object(&mut redacted);
+            let value = serde_json::to_value(&redacted).unwrap_or(serde_json::Value::Null);
             kaptein_viewmodel::render_row(vd, &value)
         }
         None => resource_row(kaptein_core::discovery::summary_of(obj, gvk)),
@@ -836,6 +846,55 @@ mod tests {
         // And the *non-lens* path is unchanged: the built-in four-column mapping.
         let builtin = map_object_with(None, &obj, &gvk);
         assert_eq!(builtin.cells.len(), 4);
+    }
+
+    /// M1.7 DoD (lens path): a lens that binds a column to a secret-shaped field must
+    /// not leak plaintext — `map_object_with` redacts the object before `render_row`.
+    #[test]
+    fn lens_column_does_not_leak_secret_values() {
+        // A lens that (wrongly) binds a column directly to a secret value.
+        let lens: kaptein_viewmodel::ViewDefinition = serde_json::from_value(serde_json::json!({
+            "id": "com.example.leaky-lens",
+            "api_version": 1,
+            "target": { "group": "", "version": "v1", "kind": "Secret" },
+            "columns": [
+                { "id": "name", "header_key": "col.name", "kind": "text", "sortable": true, "field": "metadata.name" },
+                { "id": "password", "header_key": "col.password", "kind": "text", "sortable": true, "field": "data.password" }
+            ]
+        }))
+        .expect("valid lens");
+
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+        let obj = kube::core::DynamicObject {
+            types: Some(kube::core::TypeMeta {
+                api_version: "v1".into(),
+                kind: "Secret".into(),
+            }),
+            metadata: ObjectMeta {
+                name: Some("db-secret".into()),
+                namespace: Some("default".into()),
+                uid: Some("uid-secret-1".into()),
+                ..Default::default()
+            },
+            // A Secret's data field holds base64-encoded values; the raw JSON has the
+            // sensitive key `data` → `password` which redaction must mask.
+            data: serde_json::json!({
+                "data": { "password": "aHVudGVyMg==" },
+                "stringData": { "token": "supersecret" }
+            }),
+        };
+        let gvk = kube::core::GroupVersionKind::gvk("", "v1", "Secret");
+
+        let row = map_object_with(Some(&lens), &obj, &gvk);
+
+        // The name column is fine; the password column must be masked, not plaintext.
+        assert_eq!(kaptein_viewmodel::cell_text(&row.cells[0]), "db-secret");
+        let password_cell = kaptein_viewmodel::cell_text(&row.cells[1]);
+        assert!(
+            !password_cell.contains("hunter") && !password_cell.contains("aHVudGVyMg=="),
+            "lens column must not leak secret values, got {password_cell:?}"
+        );
+        assert_eq!(password_cell, "[REDACTED]", "expected the redaction marker");
     }
 
     /// A live integration test (skipped without a cluster): seeds a `LivePlane` from the

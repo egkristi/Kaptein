@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+- **#35 — lens-driven views leak secret values (High)**: the lens render path
+  (`map_object_with`) serialized the object and fed it to `render_row` without redacting
+  it, so a lens bound to a secret-shaped field (`data.password`, env `value`) reached the
+  `Row` as plaintext. `map_object_with` now redacts the object before rendering, and a
+  test asserts a Secret lens column yields the `[REDACTED]` marker, not plaintext.
+
 ### Added
 - **PVC-binding diagnostic** (M1.6): a Pending pod whose `PodScheduled` condition carries
   `persistentvolumeclaim "<name>" not found` now surfaces as `pvc_binding` (with the claim

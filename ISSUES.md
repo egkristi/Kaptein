@@ -174,7 +174,9 @@ unowned debt. Done items are struck through.
 - **`Cell::Redacted` and `Operation::SecretViewed` have exactly one producer each.**
   `SecretViewed` is emitted by `kaptein edit`'s unredacted fetch; `Cell::Redacted` is still
   only pattern-matched (`table::cell_text`), never constructed, because no surface has an
-  unmask-in-place affordance. M1.7 keeps that bullet open deliberately.
+  unmask-in-place affordance. M1.7 keeps that bullet open deliberately. *(The lens render
+  path no longer leaks: `map_object_with` redacts the object before `render_row`, so a
+  lens bound to a secret field reads the `[REDACTED]` marker — issue #35.)*
 
 ## Hygiene notes
 
