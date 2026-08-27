@@ -14,8 +14,8 @@ name = "kaptein-tui"
 path = "src/main.rs"
 
 [dependencies]
-kaptein-viewmodel = { version = "0.27.0", path = "../kaptein-viewmodel" }
-kaptein-integration = { version = "0.27.0", path = "../kaptein-integration" }
+kaptein-viewmodel = { version = "0.28.0", path = "../kaptein-viewmodel" }
+kaptein-integration = { version = "0.28.0", path = "../kaptein-integration" }
 kube = { workspace = true }
 k8s-openapi = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

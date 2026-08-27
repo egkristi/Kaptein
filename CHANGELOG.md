@@ -4,7 +4,7 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.27.0] - 2026-08-25
+## [0.28.0] - 2026-08-27
 
 ### Added
 - **M2.2 — lens-driven TUI navigation**:
@@ -17,12 +17,6 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     (ADR-0006); `core::extension::DiscoveredLens` now carries the resolved entrypoint so a
     frontend can load the full `ViewDefinition`.
   - `kaptein-integration::load_lens` is the shared load-and-validate path.
-- **#16 — `force: true` write-path guardrail made structural**:
-  - `dry_run_apply_patch`'s field-ownership `force` flag is now a parameter threaded
-    through `apply_patch`, and the new real write path `apply_patch_real` always applies
-    with `force: false` — it can never silently steal field ownership from
-    Flux/Argo/GitOps. `apply_patch` refuses `force && !dry_run` outright, and a test
-    asserts the real path never forces.
 - **M2.2 — lens discovery (`kaptein lenses`)**:
   - `kaptein-core::extension::discover_lenses` walks configured extension paths, resolves
     each lens entrypoint's `target` into a `DiscoveredLens` GVK, and skips non-lens
@@ -33,6 +27,9 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     (`core::discovery::list_objects`) and renders each through `render_row` — lens
     columns + lens-inferred status, the first real surface that consumes a lens (not
     just the `viewdef render` fixture path).
+- **CLI — shell completions**: `kaptein completions --shell <bash|elvish|fish|powershell|zsh>`
+  emits completions for the whole command surface (via `clap_complete`), so completions
+  can never drift from the parser definitions.
 - **M2.0c — informer lifecycle policy (ADR-0006)**:
   - `kaptein-core::informer::InformerManager` — lazy per-view `register`/`touch`/
     `release`, LRU `evict_idle` with TTL, and a hard cap that returns `Denied`
@@ -56,6 +53,24 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     both `dry_run_apply` create and `dry_run_apply_patch` apply paths) against a
     cluster, self-cleaning in a throwaway namespace and gated on `KAPTEIN_LIVE_TESTS=1`
     so the default run stays hermetic.
+
+### Fixed
+- **#16 — `force: true` write-path guardrail made structural**: `dry_run_apply_patch`'s
+  field-ownership `force` flag is now a parameter threaded through `apply_patch`, and the
+  new real write path `apply_patch_real` always applies with `force: false` — it can never
+  silently steal field ownership from Flux/Argo/GitOps. `apply_patch` refuses
+  `force && !dry_run` outright, and a test asserts the real path never forces.
+- **Re-audit findings #20–#32** (external re-audit of the v0.27.0 artifact, all fixed):
+  watch reconnect now relists and reconciles (#20); MCP preflight pluralizes via kube's
+  pluralizer (#21); logs are redaction-aware (#22); the Krew manifest is rendered at
+  release time (#23); `install.sh` cosign-verifies `SHA256SUMS` (#24); `InformerManager`
+  is wired into `LivePlane` (#25) with LRU admission (#26); the bounded list path is on
+  the frontend seed (#27); the TUI re-queries only on a revision change (#28); Secret
+  annotation redaction is narrowed (#29); dead `VERSION_TAG` removed (#30); the container
+  image is published and signed to GHCR (#31); the dual sort/filter collapsed into the
+  view-model and the layer rule is enforced in CI (#32).
+
+## [0.27.0] - 2026-08-25
 
 ### Added
 - **M2.2 — status-rule rendering (lens → render contract)**:
