@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+- **`kaptein logs --name … --regex …` silently ignored the regex (#38).** The
+  single-pod **non-follow** path (`pod_logs`) never applied `--regex` — the filter was
+  only wired into the `--follow` streaming branch and the `--selector` (`multi_pod_logs`)
+  branch. The single-pod `--json` path had the same gap. Both now compile and apply the
+  regex filter, so all four log paths honor `--regex` consistently.
+
 ### Added
 - **Dynamic (live-cluster) shell completion.** `kaptein completions <shell>` only emits
   static flags/subcommands; now the CLI also ships a dynamic completer

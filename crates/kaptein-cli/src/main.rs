@@ -984,6 +984,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             // JSON mode: parse JSON log lines into typed columns. Applies to both
             // single-pod and multi-pod paths; plain lines fall back to `_raw`.
             if json {
+                // JSON mode honors `--regex` too: filter raw lines before parsing, so
+                // the typed columns reflect only matching lines (consistent with the
+                // plain single-pod and multi-pod paths).
+                let re = regex
+                    .as_deref()
+                    .map(regex::Regex::new)
+                    .transpose()
+                    .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
                 let raw_lines: Vec<String> = match name.as_deref() {
                     Some(pod_name) => {
                         let logs = kaptein_core::describe::pod_logs(
@@ -993,7 +1001,10 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                             Some(tail),
                         )
                         .await?;
-                        logs.into_iter().map(|(_, line)| line).collect()
+                        logs.into_iter()
+                            .map(|(_, line)| line)
+                            .filter(|line| re.as_ref().is_none_or(|r| r.is_match(line)))
+                            .collect()
                     }
                     None => {
                         let lines = kaptein_core::describe::multi_pod_logs(
@@ -1078,7 +1089,20 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                             Some(tail),
                         )
                         .await?;
+                        // Apply the regex filter here too — the single-pod non-follow
+                        // path must honor `--regex` exactly like the `follow` and
+                        // `--selector` paths do (it previously ignored it).
+                        let re = regex
+                            .as_deref()
+                            .map(regex::Regex::new)
+                            .transpose()
+                            .map_err(|e| kaptein_core::Error::Internal(e.to_string()))?;
                         for (container, line) in logs {
+                            if let Some(re) = &re
+                                && !re.is_match(&line)
+                            {
+                                continue;
+                            }
                             println!("[{container}] {line}");
                         }
                     }
