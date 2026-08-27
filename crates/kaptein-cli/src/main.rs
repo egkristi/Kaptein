@@ -131,6 +131,9 @@ enum Command {
         /// namespace
         #[arg(short = 'n', long, default_value = "default")]
         namespace: String,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// YAML-describe a single resource.
     Describe {
@@ -143,6 +146,9 @@ enum Command {
         /// namespace (omit for cluster-scoped)
         #[arg(short = 'n', long)]
         namespace: Option<String>,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Tail recent logs from a pod.
     Logs {
@@ -167,6 +173,9 @@ enum Command {
         /// parse JSON log lines into typed columns (M1.2 "JSON -> columns")
         #[arg(long)]
         json: bool,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Run the governed MCP server over stdio (read-only).
     Mcp,
@@ -868,7 +877,16 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             }
             Ok(())
         }
-        Command::Diagnose { name, namespace } => {
+        Command::Diagnose {
+            name,
+            namespace,
+            context,
+        } => {
+            // Use the context-specific client when --context is supplied.
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let pod = kaptein_core::pods::get_pod(&client, &namespace, &name).await?;
             let findings = kaptein_core::diagnostics::diagnose(&pod);
             if findings.is_empty() {
@@ -884,8 +902,15 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             gvk,
             name,
             namespace,
+            context,
         } => {
             let gvk = parse_gvk(&gvk);
+            // Use the context-specific client when --context is supplied (k9s-parity
+            // context switching, the same as `get --context`).
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let yaml = kaptein_core::describe::describe_dynamic(
                 &client,
                 &gvk,
@@ -904,7 +929,13 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             tail,
             follow,
             json,
+            context,
         } => {
+            // Use the context-specific client when --context is supplied.
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             // JSON mode: parse JSON log lines into typed columns. Applies to both
             // single-pod and multi-pod paths; plain lines fall back to `_raw`.
             if json {
