@@ -14,9 +14,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   test asserts a Secret lens column yields the `[REDACTED]` marker, not plaintext.
 
 ### Added
-- **Context switching parity across the read commands** (M1.2): `describe`, `diagnose`,
-  `logs`, `events`, `overview`, and `watch` now accept `--context` (matching `get`), so an
-  operator can target any kubeconfig context without switching the whole session.
+- **Context switching parity across read *and* manifest commands** (M1.2): `describe`,
+  `diagnose`, `logs`, `events`, `overview`, `watch`, `apply`, and `edit` now accept
+  `--context` (matching `get`), so an operator can target any kubeconfig context without
+  switching the whole session.
 - **M1.8 — `MemPlane::query` no longer deep-clones the whole row set**: it now sorts and
   filters an index permutation (`sort_indices`/`filter_indices`, identical semantics to
   `sort_rows`/`filter_rows`) and clones only the windowed rows — a 50k-row view clones the

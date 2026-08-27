@@ -232,6 +232,9 @@ enum Command {
         /// path to a YAML manifest, or "-" for stdin
         #[arg(short = 'f', long)]
         file: String,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Edit a resource's YAML in $EDITOR, then dry-run the result (never applies).
     Edit {
@@ -244,6 +247,9 @@ enum Command {
         /// namespace (omit for cluster-scoped)
         #[arg(short = 'n', long)]
         namespace: Option<String>,
+        /// kubeconfig context to use (context switching)
+        #[arg(long)]
+        context: Option<String>,
     },
     /// Forward a pod port to a local TCP listener (Ctrl-C to stop).
     PortForward {
@@ -1176,7 +1182,11 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             }
             Ok(())
         }
-        Command::Apply { file } => {
+        Command::Apply { file, context } => {
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let manifest = if file == "-" {
                 use std::io::Read;
                 let mut s = String::new();
@@ -1201,7 +1211,12 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             gvk,
             name,
             namespace,
+            context,
         } => {
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
             let gvk = parse_gvk(&gvk);
             let result = edit::edit_in_editor(&client, &gvk, namespace.as_deref(), &name).await?;
             println!("{}", result);
