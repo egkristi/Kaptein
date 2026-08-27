@@ -25,8 +25,11 @@ GitHub Actions OIDC identity, and installs to `~/.local/bin` (or `KAPTEIN_INSTAL
 
 Alternatives:
 
-- **kubectl plugin**: `kubectl krew install kaptein` (the release workflow renders
-  `krew/kaptein.yaml` with the real tag and per-platform sha256s).
+- **kubectl plugin**: `kubectl krew install kaptein` — *pending submission to the
+  [krew-index](https://github.com/kubernetes-sigs/krew-index)*. Each release renders
+  `krew/kaptein.yaml` (real tag + per-platform sha256s) as a release asset, but until
+  that manifest is merged into the central index, `krew install` reports the plugin as
+  missing ([#34](https://github.com/egkristi/Kaptein/issues/34)).
 - **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod`.
 - **From source**: `cargo build --release` (requires a Rust toolchain ≥ 1.97).
 

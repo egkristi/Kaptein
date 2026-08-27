@@ -156,7 +156,7 @@ jobs:
           python3 - <<'PY'
           import yaml
           m = yaml.safe_load(open("krew/kaptein.yaml"))
-          assert m["apiVersion"].startswith("krew.googlecontainers.com"), "Krew apiVersion"
+          assert m["apiVersion"].startswith("krew.googlecontainertools.github.com"), "Krew apiVersion"
           assert m["kind"] == "Plugin", "Krew kind"
           assert m["spec"]["version"], "Krew version"
           platforms = m["spec"]["platforms"]
