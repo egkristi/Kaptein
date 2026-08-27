@@ -42,7 +42,10 @@ tracker.
 
 Per the convention above, live bugs are GitHub issues.
 
-**Open:** *(none currently — the last open bug, #16, was fixed structurally below.)*
+**Open:** #34 — `kubectl krew install kaptein` from the *central* index (a CNCF repo
+that requires OSI-approved open source, which BUSL-1.1 is not). Resolved in practice by
+a **custom Krew index** — see the Distribution backlog below and
+`https://github.com/egkristi/krew-index`.
 
 **Closed since the last cycle:** #35 (lens-driven views leaked secret values — the lens
 render path `map_object_with` serialized the object and fed it to `render_row` without
@@ -129,15 +132,16 @@ unowned debt. Done items are struck through.
    maps core errors into a real enum instead of passing through.
 8. **Distribution & release sync** (cross-cutting): Homebrew/Krew/container/checksums +
    site/docs/tag sync. *Landed as files: `install.sh`, `krew/kaptein.yaml`, and
-   `Dockerfile`.* **Open — none of the three advertised install paths works end to end:**
-   **#24** (the installer verifies integrity, not authenticity — it never uses the cosign
-   bundle the release publishes), **#23** (the Krew manifest still carries
-   `PLACEHOLDER_*`, and CI's truthiness check passes it), **finding L** (no workflow
-   publishes the `ghcr.io/egkristi/kaptein` image the README documents — not yet filed),
-   plus **#30** (dead
-   `VERSION_TAG`). The Homebrew tap and the release-triggered site/README version bump
-   also remain open. *Files existing is not the same as a distribution channel working —
-   this is the clearest instance of the pattern in* Audit provenance *below.*
+   `Dockerfile`.* **Resolved (v0.27.0 re-audit → v0.29.0):** #24 (installer cosign-verifies
+   `SHA256SUMS` against the OIDC identity), #23 (release-time manifest rendering), finding L
+   (#31, container image pushed + cosign-signed), #30 (dead `VERSION_TAG`). **Krew install
+   works end to end** via a **custom index** — `kubectl krew index add kaptein
+   https://github.com/egkristi/krew-index.git && kubectl krew install kaptein/kaptein`, or
+   `kubectl krew install --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml`.
+   The **central** `kubernetes-sigs/krew-index` is a CNCF repo that requires OSI-approved
+   open source, so a BUSL-1.1 plugin is not eligible (issue #34 stays open as the
+   license-blocked central-index PR; the custom index is the shipped resolution). *Remaining:
+   a Homebrew tap and a release-triggered site/README version bump.*
 9. ~~**Contract-version enforcement**~~ (done, commit 485045c): MCP server advertises the
    contract version and refuses a client whose declared `_meta["io.kaptein/apiVersion"]`
    has a different major; rule in `kaptein-viewmodel::versioned` (lens/WIT gates land

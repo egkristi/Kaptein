@@ -442,12 +442,22 @@ KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 
 Alternatives:
 
-- **kubectl plugin**: `kubectl krew install kaptein` — *pending submission to the
-  [krew-index](https://github.com/kubernetes-sigs/krew-index)*. The release workflow
-  renders `krew/kaptein.yaml` (real tag + per-platform sha256s) as a release asset, but
-  until that manifest is merged into the central index, `krew install` will report the
-  plugin as missing. Tracked in
-  [#34](https://github.com/egkristi/Kaptein/issues/34).
+- **kubectl plugin (Krew)**: Kaptein is BUSL-1.1 (source-available), and Krew's central
+  index is a CNCF project that requires plugins to be **open source under an OSI-approved
+  license** — so it is not submitted to `kubernetes-sigs/krew-index`. Instead, Kaptein
+  ships its own **custom index** and a standalone manifest on every release:
+
+  ```bash
+  # custom index (recommended):
+  kubectl krew index add kaptein https://github.com/egkristi/krew-index.git
+  kubectl krew install kaptein/kaptein
+
+  # or, straight from the release asset (no index):
+  kubectl krew install --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml
+  ```
+
+  Both install a checksum-verified `kubectl kaptein` (see
+  [#34](https://github.com/egkristi/Kaptein/issues/34) for the licensing rationale).
 - **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod` — the
   release workflow builds a static image from the verified tarball, pushes it to GHCR,
   and cosign-signs the digest.

@@ -7,6 +7,15 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.29.0] - 2026-08-27
 
 ### Fixed
+- **#34 — `kubectl krew install kaptein` (Distribution)**: Krew's central
+  `kubernetes-sigs/krew-index` is a CNCF repo that requires plugins be open source under
+  an OSI-approved license, so a BUSL-1.1 plugin is not eligible. Kaptein now ships a
+  **custom Krew index** (`https://github.com/egkristi/krew-index`, `plugins/kaptein.yaml`
+  with real version + per-platform sha256s) and a release-published `kaptein.yaml`.
+  Install via `kubectl krew index add kaptein https://github.com/egkristi/krew-index.git
+  && kubectl krew install kaptein/kaptein`, or directly via `kubectl krew install
+  --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml`.
+  Both verified end-to-end against a real `krew` install.
 - **#35 — lens-driven views leak secret values (High)**: the lens render path
   (`map_object_with`) serialized the object and fed it to `render_row` without redacting
   it, so a lens bound to a secret-shaped field (`data.password`, env `value`) reached the

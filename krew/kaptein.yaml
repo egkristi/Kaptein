@@ -7,10 +7,12 @@
 #
 # NOTE: this file is a *template*. The version and per-platform sha256 tokens are
 # substituted at release time (see .github/workflows/release.yml) and the rendered
-# manifest is uploaded to the release as `kaptein.yaml`. To appear in
-# `kubectl krew install`, a rendered copy must also be merged into the central
-# krew-index (github.com/kubernetes-sigs/krew-index), which is a separate PR — see
-# the "Distribution" section of ROADMAP.md.
+# manifest is uploaded to the release as `kaptein.yaml`. To install via Krew, use the
+# custom index (github.com/egkristi/krew-index) or the release manifest directly:
+#   kubectl krew install --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml
+# The central krew-index (github.com/kubernetes-sigs/krew-index) requires OSI-approved
+# open source, so a BUSL-1.1 plugin is not submitted there — see issue #34 and the
+# "Distribution" section of ROADMAP.md.
 apiVersion: krew.googlecontainertools.github.com/v1alpha2
 kind: Plugin
 metadata:

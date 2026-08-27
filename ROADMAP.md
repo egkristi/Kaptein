@@ -482,6 +482,13 @@ Milestones:
     `ghcr.io/egkristi/kaptein` (issue #31). The unused `VERSION_TAG` was removed (issue #30).
     `README.md` now documents all three as real channels. *Remaining: a Homebrew tap and a
     release-triggered site/README version bump.*
+  - **Resolved (v0.29.0):** `kubectl krew install kaptein` now works end to end — not via
+    the central `kubernetes-sigs/krew-index` (a CNCF repo that requires OSI-approved open
+    source, which BUSL-1.1 is not), but via a **custom index**
+    (`https://github.com/egkristi/krew-index`, `plugins/kaptein.yaml` with real version +
+    per-platform sha256s) and the release-published manifest
+    (`kubectl krew install --manifest-url=.../releases/latest/download/kaptein.yaml`). Both
+    verified against a real `krew` install (issue #34).
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
   pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store
