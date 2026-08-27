@@ -83,6 +83,76 @@ pub struct DiscoveredExtension {
     pub dir: PathBuf,
 }
 
+/// A lens' declared target, resolved from its `entrypoint` file at discovery time — the
+/// `group/version/kind` the lens binds, so a frontend can decide whether a CRD is
+/// lens-navigable without loading the full lens (M2.2 "lens-driven kind list").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredLens {
+    /// The extension id (reverse-DNS), e.g. `"com.example.cnpg-lens"`.
+    pub id: String,
+    /// The human-readable extension name.
+    pub name: String,
+    /// The `group/version/kind` the lens targets (group empty for core).
+    pub target: kube::core::GroupVersionKind,
+}
+
+/// Discover enabled **lens** extensions in a directory tree: walk `extension.yaml`
+/// manifests, keep `kind: lens`, and resolve each lens' declared target from its
+/// `entrypoint` file. A lens whose entrypoint is missing or unparseable is reported as a
+/// problem (never silently dropped — same contract as `validate_manifest`). The caller
+/// applies the `enable`/`disable` set via [`Config::extensions`](crate::config::Config).
+pub fn discover_lenses(root: &Path) -> (Vec<DiscoveredLens>, Vec<String>) {
+    let (exts, mut problems) = discover(root);
+    let mut lenses = Vec::new();
+    for ext in exts {
+        if ext.manifest.kind != ExtensionKind::Lens {
+            continue;
+        }
+        let entry = ext.dir.join(&ext.manifest.entrypoint);
+        match read_lens_target(&entry) {
+            Ok(gvk) => lenses.push(DiscoveredLens {
+                id: ext.manifest.id,
+                name: ext.manifest.name,
+                target: gvk,
+            }),
+            Err(e) => problems.push(format!("{}: {e}", entry.display())),
+        }
+    }
+    lenses.sort_by(|a, b| {
+        let ak = format!("{}/{}/{}", a.target.group, a.target.version, a.target.kind);
+        let bk = format!("{}/{}/{}", b.target.group, b.target.version, b.target.kind);
+        ak.cmp(&bk).then(a.id.cmp(&b.id))
+    });
+    (lenses, problems)
+}
+
+/// Read a lens file and return its declared `target` `GroupVersionKind`, tolerating the
+/// two field spellings a lens may use (`target: {group, version, kind}`).
+fn read_lens_target(path: &Path) -> Result<kube::core::GroupVersionKind, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read lens: {e}"))?;
+    let value: serde_json::Value =
+        serde_yaml::from_str(&text).map_err(|e| format!("cannot parse lens: {e}"))?;
+    let target = value
+        .get("target")
+        .ok_or_else(|| "lens has no `target`".to_string())?;
+    let group = target
+        .get("group")
+        .and_then(|g| g.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let version = target
+        .get("version")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "lens target has no `version`".to_string())?
+        .to_string();
+    let kind = target
+        .get("kind")
+        .and_then(|k| k.as_str())
+        .ok_or_else(|| "lens target has no `kind`".to_string())?
+        .to_string();
+    Ok(kube::core::GroupVersionKind::gvk(&group, &version, &kind))
+}
+
 /// Discover extensions by walking a directory tree for `extension.yaml` manifests.
 /// Returns `(discovered, problems)` — a malformed manifest is reported as a problem,
 /// not silently skipped.
@@ -196,6 +266,44 @@ mod tests {
         let (found, problems) = discover(&tmp);
         assert!(found.is_empty());
         assert!(!problems.is_empty());
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn discover_lenses_resolves_target_gvk_and_skips_non_lens() {
+        let tmp = std::env::temp_dir().join("kaptein-lens-test");
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // A lens extension with a real entrypoint.
+        let lens_dir = tmp.join("cnpg");
+        std::fs::create_dir_all(&lens_dir).unwrap();
+        std::fs::write(
+            lens_dir.join("extension.yaml"),
+            "id: com.example.cnpg-lens\nname: CNPG lens\nversion: 1.0.0\napi_version: 1\nkind: lens\nentrypoint: lens.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(
+            lens_dir.join("lens.yaml"),
+            "id: com.example.cnpg-lens\napi_version: 1\ntarget: {group: postgresql.cnpg.io, version: v1, kind: Cluster}\n",
+        )
+        .unwrap();
+
+        // A non-lens extension (plugin) must be skipped.
+        let plugin_dir = tmp.join("plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("extension.yaml"),
+            "id: com.example.p\nname: P\nversion: 1.0.0\napi_version: 1\nkind: plugin\nentrypoint: p.wasm\n",
+        )
+        .unwrap();
+
+        let (lenses, problems) = discover_lenses(&tmp);
+        assert!(problems.is_empty(), "unexpected problems: {problems:?}");
+        assert_eq!(lenses.len(), 1);
+        assert_eq!(lenses[0].id, "com.example.cnpg-lens");
+        assert_eq!(lenses[0].target.group, "postgresql.cnpg.io");
+        assert_eq!(lenses[0].target.version, "v1");
+        assert_eq!(lenses[0].target.kind, "Cluster");
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

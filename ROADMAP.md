@@ -269,8 +269,10 @@ Milestones:
   - **Partially resolved (v0.27.0 re-audit):** the CLI now consumes a lens —
     `kaptein get --gvk <gvk> --lens <file>` lists full objects
     (`core::discovery::list_objects`) and renders each through `render_row` (lens columns +
-    lens-inferred status), verified live. **Still open:** lens *discovery* from configured
-    extension paths at startup (honouring the `enable`/`disable` set), a lens-driven kind
+    lens-inferred status), verified live. **Lens discovery landed:** `kaptein lenses`
+    (`core::extension::discover_lenses`) walks configured extension paths, resolves each
+    lens entrypoint's `target` GVK, and honours the `enable`/`disable` set — so the
+    discovered lens set is queryable without recompile. **Still open:** a lens-driven kind
     list in the TUI (a discovered CRD with a lens becomes navigable with no code change),
     and `render_row` on the TUI's `DataPlane` path.
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD

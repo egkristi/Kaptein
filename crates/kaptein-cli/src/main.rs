@@ -116,6 +116,13 @@ enum Command {
         #[command(subcommand)]
         command: ExtensionCommand,
     },
+    /// List enabled lens extensions and the `group/version/kind` each targets (M2.2
+    /// lens discovery — the set of CRDs that are lens-navigable).
+    Lenses {
+        /// directory to search recursively for lens extension.yaml (default: ./extensions)
+        #[arg(short = 'd', long, default_value = "extensions")]
+        dir: String,
+    },
     /// Diagnose why a pod is not ready.
     Diagnose {
         /// pod name
@@ -835,6 +842,32 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 Ok(())
             }
         },
+        Command::Lenses { dir } => {
+            // Lens discovery (M2.2): walk the extension directory, keep `kind: lens`,
+            // resolve each lens' target GVK, and honor the enable/disable set. This is
+            // the "which CRDs are lens-navigable" answer a frontend reads at startup.
+            let (lenses, problems) =
+                kaptein_core::extension::discover_lenses(std::path::Path::new(&dir));
+            for p in &problems {
+                eprintln!("error: {p}");
+            }
+            let config = kaptein_core::config::load();
+            let mut shown = 0usize;
+            for lens in &lenses {
+                if !config.extensions.is_enabled(&lens.id) {
+                    continue;
+                }
+                println!(
+                    "{:<40} {}/{}/{}",
+                    lens.id, lens.target.group, lens.target.version, lens.target.kind
+                );
+                shown += 1;
+            }
+            if shown == 0 {
+                println!("no enabled lenses found in {dir}");
+            }
+            Ok(())
+        }
         Command::Diagnose { name, namespace } => {
             let pod = kaptein_core::pods::get_pod(&client, &namespace, &name).await?;
             let findings = kaptein_core::diagnostics::diagnose(&pod);

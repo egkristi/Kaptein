@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [0.27.0] - 2026-08-25
 
 ### Added
+- **M2.2 — lens discovery (`kaptein lenses`)**:
+  - `kaptein-core::extension::discover_lenses` walks configured extension paths, resolves
+    each lens entrypoint's `target` into a `DiscoveredLens` GVK, and skips non-lens
+    extensions; the `kaptein lenses` command prints the enabled lens set (honouring the
+    `enable`/`disable` config), so the discovered lens set is queryable with no recompile.
 - **M2.2 — the CLI consumes a lens (lens-driven `get`)**:
   - `kaptein get --gvk <gvk> --lens <file>` lists full objects
     (`core::discovery::list_objects`) and renders each through `render_row` — lens
