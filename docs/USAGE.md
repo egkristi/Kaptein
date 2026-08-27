@@ -223,6 +223,11 @@ kaptein logs --name my-pod -n default --regex "ERROR"
 kaptein logs --name my-pod -n default --json
 ```
 
+`--tail N` is a **per-pod, per-container** bound, not a global line count — with a
+`--selector` matching *m* pods you get up to `m × N` lines (exactly like
+`kubectl logs --selector … --tail N`). To cap the *total* output, use `--regex` or pipe
+through `tail`, or narrow the selector.
+
 ### 3.5 Events & the landing view
 
 ```bash

@@ -169,7 +169,7 @@ enum Command {
         /// regex filter applied to each log line
         #[arg(short = 'r', long)]
         regex: Option<String>,
-        /// number of lines to tail
+        /// number of lines to tail (per pod, per container — like kubectl)
         #[arg(long, default_value_t = 100)]
         tail: i64,
         /// follow the log stream until interrupted (only with --name)
