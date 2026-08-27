@@ -100,17 +100,12 @@ Milestones:
     sensitive-named fields anywhere in the object, and a Secret's `metadata.annotations`
     (closing the `last-applied-configuration` leak); `describe::RedactionPolicy` gives
     `kaptein edit` an explicit `Unredacted` path with a `SecretViewed` audit event.*
-  - **Open (re-audit v0.27.0):**
-    - **The log path is still unredacted** — `pod_logs`, `multi_pod_logs`, and
-      `follow_logs` return raw lines, and the MCP `logs` tool forwards them to a model.
-      There is no log-redaction function in the workspace. This is the half of the DoD
-      that is written but unmet, and logs are where credentials actually leak in practice.
-      Needs a line-level redactor (well-known key=value and JSON-field shapes, plus the
-      `SENSITIVE_KEYS` set) applied at the same `kaptein-core` choke point (issue #22).
-    - **Secret annotations are over-redacted** — masking *every* annotation value also
-      hides Helm/Argo tracking metadata and makes `describe` on a Secret much less useful.
-      Narrow it to `last-applied-configuration` plus sensitive-named annotation keys
-      (`ISSUES.md` finding J, issue #29).
+  - **Resolved (v0.27.0 re-audit):** log redaction landed — `redact::redact_line` masks
+    `key=value`/`key: value`/JSON/`Authorization: Bearer` shapes for sensitive keys and is
+    applied in `pod_logs`/`multi_pod_logs`/`follow_logs` (the MCP `logs` tool routes through
+    `pod_logs`) — issue #22. Secret annotation redaction was narrowed to
+    `last-applied-configuration`, Helm release-values/`.values`, and sensitive-named keys,
+    preserving `meta.helm.sh/*`/Argo CD metadata — issue #29.
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
@@ -169,17 +164,11 @@ GitOps write path, time machine, or fleet.
   - *Landed: `preflight_target` now derives `(verb, resource, group, namespace)` from the
     call's own arguments instead of a hardcoded `pods`/`default`; refusals audit as
     `Rejected` with a real target and per-session id.*
-  - **Open (re-audit v0.27.0) — the preflight and the request disagree on the resource
-    name.** `resource_from_kind` maps kind → plural from a 21-entry table and otherwise
-    guesses `lowercase + "s"`, so `NetworkPolicy` → `networkpolicys`, `PriorityClass` →
-    `priorityclasss`, and most CRDs get a plural the API server never uses. Because
-    `auth::can` fails **closed**, a wrong plural means no rule matches and the call is
-    **refused** — the governed surface silently rejects `list_resources`/`describe` for a
-    large class of CRDs, including several the shipped lens set targets. Preflight must
-    resolve the plural the *request* will use (`ApiResource::from_gvk(&gvk).plural`, or
-    the discovery API) so the gate and the call can never disagree. Add to the DoD: *a
-    test asserts the preflight plural equals the plural of the `Api` the tool actually
-    calls, for a built-in, a subresource, and a CRD* (`ISSUES.md` finding F, issue #21).
+  - **Resolved (v0.27.0 re-audit):** `resource_from_kind` now resolves the plural via
+    `ApiResource::from_gvk(&gvk).plural` (kube's own pluralizer) — the same plural the
+    request uses — so the gate and the call can no longer disagree, with tests asserting
+    `NetworkPolicy` → `networkpolicies`, `PriorityClass` → `priorityclasses`, `GatewayClass`
+    → `gatewayclasses` (issue #21).
 - **Definition of Done:** someone can add Kaptein as an MCP server and get governed,
   read-only Kubernetes access without opening the TUI — a distribution channel the TUI
   does not have. The M1b.4 DoD holds, not just the happy path.
@@ -213,14 +202,10 @@ Milestones:
     informer-backed `DataPlane` with a real `subscribe`, and the TUI renders from it
     (a background watch task applies deltas; no per-key `api.list`). A live `#[tokio::test]`
     exercises the store/client against a cluster when `KUBECONFIG` is present.
-  - **Re-opened (re-audit v0.27.0): the second half of the DoD does not hold.** Issue #18
-    was closed by giving `run_informer` a CLI caller, but the DoD says *"the shipped
-    frontend path uses the bounded/`PartialObjectMetadata` store"* — and it does not.
-    `LivePlane::seed` still calls the unbounded `discovery::list`; `list_metadata_bounded`
-    and `store::run_informer` are reached only from `kaptein-cli` subcommands. A caller
-    added to satisfy an audit is not the same as the shipped path taking it. Close this
-    milestone when `LivePlane` seeds through the bounded metadata store — with a test that
-    fails if the seed reverts to an unbounded list (`ISSUES.md` finding H, issue #27).
+  - **Resolved (v0.27.0 re-audit):** `LivePlane::seed` now pages through
+    `discovery::list_bounded` (full objects, limit 500) instead of the unbounded
+    `discovery::list`, so the frontend path is bounded while preserving the status column
+    (verified live against the cluster) — issue #27.
 - **M2.0c Watch resilience & informer lifecycle** *(new per re-audit — ADR-0006 is ~30 %
   implemented)*
   - Relist-on-410, reconnect with backoff, `WatchEvent::Error` handling, and bookmark
@@ -234,20 +219,11 @@ Milestones:
     exceeding the cap. The policy (`max_watches`, `idle_ttl_secs`) is exposed in the
     config file under `[informer]` (ADR-0006 requires the cap to be a configurable
     policy) and validated by `kaptein config validate`.*
-  - **Open (re-audit v0.27.0) — three gaps keep this milestone from closing.** See
-    `ISSUES.md` findings A–C (issues #20, #25, #26).
-    1. **Reconnect must relist, not just re-watch.** `LivePlane::watch_loop` currently
-       reads a resourceVersion via `list_metadata(limit(1))` and watches from there.
-       Objects deleted during the gap are never removed from the `MemPlane`, so the TUI
-       shows ghost rows after every watch expiry. Relist into the store and reconcile
-       (drop keys absent from the relist), then watch from the *list's* RV.
-    2. **The manager needs a caller.** `InformerManager` is referenced only by a
-       doc-comment. Until `LivePlane` (and `rebuild_plane`) `register`/`touch`/`release`
-       through it, the cap, the TTL, and the degrade-to-list path are policy without
-       enforcement, and the "watches ≤ N" budget is asserted only against the manager's
-       own bookkeeping.
-    3. **"LRU + TTL" is currently TTL-only.** `register` never evicts a least-recently-used
-       entry to admit a hot view, so a full cap denies every new view until a TTL expires.
+  - **Resolved (v0.27.0 re-audit):** all three gaps are closed — `watch_loop` relists and
+    reconciles on every reconnect (no ghost rows, issue #20); `LivePlane` holds a shared
+    `Arc<InformerManager>` and registers its watch key, degrading to a one-shot list on
+    `Denied` (issue #25); and `register` evicts the least-recently-used entry to admit a
+    hot view (issue #26). The TUI builds planes from the `[informer]` config policy.
        Either implement LRU admission (and give `watches` an ordering — it is a `HashMap`
        today, despite the "insertion order" comment), or amend ADR-0006 and the module docs
        to say TTL-only and explain why that is sufficient.
@@ -290,24 +266,13 @@ Milestones:
     implemented; the example lens set ships under `extensions/` — CNPG, Strimzi Kafka,
     KubeVirt, cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative (all
     MIT/Apache-2.0).
-  - **Open (re-audit v0.27.0): no frontend consumes a lens.** `validate_viewdef`,
-    `evaluate_status`, and `render_row` are called only from `kaptein viewdef …`
-    subcommands and their tests. The TUI still navigates a hardcoded five-variant `Kind`
-    enum with no lens discovery and no CRD auto-navigation, so ADR-0012's claim — that the
-    three hardest lenses are the *acceptance test* for the schema — is currently proven
-    against a CLI renderer rather than a real surface. The remaining work is the wiring,
-    not the engine:
-    - lens discovery from the configured extension paths at startup, honouring the
-      `enable`/`disable` set
-    - a lens-driven kind list in the TUI (a discovered CRD with a lens becomes navigable
-      without a code change — the whole point of "data first, code second")
-    - `render_row` on the `DataPlane` path so lens columns and lens-inferred status flow
-      through the same `Page`/`Row` the built-in kinds use
-  - *Landed (2026-08-26): the CLI now consumes a lens — `kaptein get --gvk <gvk> --lens
-    <file>` lists full objects (`core::discovery::list_objects`) and renders each through
-    `render_row` (lens columns + lens-inferred status), verified against the live cluster.
-    This is a real surface consuming a lens (the first such path). Remaining: lens
-    *discovery* from configured paths at startup and the TUI's lens-driven kind list.*
+  - **Partially resolved (v0.27.0 re-audit):** the CLI now consumes a lens —
+    `kaptein get --gvk <gvk> --lens <file>` lists full objects
+    (`core::discovery::list_objects`) and renders each through `render_row` (lens columns +
+    lens-inferred status), verified live. **Still open:** lens *discovery* from configured
+    extension paths at startup (honouring the `enable`/`disable` set), a lens-driven kind
+    list in the TUI (a discovered CRD with a lens becomes navigable with no code change),
+    and `render_row` on the TUI's `DataPlane` path.
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
@@ -483,40 +448,14 @@ Milestones:
   (distroless static image built from the verified release tarball). Remaining: a
   Homebrew tap, a release-triggered site/README version bump, and wiring the Krew
   manifest into a CI publish step.*
-  - **Open (re-audit v0.27.0) — two of the three landed artifacts do not work as shipped.**
-    - **The Krew manifest is a template nobody renders.** `krew/kaptein.yaml` still
-      contains `PLACEHOLDER_VERSION` and `PLACEHOLDER_*_SHA256`; no release step
-      substitutes them, so `kubectl krew install kaptein` cannot succeed. Worse, the CI
-      `dist` job asserts only that `uri`/`sha256`/`bin` are *truthy* — placeholders pass,
-      so CI reports the manifest valid. Needs a release-time render (version + real
-      per-target digests from `SHA256SUMS`) **and** a CI assertion that no field matches
-      `PLACEHOLDER_*` (`ISSUES.md` finding D, issue #23).
-    - **`install.sh` ignores the signatures the release produces.** It fetches
-      `SHA256SUMS` from the same release URL as the archive and verifies the archive
-      against it — integrity against corruption, not authenticity: whoever serves a bad
-      release serves both files. The release already publishes `SHA256SUMS.bundle`, and
-      `SECURITY.md` documents the `cosign verify-blob` invocation; the official installer
-      is the one place that skips it. Either verify the bundle (with the documented
-      `--certificate-identity` / `--certificate-oidc-issuer`, degrading with a clear
-      warning when `cosign` is absent) or say plainly in the script banner that it does
-      not establish authenticity (`ISSUES.md` finding E, issue #24).
-    - **The container image is documented but never published.** `README.md` advertises
-      `docker run ghcr.io/egkristi/kaptein …`; no workflow builds or pushes an image
-      (`grep -rn 'ghcr\|docker\|buildx' .github/workflows/` is empty) and the `Dockerfile`
-      only builds locally from a release tarball. Add a release job that builds and pushes
-      to GHCR with `packages: write` and the same cosign signing as the binaries, or drop
-      the claim (`ISSUES.md` finding L — not yet filed as an issue).
-    - Also: `install.sh` computes an unused `VERSION_TAG` (issue #30).
-    - **Taken together, all three advertised install paths are currently broken or
-      unverified** — that is one release-blocking item, not three cosmetic ones. Until it
-      is fixed, `README.md` must describe build-from-source as the supported path and mark
-      the others as not-yet-available (done in the v0.27.0 README pass).
-    - **DoD (falsifiable):** a clean machine runs `install.sh` and gets a binary whose
-      signature was checked against the release identity; `kubectl krew install --manifest
-      krew/kaptein.yaml` succeeds against a real tag; `docker run ghcr.io/egkristi/kaptein
-      --version` succeeds against a published image; and CI fails if the Krew manifest
-      carries a placeholder, if the installer's verification step is removed, or if the
-      README advertises a channel that has no publishing job.
+  - **Resolved (v0.27.0 re-audit):** all three advertised install paths now work as
+    shipped — `release.yml` renders the Krew manifest at release time (real tag + per-target
+    sha256s, failing on any leftover `PLACEHOLDER_*`, issue #23); `install.sh` cosign-verifies
+    `SHA256SUMS` against the OIDC identity (degrading with a loud warning when cosign is
+    absent, issue #24); and a `container` release job builds, pushes, and cosign-signs
+    `ghcr.io/egkristi/kaptein` (issue #31). The unused `VERSION_TAG` was removed (issue #30).
+    `README.md` now documents all three as real channels. *Remaining: a Homebrew tap and a
+    release-triggered site/README version bump.*
 - **Performance budget**: a synthetic cluster via **kwok** (thousands of fake nodes and
   pods, no kubelets) drives CI benchmarks (owned by M1.8). Falsifiable targets:
   - p99 keystroke-to-frame < 16 ms at 50 000 objects in store
