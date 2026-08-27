@@ -363,7 +363,23 @@ async fn run_event_loop(
             );
 
             let detail_text = detail.clone().unwrap_or_else(|| {
-                "Press d to describe, i to diagnose the selected resource.".into()
+                // Surface the selected resource's action graph: a lens-driven kind
+                // declares its actions (e.g. "describe") in the lens; the built-in kinds
+                // expose describe + diagnose. The label_key is the render contract's
+                // i18n key — the TUI shows the action *id* (the stable, executable name),
+                // which maps to the existing bindings (`d` = describe, `i` = diagnose).
+                let actions = match &kind.lens {
+                    Some(vd) => vd
+                        .actions_as_semantic()
+                        .iter()
+                        .map(|a| a.id.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    None => "describe, diagnose".to_string(),
+                };
+                format!(
+                    "Actions: {actions}\nPress d to describe, i to diagnose the selected resource."
+                )
             });
             let detail_para = Paragraph::new(detail_text)
                 .block(Block::default().title(" Detail ").borders(Borders::ALL));

@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **Lens action graph (M2.2)**: `ViewDefinition::actions_as_semantic` maps a lens's
+  declared `actions` into the render contract's `semantic::Action` (lens-native
+  `allowed`/`gated`/`forbidden` → `ActionState`), and the TUI surfaces the selected
+  resource's action graph — a lens-driven kind shows its declared action ids; built-ins
+  show `describe, diagnose`. The action *id* maps to the existing bindings (`d`/`i`).
 - **`blast_radius` walks the full ownership chain** (M1b.3 / M2.4 groundwork): the
   traversal is now generic over intermediate controllers (`ReplicaSet`, `Job`) rather
   than hardcoded to `Deployment → ReplicaSet → Pod`, so `StatefulSet → Pod`,

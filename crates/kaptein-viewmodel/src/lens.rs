@@ -14,6 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::render::{Cell, Row, RowId};
+use crate::semantic::{Action, ActionState};
 use crate::surface::{Column, ColumnKind};
 
 /// The lens schema version this release validates. Bumped on a breaking change to the
@@ -144,6 +145,35 @@ pub struct ViewDefinition {
     /// Actions this lens makes available, with their RBAC-preflight state.
     #[serde(default)]
     pub actions: Vec<LensAction>,
+}
+
+impl ViewDefinition {
+    /// Map a lens's declared actions into the render contract's `semantic::Action`s,
+    /// resolving each lens-native `state` (`allowed`/`gated`/`forbidden`) to an
+    /// `ActionState`. This is the "action graph" half of M2.2: the lens declares the
+    /// action *id* and *label key*; the frontend renders it and the core grey-out/p
+    /// reflight logic acts on the `ActionState` — renderer-agnostic, so the TUI, GUI,
+    /// and MCP surface share it.
+    pub fn actions_as_semantic(&self) -> Vec<Action> {
+        self.actions
+            .iter()
+            .map(|a| Action {
+                id: a.id.clone(),
+                label_key: a.label_key.clone(),
+                state: match a.state.as_str() {
+                    "gated" => ActionState::Gated {
+                        reason_key: "action.gated".into(),
+                    },
+                    "forbidden" => ActionState::Forbidden {
+                        verb: String::new(),
+                        resource: String::new(),
+                        namespace: None,
+                    },
+                    _ => ActionState::Allowed,
+                },
+            })
+            .collect()
+    }
 }
 
 /// Validate a view definition, returning a list of problems (empty = valid).
@@ -612,6 +642,29 @@ mod tests {
     #[test]
     fn valid_lens_has_no_problems() {
         assert!(validate_viewdef(&valid()).is_empty());
+    }
+
+    #[test]
+    fn actions_as_semantic_maps_state_and_label() {
+        let mut vd = valid();
+        vd.actions = vec![
+            LensAction {
+                id: "describe".into(),
+                label_key: "action.describe".into(),
+                state: "allowed".into(),
+            },
+            LensAction {
+                id: "restart".into(),
+                label_key: "action.restart".into(),
+                state: "gated".into(),
+            },
+        ];
+        let actions = vd.actions_as_semantic();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].id, "describe");
+        assert_eq!(actions[0].label_key, "action.describe");
+        assert!(matches!(actions[0].state, ActionState::Allowed));
+        assert!(matches!(actions[1].state, ActionState::Gated { .. }));
     }
 
     #[test]

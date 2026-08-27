@@ -283,9 +283,14 @@ Milestones:
     `LivePlane::new_lens` — the lens's declared columns become the table schema and its
     status rules drive the status chip, so dropping a lens file into the path makes its
     CRD navigable with **no recompile**. `render_row` is on the TUI's `DataPlane` path
-    (`map_object_with` is the single seed/watch mapping). **Still open (Phase 2+):**
-    per-lens action/health surfaces (M2.4+), the browser UI's lens navigation (M2.1), and
-    the `kaptein` TUI's lens action graph.
+    (`map_object_with` is the single seed/watch mapping). **Lens action graph landed:**
+    `ViewDefinition::actions_as_semantic` maps a lens's declared `actions` into the render
+    contract's `semantic::Action` (`allowed`/`gated`/`forbidden` → `ActionState`), and the
+    TUI surfaces the selected resource's action graph (the lens's action ids, or
+    `describe, diagnose` for built-ins) — the action *id* maps to the existing bindings
+    (`d` = describe, `i` = diagnose). **Still open (Phase 2+):** per-lens action/health
+    surfaces (M2.4+), the browser UI's lens navigation (M2.1), and per-action RBAC
+    grey-out (the `Forbidden` state is constructed but not yet preflight-driven).
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
