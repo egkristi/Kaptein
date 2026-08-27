@@ -7,6 +7,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **PVC-binding diagnostic** (M1.6): a Pending pod whose `PodScheduled` condition carries
+  `persistentvolumeclaim "<name>" not found` now surfaces as `pvc_binding` (with the claim
+  name extracted) — checked before the generic `unschedulable` fallback. Added a fixture
+  (`pvc_binding.json`) to the diagnostics corpus.
 - **OOM forensics rule** (M1.6 diagnostics): a distinct `oom_killed` finding detects a
   container killed by the kernel (reason `OOMKilled` or exit 137) from either the current
   `terminated` state or `last_state.terminated` after a restart — so a memory kill reads

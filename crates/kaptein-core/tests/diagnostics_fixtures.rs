@@ -81,3 +81,10 @@ fn oom_killed_is_detected() {
     let got = codes(&pod);
     assert!(got.contains(&"oom_killed".into()), "got {got:?}");
 }
+
+#[test]
+fn pvc_binding_failure_is_detected() {
+    let pod = load_fixture("pvc_binding.json");
+    let got = codes(&pod);
+    assert!(got.contains(&"pvc_binding".into()), "got {got:?}");
+}

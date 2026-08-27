@@ -25,15 +25,17 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
         }];
     };
 
-    // Pending: check scheduling reasons first.
+    // Pending: check scheduling reasons first. PVC binding is the *most specific*
+    // unschedulable signal (the scheduler tried and failed to bind a claim), so it is
+    // checked before the generic `unschedulable` fallback.
     if status.phase.as_deref() == Some("Pending") {
+        if let Some(f) = pvc_binding_finding(status) {
+            return vec![f];
+        }
         if let Some(f) = unschedulable_finding(status) {
             return vec![f];
         }
         if let Some(f) = image_pull_finding(status) {
-            return vec![f];
-        }
-        if let Some(f) = pvc_binding_finding(status) {
             return vec![f];
         }
         return vec![Finding {
@@ -129,12 +131,32 @@ fn image_pull_finding(status: &PodStatus) -> Option<Finding> {
     None
 }
 
-fn pvc_binding_finding(_status: &PodStatus) -> Option<Finding> {
-    // PVC binding failures surface as unschedulable ("persistentvolumeclaim ... not
-    // found") in the PodScheduled condition message, so this is a fallback for when the
-    // scheduler hasn't recorded a reason. We return None here; full PVC analysis needs
-    // the PVC resources themselves (a later rule pack).
-    None
+fn pvc_binding_finding(status: &PodStatus) -> Option<Finding> {
+    // A PVC-binding failure surfaces in the `PodScheduled` condition's message as
+    // `persistentvolumeclaim "<name>" not found` (the scheduler tried and failed to bind
+    // the claim). Extract the claim name from the message rather than fetching the PVC
+    // resources themselves (a full PVC analysis — storage class, provisioner — is a
+    // Phase 3a rule pack).
+    let c = condition(status, "PodScheduled")?;
+    let msg = c.message.as_deref().unwrap_or_default();
+    let lower = msg.to_ascii_lowercase();
+    if !lower.contains("persistentvolumeclaim") || !lower.contains("not found") {
+        return None;
+    }
+    // Pull the claim name out of the message, falling back to a generic summary.
+    let claim = msg
+        .split("persistentvolumeclaim")
+        .nth(1)
+        .and_then(|s| s.split('"').nth(1))
+        .map(|c| c.to_string());
+    let summary = match claim {
+        Some(c) => format!("Pod cannot bind PVC '{c}': not found."),
+        None => "Pod cannot bind a persistentvolumeclaim: not found.".into(),
+    };
+    Some(Finding {
+        code: "pvc_binding".into(),
+        summary,
+    })
 }
 
 /// The "probes" rule (M1.6): a `Ready=False` condition with a `last_probe_time` indicates
@@ -275,6 +297,44 @@ mod tests {
     fn ready_pod_has_no_findings() {
         let pod = pod_with("Running", true);
         assert!(diagnose(&pod).is_empty());
+    }
+
+    #[test]
+    fn pvc_binding_failure_is_detected_and_names_the_claim() {
+        // A Pending pod whose PodScheduled condition carries the "persistentvolumeclaim
+        // not found" message must surface as pvc_binding (before the generic
+        // unschedulable fallback), with the claim name extracted.
+        let mut pod = pod_with("Pending", false);
+        if let Some(status) = &mut pod.status {
+            status.conditions = Some(vec![
+                PodCondition {
+                    type_: "Ready".into(),
+                    status: "False".into(),
+                    ..Default::default()
+                },
+                PodCondition {
+                    type_: "PodScheduled".into(),
+                    status: "False".into(),
+                    reason: Some("Unschedulable".into()),
+                    message: Some(
+                        "0/1 nodes are available: persistentvolumeclaim \"db-pvc\" not found."
+                            .into(),
+                    ),
+                    ..Default::default()
+                },
+            ]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "pvc_binding"),
+            "expected pvc_binding finding, got {findings:?}"
+        );
+        let f = findings.iter().find(|f| f.code == "pvc_binding").unwrap();
+        assert!(
+            f.summary.contains("db-pvc"),
+            "summary should name the claim: {}",
+            f.summary
+        );
     }
 
     #[test]

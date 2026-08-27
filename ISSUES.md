@@ -147,8 +147,10 @@ unowned debt. Done items are struck through.
 
 ## By-design limitations
 
-- **PVC-binding diagnostics** need the PVC resources themselves — deferred to a Phase 3a
-  rule pack (the scheduler's `PodScheduled` message is the Phase 1 signal).
+- **PVC-binding diagnostics** now detect a `persistentvolumeclaim "<name>" not found`
+  message in the `PodScheduled` condition (surfacing as `pvc_binding` with the claim name
+  extracted). A *full* PVC analysis (storage class, provisioner, volume topology) is
+  deferred to a Phase 3a rule pack.
 - **`blast_radius`** walks the ownership chain generically now: the intermediate
   controllers that can be owned by a workload and own Pods (`ReplicaSet`, `Job`) are
   listed and matched transitively, so `Deployment → ReplicaSet → Pod`,

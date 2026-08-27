@@ -1,0 +1,20 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": { "name": "db-app", "namespace": "default" },
+  "spec": {
+    "containers": [{ "name": "app", "image": "postgres:16" }]
+  },
+  "status": {
+    "phase": "Pending",
+    "conditions": [
+      { "type": "Ready", "status": "False", "reason": "ContainersNotReady" },
+      {
+        "type": "PodScheduled",
+        "status": "False",
+        "reason": "Unschedulable",
+        "message": "0/1 nodes are available: persistentvolumeclaim \"db-pvc\" not found."
+      }
+    ]
+  }
+}
