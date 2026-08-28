@@ -63,3 +63,21 @@ jobs:
             echo "Publishing ${crate}@${version}"
             cargo publish -p "$crate"
           done
+
+      # The `frontend-tui` crate was renamed to `kaptein-tui` (the TUI is now a
+      # library hosted by the `kaptein` binary as `kaptein tui`). crates.io names
+      # are immutable, so yank every published `frontend-tui` version so
+      # `cargo install frontend-tui` no longer resolves the stale crate.
+      - name: Yank legacy frontend-tui crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in $(curl -fsSL -A "Kaptein publish (GitHub Actions)" \
+              "https://crates.io/api/v1/crates/frontend-tui" \
+              | python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(d.get("versions",[])))'); do
+            if [ -n "$v" ]; then
+              echo "Yanking frontend-tui@${v}"
+              cargo yank --version "${v}" frontend-tui || true
+            fi
+          done

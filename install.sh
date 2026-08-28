@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install the Kaptein CLI and TUI from a signed GitHub release.
+# Install the Kaptein CLI (the single `kaptein` binary — the TUI is `kaptein tui`)
+# from a signed GitHub release.
 #
 # This is the "Distribution & release sync" artifact (ROADMAP.md cross-cutting):
 # it downloads the release binary for this platform, verifies its SHA-256
@@ -9,17 +10,15 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 #   # or, to pick a version and install dir:
-#   KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+#   KAPTEIN_VERSION=v0.30.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 #
 # Environment variables:
 #   KAPTEIN_VERSION     release tag to install (default: latest)
 #   KAPTEIN_INSTALL_DIR destination directory (default: ~/.local/bin)
-#   KAPTEIN_BINARIES    which binaries to install (default: "kaptein kaptein-tui")
 
 set -euo pipefail
 
 REPO="egkristi/Kaptein"
-BINARIES="${KAPTEIN_BINARIES:-kaptein kaptein-tui}"
 INSTALL_DIR="${KAPTEIN_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Resolve the target triple for this platform (mirrors release.yml's matrix).
@@ -103,13 +102,11 @@ echo "==> Verifying SHA-256 checksum ..."
 )
 
 echo "==> Extracting ..."
-tar -xzf "${WORK}/${ARCHIVE}" -C "${WORK}" kaptein kaptein-tui
+tar -xzf "${WORK}/${ARCHIVE}" -C "${WORK}" kaptein
 
 mkdir -p "${INSTALL_DIR}"
-for bin in ${BINARIES}; do
-  install -m 0755 "${WORK}/${bin}" "${INSTALL_DIR}/${bin}"
-  echo "==> Installed ${INSTALL_DIR}/${bin}"
-done
+install -m 0755 "${WORK}/kaptein" "${INSTALL_DIR}/kaptein"
+echo "==> Installed ${INSTALL_DIR}/kaptein"
 
 # Ensure the install dir is on PATH (best effort).
 case ":${PATH}:" in

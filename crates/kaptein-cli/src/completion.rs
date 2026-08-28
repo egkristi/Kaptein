@@ -168,7 +168,10 @@ mod tests {
     #[test]
     fn gvk_completer_prefix_matches_case_insensitively() {
         let got = gvk_completer(OsStr::new("apps"));
-        let values: Vec<&str> = got.iter().map(|c| c.get_value().to_str().unwrap()).collect();
+        let values: Vec<&str> = got
+            .iter()
+            .map(|c| c.get_value().to_str().unwrap())
+            .collect();
         assert!(values.contains(&"apps/v1/Deployment"));
         assert!(values.contains(&"apps/v1/StatefulSet"));
         assert!(!values.contains(&"v1/Pod"));
@@ -177,7 +180,10 @@ mod tests {
     #[test]
     fn gvk_completer_matches_full_kind() {
         let got = gvk_completer(OsStr::new("batch/v1"));
-        let values: Vec<&str> = got.iter().map(|c| c.get_value().to_str().unwrap()).collect();
+        let values: Vec<&str> = got
+            .iter()
+            .map(|c| c.get_value().to_str().unwrap())
+            .collect();
         assert!(values.contains(&"batch/v1/Job"));
         assert!(values.contains(&"batch/v1/CronJob"));
     }
@@ -185,7 +191,10 @@ mod tests {
     #[test]
     fn resource_completer_prefix_matches() {
         let got = resource_completer(OsStr::new("depl"));
-        let values: Vec<&str> = got.iter().map(|c| c.get_value().to_str().unwrap()).collect();
+        let values: Vec<&str> = got
+            .iter()
+            .map(|c| c.get_value().to_str().unwrap())
+            .collect();
         assert!(values.contains(&"deployments"));
         assert!(!values.contains(&"pods"));
     }

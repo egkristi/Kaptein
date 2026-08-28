@@ -1,45 +1,41 @@
 # Kaptein Installation
 
-How to install the **Kaptein** Kubernetes workbench — the `kaptein` CLI and the
-`kaptein-tui` terminal UI.
+How to install the **Kaptein** Kubernetes workbench — a single static binary, `kaptein`.
+The TUI, GUI, and headless agent are all projections of the same view-model, invoked as
+subcommands (`kaptein tui`, `kaptein mcp`, …).
 
 For the *why* and the roadmap, see [`README.md`](../README.md) and
 [`ROADMAP.md`](../ROADMAP.md). For how to *use* Kaptein once installed, see
 [`USAGE.md`](./USAGE.md). For known limitations, see [`ISSUES.md`](../ISSUES.md).
 
-Two binaries ship:
+One static binary ships:
 
-| Binary | Purpose |
-|--------|---------|
-| `kaptein` | The CLI — scripting, one-shots, MCP server, and extension lifecycle. |
-| `kaptein-tui` | The interactive terminal UI (the daily driver). |
+| Command | Purpose |
+|---------|---------|
+| `kaptein` | The CLI — scripting, one-shots, MCP server, extension lifecycle, **and** the TUI (`kaptein tui`). |
 
 **Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
 simplest way to get the CLI is the crate published on crates.io:
 
 ```bash
-cargo install kaptein          # the CLI
-cargo install kaptein-tui      # the terminal UI (separate crate)
+cargo install kaptein          # the CLI + TUI (one binary)
+kaptein tui                    # launch the TUI
 ```
 
-`cargo install kaptein` installs only the CLI (the `kaptein` crate); the TUI is a
-separate crate, `kaptein-tui`. Both are version-pinned on crates.io, so you get the
-same release as the tag.
-
-**Recommended — signed release (both binaries, no Rust):** the install script downloads
-the prebuilt, signed binaries for your platform, verifies the SHA-256 checksum against
+**Recommended — signed release (one binary, no Rust):** the install script downloads
+the prebuilt, signed binary for your platform, verifies the SHA-256 checksum against
 the release's `SHA256SUMS`, cosign-verifies that file's signature against the GitHub
 Actions OIDC identity, and installs to `~/.local/bin` (or `KAPTEIN_INSTALL_DIR`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 # pick a version / install dir:
-KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+KAPTEIN_VERSION=v0.30.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
 Which to use: `cargo install` is the default for CLI-only users who already have Rust.
-`install.sh` is the default when you want **both** binaries and the verified signature
-chain (no Rust required).
+`install.sh` is the default when you want the verified signature chain (no Rust
+required).
 
 Other install methods:
 

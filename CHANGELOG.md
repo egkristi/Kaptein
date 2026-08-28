@@ -4,9 +4,15 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.30.0] - 2026-08-28
 
 ### Changed
+- **One static binary — the TUI is now `kaptein tui`, not a separate `kaptein-tui`**
+  executable. `kaptein-tui` was converted to a *library* hosted by the `kaptein` binary
+  (the "one static binary" thesis: TUI, GUI, and headless are all projections of the same
+  view-model, invoked as subcommands — `kaptein tui`, `kaptein mcp`, …). `install.sh` and
+  the release now ship a single `kaptein` binary; the legacy `frontend-tui` crates.io
+  crate is yanked. `cargo install kaptein` gives you the CLI **and** the TUI.
 - **The TUI quit key is now vim-style `:q`** (plus `:q!`, `:x`, and `:wq`), instead of
   the bare `q`. The `:` palette now matches the vim quit family exactly before the fuzzy
   fallback, so `:q` quits deterministically. `Esc` and `Ctrl-C` still quit. The status

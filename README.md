@@ -51,7 +51,8 @@ below is labelled one of three ways:
 - 🧪 **Preview** — ships, but not yet complete or fully integrated across surfaces.
 - 🛠️ **Planned** — on the roadmap (see [`ROADMAP.md`](./ROADMAP.md)); not yet shipped.
 
-**Available now (Phase 1):** the `kaptein` CLI and `kaptein-tui`, resource navigation
+**Available now (Phase 1):** the `kaptein` CLI (one static binary — TUI, GUI, and
+headless are subcommands of it), resource navigation
 (list built-ins **and** CRDs, describe, logs, events, watch), diagnostics ("why isn't
 this pod ready"), RBAC preflight, context guardrails (read-only default + break-glass),
 secret masking, a dry-run-gated write path, the read-only **governed MCP server**, and
@@ -432,38 +433,37 @@ guardrail ([#16](https://github.com/egkristi/Kaptein/issues/16)).
 > server, configuration, and the lens/extension system. (Installing? See
 > [`docs/INSTALL.md`](docs/INSTALL.md).)
 
-Two binaries ship:
+One static binary ships — the TUI, GUI, and headless agent are all projections of the
+same view-model, invoked as subcommands (`kaptein tui`, `kaptein mcp`, …):
 
-| Binary | Purpose | Installed by |
-|--------|---------|--------------|
-| `kaptein` | The CLI — scripting, one-shots, MCP server, extension lifecycle. | `cargo install kaptein`, `install.sh`, Krew |
-| `kaptein-tui` | The interactive terminal UI (the daily driver). | `cargo install kaptein-tui`, `install.sh` |
+| Command | Purpose |
+|---------|---------|
+| `kaptein` | The CLI — scripting, one-shots, MCP server, extension lifecycle, **and** the TUI (`kaptein tui`). |
 
 **Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
 simplest way to get the CLI is the crate published on crates.io:
 
 ```bash
-cargo install kaptein          # the CLI
-cargo install kaptein-tui      # the terminal UI (separate crate)
+cargo install kaptein          # the CLI + TUI (one binary)
+kaptein tui                    # launch the TUI
 ```
 
-**Recommended — signed release (both binaries, no Rust):** the install script downloads
-the prebuilt, signed binaries for your platform, verifies the SHA-256 checksum against
+**Recommended — signed release (one binary, no Rust):** the install script downloads
+the prebuilt, signed binary for your platform, verifies the SHA-256 checksum against
 the release's `SHA256SUMS`, and cosign-verifies that file's signature against the GitHub
 Actions OIDC identity, then installs to `~/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 # pick a version / install dir:
-KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+KAPTEIN_VERSION=v0.30.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
 Which to use: `cargo install` is the default for CLI-only users who already have Rust
 (one standard command, version-pinned by crates.io, no signature verification to
-configure). `install.sh` is the default when you want **both** binaries and the verified
-signature chain — the path this project's security posture (`SECURITY.md`) is built
-around. The two are complementary: `cargo install` does not ship the TUI, and the
-install script does not require a Rust toolchain.
+configure). `install.sh` is the default when you want the verified signature chain
+without a Rust toolchain — the path this project's security posture (`SECURITY.md`) is
+built around.
 
 Other install methods:
 

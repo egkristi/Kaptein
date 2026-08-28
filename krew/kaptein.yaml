@@ -2,8 +2,9 @@
 # point (Distribution & release sync, ROADMAP.md).
 #
 # Krew installs a *single* binary named after the plugin into
-# ~/.krew/bin/kubectl-kaptein. We ship the `kaptein` CLI (the TUI is not a kubectl
-# subcommand, so it is distributed via install.sh, not Krew).
+# ~/.krew/bin/kubectl-kaptein. Kaptein is one static binary: the TUI is `kaptein
+# tui` (not a separate executable), so the Krew-installed `kubectl kaptein` gives
+# you the full CLI including the TUI subcommand.
 #
 # NOTE: this file is a *template*. The version and per-platform sha256 tokens are
 # substituted at release time (see .github/workflows/release.yml) and the rendered

@@ -1,7 +1,7 @@
 # Kaptein Usage Manual
 
 This is the operator's manual for **Kaptein** — the unified Kubernetes workbench. It
-covers the command-line interface (`kaptein`), the terminal UI (`kaptein-tui`), the
+covers the command-line interface (`kaptein`), the terminal UI (`kaptein tui`), the
 governed MCP server (`kaptein mcp`), configuration, and the extension/lens system.
 
 For installation, see [`INSTALL.md`](./INSTALL.md). For the *why* and the roadmap, see
@@ -226,14 +226,15 @@ External tools degrade gracefully when absent — never a panic, a clear error m
 
 ---
 
-## 3. The TUI (`kaptein-tui`)
+## 3. The TUI (`kaptein tui`)
 
 The daily driver: a ratatui table over cluster resources with vim navigation, a detail
-pane, and lens-driven navigation.
+pane, and lens-driven navigation. It is a subcommand of the single `kaptein` binary, not
+a separate executable.
 
 ```bash
-kaptein-tui
-KAPTEIN_EXTENSIONS_DIR=./extensions kaptein-tui   # control where lenses are discovered
+kaptein tui
+KAPTEIN_EXTENSIONS_DIR=./extensions kaptein tui   # control where lenses are discovered
 ```
 
 ### 3.1 Keys
@@ -505,7 +506,7 @@ kaptein delete --gvk apps/v1/Deployment --name web -n prod --confirm --break-gla
 1. Write `extensions/my-crd/extension.yaml` and a lens YAML (see §5.2).
 2. Validate: `kaptein viewdef-validate -f extensions/my-crd/lens.yaml`
 3. Check discovery: `kaptein lenses -d extensions`
-4. Run `kaptein-tui` and press `Tab` until your CRD appears — no recompile.
+4. Run `kaptein tui` and press `Tab` until your CRD appears — no recompile.
 
 ### 7.5 "Let an agent read the cluster, safely"
 

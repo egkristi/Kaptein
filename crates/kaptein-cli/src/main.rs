@@ -184,6 +184,8 @@ enum Command {
     },
     /// Run the governed MCP server over stdio (read-only).
     Mcp,
+    /// Run the interactive terminal UI (the daily driver).
+    Tui,
     /// Show recent cluster events ("what changed in the last N minutes").
     Events {
         /// namespace (omit for all namespaces)
@@ -1126,6 +1128,13 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         Command::Mcp => mcp::serve()
             .await
             .map_err(|e| kaptein_core::Error::Internal(e.to_string())),
+        Command::Tui => {
+            // The TUI is a projection of the same view-model, hosted as a subcommand of
+            // the single `kaptein` binary (one static binary — not a separate executable).
+            kaptein_tui::run()
+                .await
+                .map_err(|e| kaptein_core::Error::Internal(e.to_string()))
+        }
         Command::Events {
             namespace,
             minutes,

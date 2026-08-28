@@ -88,7 +88,7 @@ afternoon; holding nine synchronized crates through Phase 1 is weekly friction):
 crates/
   kaptein-core/       # kube-rs client, watchers/reflectors, CRD discovery, stores
   kaptein-viewmodel/  # renderer-agnostic logic (the product)
-  kaptein-tui/        # ratatui
+  kaptein-tui/        # ratatui (a *library* — hosted by the CLI as `kaptein tui`)
   # future (split out when they have code): frontend-gui, serve, headless,
   # viewdef, plugins, ext-sdk
 extensions/        # example extensions (lenses, plugins, integrations)

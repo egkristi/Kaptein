@@ -111,6 +111,7 @@ the log (ADR-0010, ADR-0007).
 ## The projections
 
 - **`kaptein-tui`** (ratatui) — terminal, SSH/bastion. The first daily-driver surface.
+  A *library* hosted by the single `kaptein` binary as `kaptein tui`.
 - **`frontend-gui`** (egui + wasm) — native desktop, and a browser bundle that relays
   through `serve` (see ADR-0002). Uses `egui_table` for the virtualized `Table` surface.
 - **`headless`** — agent mode that drives the view-model directly, **no network
