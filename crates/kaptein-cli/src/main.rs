@@ -140,6 +140,33 @@ enum Command {
         #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
         context: Option<String>,
     },
+    /// Report a resource's owners and dependents (what cascade-delete would affect).
+    BlastRadius {
+        /// group/version/kind, e.g. apps/v1/Deployment
+        #[arg(short, long, default_value = "apps/v1/Deployment", add = ArgValueCompleter::new(completion::gvk_completer))]
+        gvk: String,
+        /// resource name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace (omit for cluster-scoped)
+        #[arg(short = 'n', long, add = ArgValueCompleter::new(completion::namespace_completer))]
+        namespace: Option<String>,
+        /// kubeconfig context to use (context switching)
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
+        context: Option<String>,
+    },
+    /// Analyze why a Job is pending or stuck (conditions + pod diagnostics).
+    WhyJobPending {
+        /// job name
+        #[arg(short = 'p', long)]
+        name: String,
+        /// namespace
+        #[arg(short = 'n', long, default_value = "default", add = ArgValueCompleter::new(completion::namespace_completer))]
+        namespace: String,
+        /// kubeconfig context to use (context switching)
+        #[arg(long, add = ArgValueCompleter::new(completion::context_completer))]
+        context: Option<String>,
+    },
     /// YAML-describe a single resource.
     Describe {
         /// group/version/kind
@@ -941,6 +968,66 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             } else {
                 for f in findings {
                     println!("{}: {}", f.code, f.summary);
+                }
+            }
+            Ok(())
+        }
+        Command::BlastRadius {
+            gvk,
+            name,
+            namespace,
+            context,
+        } => {
+            let gvk = parse_gvk(&gvk);
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
+            let br = kaptein_core::moat::blast_radius(&client, namespace.as_deref(), &gvk, &name)
+                .await?;
+            println!(
+                "blast radius for {gvk:?}/{}/{}:",
+                namespace.as_deref().unwrap_or("-"),
+                name
+            );
+            if br.owners.is_empty() {
+                println!("  owners: (none — top-level resource)");
+            } else {
+                println!("  owners: {}", br.owners.join(", "));
+            }
+            if br.dependents.is_empty() {
+                println!("  dependents: (none — removing this affects nothing downstream)");
+            } else {
+                println!("  dependents: {}", br.dependents.join(", "));
+            }
+            Ok(())
+        }
+        Command::WhyJobPending {
+            name,
+            namespace,
+            context,
+        } => {
+            let client = match context.as_deref() {
+                Some(ctx) => kaptein_core::discovery::client_for_context(Some(ctx)).await?,
+                None => client.clone(),
+            };
+            let expl = kaptein_core::moat::why_is_job_pending(&client, &namespace, &name).await?;
+            println!(
+                "job {namespace}/{name}: failed={} active={} succeeded={}",
+                expl.failed, expl.active, expl.succeeded
+            );
+            if expl.conditions.is_empty() {
+                println!("  conditions: (none recorded)");
+            } else {
+                for (ty, status, msg) in &expl.conditions {
+                    println!("  [{ty} {status}] {msg}");
+                }
+            }
+            if expl.pods.is_empty() {
+                println!("  pods: (none found)");
+            } else {
+                for p in &expl.pods {
+                    println!("  pod: {p}");
                 }
             }
             Ok(())

@@ -173,6 +173,10 @@ GitOps write path, time machine, or fleet.
   `get_logs`, `get_events`) plus the diagnostic moat (`explain_pod_failure`,
   `what_changed_between`, `blast_radius`, `why_is_job_pending`), backed by the M1.6
   rule engine (the one pack ships in Phase 1; more packs in 3a).
+  *Landed (v0.30.0 →): the moat is **not MCP-only** — `kaptein blast-radius` and
+  `kaptein why-job-pending` expose two of the four moat tools as first-class CLI
+  commands, reusing `kaptein-core::moat` (the same engine the MCP tools call), so the
+  moat is one implementation surfaced two ways.*
 - **M1b.4 Governance conformance — *blocking*** *(elevated per review)*
   - Every tool call actually runs **RBAC preflight + context classification + read-only
     guardrail** *before* reaching the API server — not merely documented

@@ -12,6 +12,12 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   250 MB budget (measured ~16 MB; the RSS gate is Linux-only, the p99 latency gate still
   applies everywhere). The "steady-state RSS < 250 MB at 50 000 objects" budget is now
   measured, not aspirational.
+- **M1b.3 — the diagnostic moat is now reachable from the CLI.** `blast_radius` and
+  `why_is_job_pending` were previously exposed only through the MCP server. Two new CLI
+  commands surface them: `kaptein blast-radius --gvk <gvk> --name <n> [-n <ns>]` (owners +
+  dependents, cascade-delete impact) and `kaptein why-job-pending --name <n> -n <ns>`
+  (Job conditions + pod diagnostics). They reuse `kaptein-core::moat` — the same engine
+  the MCP tools call — so the moat is one implementation, two surfaces.
 
 ## [0.30.0] - 2026-08-28
 

@@ -95,14 +95,21 @@ kaptein describe --gvk v1/Node --name node-1                # cluster-scoped: no
 
 Secret values are masked by default (see §1.3).
 
-### 2.3 Diagnostics — `diagnose`
+### 2.3 Diagnostics — `diagnose`, `blast-radius`, `why-job-pending`
 
 ```bash
 kaptein diagnose --name crashy-pod --namespace default
+kaptein blast-radius --gvk apps/v1/Deployment --name web -n prod   # owners + dependents
+kaptein blast-radius --gvk v1/Node --name node-1                   # cluster-scoped: no -n
+kaptein why-job-pending --name my-job -n default                   # conditions + pod diagnostics
 ```
 
-Produces evidence-based findings (crash-loop backoff, image-pull backoff, unschedulable,
-readiness failures, exit-0 jobs, etc.), not raw strings.
+`diagnose` produces evidence-based findings (crash-loop backoff, image-pull backoff,
+unschedulable, readiness failures, exit-0 jobs, etc.), not raw strings. `blast-radius`
+reports a resource's owners and its dependents (what cascade-delete would affect) —
+traversing `Deployment → ReplicaSet → Pod` and `CronJob → Job → Pod`. `why-job-pending`
+explains a stuck/pending Job from its conditions and its pods' diagnostics. (The same
+moat backs the MCP `diagnose`/`blast_radius`/`why_is_job_pending` tools.)
 
 ### 2.4 Logs — `logs`
 
