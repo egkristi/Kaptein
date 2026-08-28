@@ -99,7 +99,12 @@ Milestones:
   - *Landed: the resource path. `redact::redact_object` masks `Secret` `data`/`stringData`,
     sensitive-named fields anywhere in the object, and a Secret's `metadata.annotations`
     (closing the `last-applied-configuration` leak); `describe::RedactionPolicy` gives
-    `kaptein edit` an explicit `Unredacted` path with a `SecretViewed` audit event.*
+    `kaptein edit` an explicit `Unredacted` path with a `SecretViewed` audit event.
+    **`Cell::Redacted` is now actually constructed** (v0.30.0 →): `render_row` recognizes
+    the `[REDACTED]` marker `kaptein-core::redact` produces and emits the *typed*
+    `Cell::Redacted` variant, and `cell_text` renders it as the mask — the frontend renders
+    a mask with no special-case string comparison. Only the unmask-in-place affordance
+    remains open (deliberately).*
   - **Resolved (v0.27.0 re-audit):** log redaction landed — `redact::redact_line` masks
     `key=value`/`key: value`/JSON/`Authorization: Bearer` shapes for sensitive keys and is
     applied in `pod_logs`/`multi_pod_logs`/`follow_logs` (the MCP `logs` tool routes through

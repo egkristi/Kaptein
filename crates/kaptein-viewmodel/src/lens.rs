@@ -422,6 +422,14 @@ pub fn render_row(vd: &ViewDefinition, resource: &serde_json::Value) -> Row {
     Row { id, cells }
 }
 
+/// The marker string the redaction choke point (`kaptein-core::redact`) substitutes for a
+/// masked secret value. The view-model owns the *meaning* of a redacted cell (a mask, not
+/// text), so it recognizes this exact string and constructs the typed [`Cell::Redacted`]
+/// variant rather than a plain `Text` cell — giving every frontend a uniform signal to
+/// render a mask, never the secret. Core owns producing the marker; this constant must
+/// stay in sync with `kaptein-core::redact::REDACTED`.
+pub const REDACTED_MARKER: &str = "[REDACTED]";
+
 /// Build the `Cell` for a single lens column against a resource.
 fn cell_for_column(col: &Column, resource: &serde_json::Value, vd: &ViewDefinition) -> Cell {
     if col.kind == ColumnKind::Status {
@@ -448,6 +456,11 @@ fn cell_for_column(col: &Column, resource: &serde_json::Value, vd: &ViewDefiniti
         Some(serde_json::Value::Number(n)) => Cell::Text {
             value: n.to_string(),
         },
+        // A string that is the redaction marker is a *typed* redacted cell, not text — so
+        // a frontend renders a mask, never the (already-masked) value. This is the M1.7
+        // "Cell::Redacted is actually constructed" path: the marker string produced by
+        // `kaptein-core::redact` becomes the render contract's redacted variant.
+        Some(serde_json::Value::String(s)) if s == REDACTED_MARKER => Cell::Redacted,
         Some(serde_json::Value::String(s)) => Cell::Text { value: s.clone() },
         Some(serde_json::Value::Bool(b)) => Cell::Text {
             value: b.to_string(),
@@ -1033,6 +1046,76 @@ mod tests {
             Cell::Status {
                 level: crate::render::StatusLevel::Info,
                 label_key: "unknown".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn render_row_constructs_typed_redacted_cell_for_the_marker() {
+        // M1.7: a lens column bound to a field that the redaction choke point masked to
+        // the `[REDACTED]` marker must produce the *typed* `Cell::Redacted` variant — not
+        // a plain `Text` cell carrying the marker string — so a frontend renders a mask
+        // with no special-case string comparison.
+        let vd = ViewDefinition {
+            id: "com.example.secret".into(),
+            api_version: LENS_SCHEMA_VERSION,
+            target: GroupVersionKind {
+                group: "".into(),
+                version: "v1".into(),
+                kind: "Secret".into(),
+            },
+            columns: vec![Column {
+                id: "password".into(),
+                header_key: "col.password".into(),
+                kind: ColumnKind::Text,
+                sortable: true,
+                field: Some("data.password".into()),
+            }],
+            status: vec![],
+            conditions: vec![],
+            actions: vec![],
+        };
+        // A Secret whose `data.password` was already masked by kaptein-core::redact.
+        let resource = serde_json::json!({
+            "metadata": {"name": "db", "namespace": "n"},
+            "data": {"password": REDACTED_MARKER}
+        });
+        let row = render_row(&vd, &resource);
+        assert_eq!(row.cells[0], Cell::Redacted);
+    }
+
+    #[test]
+    fn render_row_keeps_plain_strings_as_text() {
+        // A non-marker string is still a Text cell (the redaction special-case must not
+        // over-match ordinary values that merely contain the word "redacted").
+        let vd = ViewDefinition {
+            id: "com.example.t".into(),
+            api_version: LENS_SCHEMA_VERSION,
+            target: GroupVersionKind {
+                group: "example.io".into(),
+                version: "v1".into(),
+                kind: "Thing".into(),
+            },
+            columns: vec![Column {
+                id: "note".into(),
+                header_key: "col.note".into(),
+                kind: ColumnKind::Text,
+                sortable: true,
+                field: Some("spec.note".into()),
+            }],
+            status: vec![],
+            conditions: vec![],
+            actions: vec![],
+        };
+        let resource = serde_json::json!({
+            "metadata": {"name": "x"},
+            "spec": {"note": "a redacted-looking but real value"}
+        });
+        let row = render_row(&vd, &resource);
+        assert_eq!(
+            row.cells[0],
+            Cell::Text {
+                value: "a redacted-looking but real value".into()
             }
         );
     }

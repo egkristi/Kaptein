@@ -190,11 +190,15 @@ unowned debt. Done items are struck through.
   asserting a lens-declared column reaches a `Row` through the live data plane (added in
   `kaptein-integration`), and per-lens action/health surfaces (M2.4+).
 - **`Cell::Redacted` and `Operation::SecretViewed` have exactly one producer each.**
-  `SecretViewed` is emitted by `kaptein edit`'s unredacted fetch; `Cell::Redacted` is still
-  only pattern-matched (`table::cell_text`), never constructed, because no surface has an
-  unmask-in-place affordance. M1.7 keeps that bullet open deliberately. *(The lens render
-  path no longer leaks: `map_object_with` redacts the object before `render_row`, so a
-  lens bound to a secret field reads the `[REDACTED]` marker — issue #35.)*
+  `SecretViewed` is emitted by `kaptein edit`'s unredacted fetch. `Cell::Redacted` **is now
+  constructed** (v0.30.0 →): `render_row`'s `cell_for_column` recognizes the
+  `[REDACTED]` marker that `kaptein-core::redact` substitutes and emits the *typed*
+  `Cell::Redacted` variant (instead of a `Text` cell carrying the marker string), and
+  `cell_text` renders it as the `[REDACTED]` mask — so a frontend renders a mask with no
+  special-case string comparison. The one remaining M1.7 open is an unmask-in-place
+  affordance (kept deliberately). *(The lens render path no longer leaks: `map_object_with`
+  redacts the object before `render_row`, so a lens bound to a secret field reaches the
+  `Row` as `Cell::Redacted` — issue #35.)*
 
 ## Hygiene notes
 

@@ -929,12 +929,17 @@ mod tests {
 
         // The name column is fine; the password column must be masked, not plaintext.
         assert_eq!(kaptein_viewmodel::cell_text(&row.cells[0]), "db-secret");
-        let password_cell = kaptein_viewmodel::cell_text(&row.cells[1]);
-        assert!(
-            !password_cell.contains("hunter") && !password_cell.contains("aHVudGVyMg=="),
-            "lens column must not leak secret values, got {password_cell:?}"
+        // The password column is now the *typed* `Cell::Redacted` variant (M1.7), not a
+        // `Text` cell carrying a marker string — so the frontend renders a mask without
+        // any special-case string comparison.
+        assert_eq!(
+            row.cells[1],
+            kaptein_viewmodel::Cell::Redacted,
+            "a lens column bound to a secret field must be the typed Redacted cell"
         );
-        assert_eq!(password_cell, "[REDACTED]", "expected the redaction marker");
+        // Its display text is the mask (the frontend renders `[REDACTED]`, never the
+        // secret and never an empty-looking gap).
+        assert_eq!(kaptein_viewmodel::cell_text(&row.cells[1]), "[REDACTED]");
     }
 
     /// A live integration test (skipped without a cluster): seeds a `LivePlane` from the

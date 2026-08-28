@@ -17,7 +17,9 @@ pub fn cell_text(cell: &Cell) -> String {
         Cell::Number { value } => value.to_string(),
         Cell::Timestamp { millis } => millis.to_string(),
         Cell::Status { label_key, .. } => label_key.clone(),
-        Cell::Redacted => String::new(),
+        // A redacted cell renders as a mask, never an empty-looking blank — the operator
+        // should see `[REDACTED]`, not a gap that looks like a rendering bug.
+        Cell::Redacted => crate::lens::REDACTED_MARKER.to_string(),
     }
 }
 

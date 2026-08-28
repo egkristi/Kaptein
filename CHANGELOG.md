@@ -18,6 +18,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   dependents, cascade-delete impact) and `kaptein why-job-pending --name <n> -n <ns>`
   (Job conditions + pod diagnostics). They reuse `kaptein-core::moat` — the same engine
   the MCP tools call — so the moat is one implementation, two surfaces.
+- **M1.7 — `Cell::Redacted` is now actually constructed.** The typed `Cell::Redacted`
+  render-contract variant existed but was never produced — `render_row` mapped the
+  `[REDACTED]` marker (from `kaptein-core::redact`) to a plain `Text` cell, so a frontend
+  had to special-case the marker string. `render_row` now recognizes the marker and emits
+  `Cell::Redacted`, and `cell_text` renders it as the `[REDACTED]` mask — a frontend
+  renders a mask with no string comparison, and the lens-driven view reaches the `Row` as
+  the typed variant (with a test pinning it).
 
 ## [0.30.0] - 2026-08-28
 
