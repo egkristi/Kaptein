@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo metadata --no-deps --format-version 1 > /tmp/meta.json
-          for crate in kaptein-core kaptein-viewmodel kaptein-integration kaptein kaptein-tui; do
+          for crate in kaptein-core kaptein-viewmodel kaptein-integration kaptein-tui kaptein; do
             version="$(python3 -c 'import sys,json; m=json.load(open("/tmp/meta.json")); print(next(p["version"] for p in m["packages"] if p["name"]==sys.argv[1]))' "$crate")"
             # crates.io returns 200 for an existing version, 404 otherwise.
             if curl -fsSL -A "Kaptein publish (GitHub Actions)" \
