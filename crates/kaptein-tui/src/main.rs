@@ -9,7 +9,7 @@
 //!   j/k  move selection        g/G  top/bottom
 //!   <Tab>  cycle resource kind  n  cycle namespace
 //!   d  describe selected        i  diagnose selected
-//!   q / Esc / Ctrl-C  quit
+//!   :q / Esc / Ctrl-C  quit
 
 use std::io;
 
@@ -291,7 +291,7 @@ async fn run_event_loop(
             )
         } else {
             format!(
-                " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  ::palette  d:describe  i:diagnose  q:quit ",
+                " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  ::palette  d:describe  i:diagnose  :q:quit ",
                 kind.label,
                 namespace.as_deref().unwrap_or("all"),
                 sort_label(&kind.headers, sort_key, sort_descending),
@@ -423,7 +423,6 @@ async fn run_event_loop(
                     scroll = 0;
                 }
                 KeyCode::Esc => break,
-                KeyCode::Char('q') if palette_query.is_none() && jump_query.is_none() => break,
                 KeyCode::Char('c')
                     if key.modifiers.contains(KeyModifiers::CONTROL)
                         && palette_query.is_none()
@@ -446,10 +445,16 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Enter if palette_query.is_some() => {
+                    // Vim quit commands are matched exactly (before the fuzzy fallback),
+                    // so `:q`, `:q!`, `:x`, and `:wq` all quit deterministically — no
+                    // fuzzy ambiguity. Then fall back to the fuzzy palette.
+                    let q = palette_query.as_deref().unwrap_or_default();
+                    let is_quit = matches!(q.trim(), "q" | "q!" | "x" | "wq");
+                    if is_quit {
+                        break;
+                    }
                     // Execute the best-matching command (or no-op if none match).
-                    if let Some(q) = palette_query.as_deref()
-                        && let Some(cmd) = palette_matches(q).into_iter().next()
-                    {
+                    if let Some(cmd) = palette_matches(q).into_iter().next() {
                         let should_quit = execute_command(
                             cmd,
                             client,

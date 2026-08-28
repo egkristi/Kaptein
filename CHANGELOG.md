@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Changed
+- **The TUI quit key is now vim-style `:q`** (plus `:q!`, `:x`, and `:wq`), instead of
+  the bare `q`. The `:` palette now matches the vim quit family exactly before the fuzzy
+  fallback, so `:q` quits deterministically. `Esc` and `Ctrl-C` still quit. The status
+  line, header doc, and `docs/USAGE.md` key table reflect the change.
+
 ### Fixed
 - **`kaptein logs --name … --regex …` silently ignored the regex (#38).** The
   single-pod **non-follow** path (`pod_logs`) never applied `--regex` — the filter was

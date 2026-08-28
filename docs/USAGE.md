@@ -353,7 +353,7 @@ KAPTEIN_EXTENSIONS_DIR=./extensions kaptein-tui   # control where lenses are dis
 | `:` | Command palette (fuzzy-match commands, `Enter` to run, `Esc` to cancel) |
 | `d` | Describe the selected resource |
 | `i` | Diagnose the selected pod |
-| `q` / `Esc` / `Ctrl-C` | Quit |
+| `:q` / `:q!` / `:x` / `:wq` | Quit (vim-style; `Esc` / `Ctrl-C` also quit) |
 
 ### 4.2 Lens-driven navigation (M2.2)
 
