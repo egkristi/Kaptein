@@ -4,119 +4,15 @@ This is the operator's manual for **Kaptein** — the unified Kubernetes workben
 covers the command-line interface (`kaptein`), the terminal UI (`kaptein-tui`), the
 governed MCP server (`kaptein mcp`), configuration, and the extension/lens system.
 
-For the *why* and the roadmap, see [`README.md`](../README.md) and
-[`ROADMAP.md`](../ROADMAP.md). For known limitations, see [`ISSUES.md`](../ISSUES.md).
+For installation, see [`INSTALL.md`](./INSTALL.md). For the *why* and the roadmap, see
+[`README.md`](../README.md) and [`ROADMAP.md`](../ROADMAP.md). For known limitations, see
+[`ISSUES.md`](../ISSUES.md).
 
 ---
 
-## 1. Installation
+## 1. Concepts
 
-Two binaries ship:
-
-| Binary | Purpose |
-|--------|---------|
-| `kaptein` | The CLI — scripting, one-shots, MCP server, and extension lifecycle. |
-| `kaptein-tui` | The interactive terminal UI (the daily driver). |
-
-**Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
-simplest way to get the CLI is the crate published on crates.io:
-
-```bash
-cargo install kaptein          # the CLI
-cargo install kaptein-tui      # the terminal UI (separate crate)
-```
-
-`cargo install kaptein` installs only the CLI (the `kaptein` crate); the TUI is a
-separate crate, `kaptein-tui`. Both are version-pinned on crates.io, so you get the
-same release as the tag.
-
-**Recommended — signed release (both binaries, no Rust):** the install script downloads
-the prebuilt, signed binaries for your platform, verifies the SHA-256 checksum against
-the release's `SHA256SUMS`, cosign-verifies that file's signature against the GitHub
-Actions OIDC identity, and installs to `~/.local/bin` (or `KAPTEIN_INSTALL_DIR`):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
-# pick a version / install dir:
-KAPTEIN_VERSION=v0.29.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
-```
-
-Which to use: `cargo install` is the default for CLI-only users who already have Rust.
-`install.sh` is the default when you want **both** binaries and the verified signature
-chain (no Rust required).
-
-Other install methods:
-
-- **kubectl plugin (Krew)**: Kaptein is BUSL-1.1 (source-available), and Krew's central
-  index requires plugins to be open source under an OSI-approved license — so it is not
-  submitted to `kubernetes-sigs/krew-index`. Install from Kaptein's **custom index**, or
-  directly from the release manifest:
-
-  ```bash
-  kubectl krew index add kaptein https://github.com/egkristi/krew-index.git
-  kubectl krew install kaptein/kaptein
-
-  # or, straight from the release asset (no index):
-  kubectl krew install --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml
-  ```
-
-  See [#34](https://github.com/egkristi/Kaptein/issues/34) for the licensing rationale.
-- **Container image**: `docker run ghcr.io/egkristi/kaptein get --gvk v1/Pod`.
-- **From source**: `cargo build --release` (requires a Rust toolchain ≥ 1.97).
-
-Verify a download yourself (`cosign` must be installed):
-
-```bash
-cosign verify-blob \
-  --certificate-identity "https://github.com/egkristi/Kaptein/.github/workflows/release.yml@refs/tags/<tag>" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --bundle SHA256SUMS.bundle SHA256SUMS
-```
-
-Shell completions are generated from the same parser the CLI uses, so they can never
-drift from the command surface:
-
-```bash
-kaptein completions bash > ~/.local/share/bash-completion/completions/kaptein
-kaptein completions zsh  > "${fpath[1]}/_kaptein"
-kaptein completions fish > ~/.config/fish/completions/kaptein.fish
-```
-
-**Dynamic (live-cluster) completion.** The static `completions` output covers flags and
-subcommands; for **live values** — namespaces, kubeconfig contexts, pod names, GVKs, and
-plural resources — the CLI also ships a *dynamic* completer that queries the cluster at
-completion time. Source the dynamic registration (which re-invokes `kaptein` as you type)
-instead of, or alongside, the static file:
-
-```bash
-# bash
-source <(COMPLETE=bash kaptein)
-# zsh
-source <(COMPLETE=zsh kaptein)
-# fish
-COMPLETE=fish kaptein | source
-```
-
-What completes dynamically:
-
-| Argument | Candidates |
-|----------|-----------|
-| `--namespace` / `-n` | live namespace names |
-| `--context` | kubeconfig context names (no cluster call) |
-| `--gvk` / `-g` | common built-in GVKs (`v1/Pod`, `apps/v1/Deployment`, …) |
-| `--resource` / `-r` (`can`, `preflight`) | common plural resources (`pods`, `deployments`, …) |
-| `--name` / `-p` / `--pod` | pod names in the `default` namespace |
-
-Known limitation: the pod-name completer completes from the `default` namespace (the
-completer cannot read a sibling `-n` flag you already typed), so `-n <ns>` first to
-complete pods in another namespace. Completion always degrades gracefully — an
-unreachable cluster or a permission denial yields no candidates, never an error or hang.
-
----
-
-## 2. Concepts
-
-### 2.1 GVK addressing
+### 1.1 GVK addressing
 
 Kaptein addresses resources by `group/version/kind` (GVK) throughout — built-ins and
 CRDs are handled uniformly via the discovery API. The `--gvk` flag accepts:
@@ -127,7 +23,7 @@ CRDs are handled uniformly via the discovery API. The `--gvk` flag accepts:
 | `apps/v1/Deployment` | Group `apps`, version `v1`, kind `Deployment` |
 | `postgresql.cnpg.io/v1/Cluster` | A CRD group |
 
-### 2.2 Context guardrails (M1.1)
+### 1.2 Context guardrails (M1.1)
 
 Kaptein classifies every kubeconfig context as `Prod`, `Staging`, or `Unknown`:
 
@@ -141,27 +37,27 @@ apply. On `prod`/`unknown` contexts, a non-empty `--break-glass` reason is *also
 required — the gate is enforced **before** the request reaches the API server (defense
 in depth with RBAC).
 
-### 2.3 Secrets are masked by default (M1.7)
+### 1.3 Secrets are masked by default (M1.7)
 
 `describe` (and the MCP `describe` tool) redact `Secret` values and sensitive-named
 fields before serialization. Logs are likewise redaction-aware. `kaptein edit` fetches
 **unredacted** so you can edit real values, but that unmask is audited as
 `SecretViewed`.
 
-### 2.4 Read-only default
+### 1.4 Read-only default
 
 Unknown contexts are read-only. There is no path that writes to the API server without
-going through the guardrail gate — see §2.2.
+going through the guardrail gate — see §1.2.
 
 ---
 
-## 3. The CLI (`kaptein`)
+## 2. The CLI (`kaptein`)
 
 Run `kaptein --help` or `kaptein <command> --help` for the authoritative, up-to-date
 help. The sections below are the human guide; flags may gain new options between
 releases.
 
-### 3.1 Reading resources — `get`
+### 2.1 Reading resources — `get`
 
 ```bash
 # Pods (all namespaces), the default kind
@@ -189,7 +85,7 @@ kaptein get --context staging --gvk v1/Service
 Sortable columns: `name`, `namespace`, `created` (or `age`). Filtering is a
 case-insensitive substring match over `name`/`namespace`/`status`.
 
-### 3.2 Describing — `describe`
+### 2.2 Describing — `describe`
 
 ```bash
 kaptein describe --name my-pod --namespace default          # gvk defaults to v1/Pod
@@ -197,9 +93,9 @@ kaptein describe --gvk apps/v1/Deployment --name web -n prod
 kaptein describe --gvk v1/Node --name node-1                # cluster-scoped: no -n
 ```
 
-Secret values are masked by default (see §2.3).
+Secret values are masked by default (see §1.3).
 
-### 3.3 Diagnostics — `diagnose`
+### 2.3 Diagnostics — `diagnose`
 
 ```bash
 kaptein diagnose --name crashy-pod --namespace default
@@ -208,7 +104,7 @@ kaptein diagnose --name crashy-pod --namespace default
 Produces evidence-based findings (crash-loop backoff, image-pull backoff, unschedulable,
 readiness failures, exit-0 jobs, etc.), not raw strings.
 
-### 3.4 Logs — `logs`
+### 2.4 Logs — `logs`
 
 ```bash
 # Tail one pod
@@ -228,14 +124,14 @@ kaptein logs --name my-pod -n default --json
 `kubectl logs --selector … --tail N`). To cap the *total* output, use `--regex` or pipe
 through `tail`, or narrow the selector.
 
-### 3.5 Events & the landing view
+### 2.5 Events & the landing view
 
 ```bash
 kaptein events --namespace prod --minutes 30               # what changed recently
 kaptein overview --minutes 15                              # is anything broken?
 ```
 
-### 3.6 Watching — `watch` and `watch-store`
+### 2.6 Watching — `watch` and `watch-store`
 
 ```bash
 # Ring-buffer watch (in-memory, no persistence)
@@ -247,7 +143,7 @@ kaptein watch-store --gvk v1/Pod --namespace prod --limit 500
 kaptein watch-store --gvk v1/Pod --namespace prod --max 20  # apply 20 deltas, then exit
 ```
 
-### 3.7 RBAC preflight — `can` and `preflight`
+### 2.7 RBAC preflight — `can` and `preflight`
 
 ```bash
 kaptein can --verb delete --resource pods --namespace prod
@@ -255,7 +151,7 @@ kaptein can --verb create --resource clusters --group postgresql.cnpg.io -n defa
 kaptein preflight --resource deployments --group apps -n default   # whole action set
 ```
 
-### 3.8 Context inspection
+### 2.8 Context inspection
 
 ```bash
 kaptein context                                              # current + its class
@@ -264,7 +160,7 @@ kaptein config-explain-context --context prod-eu-west       # why it classifies 
 kaptein config-validate                                      # check your config.toml
 ```
 
-### 3.9 Writes — dry-run by default
+### 2.9 Writes — dry-run by default
 
 Every write command prints a **dry-run** result unless you pass `--confirm`. On
 `prod`/`unknown` contexts you must *also* pass a `--break-glass` reason.
@@ -298,7 +194,7 @@ kaptein debug-containers --pod my-pod -n default
 kaptein debug --pod my-pod -n default --name debug --image busybox -- sleep 3600 --confirm
 ```
 
-### 3.10 Exec & port-forward (read-only)
+### 2.10 Exec & port-forward (read-only)
 
 ```bash
 kaptein exec --pod my-pod -n default -- ls -la
@@ -318,7 +214,7 @@ kaptein port-forward-list
 kaptein port-forward-remove --name web-dev
 ```
 
-### 3.11 External tools — `krew`
+### 2.11 External tools — `krew`
 
 ```bash
 kaptein krew                                  # list krew plugins
@@ -330,7 +226,7 @@ External tools degrade gracefully when absent — never a panic, a clear error m
 
 ---
 
-## 4. The TUI (`kaptein-tui`)
+## 3. The TUI (`kaptein-tui`)
 
 The daily driver: a ratatui table over cluster resources with vim navigation, a detail
 pane, and lens-driven navigation.
@@ -340,7 +236,7 @@ kaptein-tui
 KAPTEIN_EXTENSIONS_DIR=./extensions kaptein-tui   # control where lenses are discovered
 ```
 
-### 4.1 Keys
+### 3.1 Keys
 
 | Key | Action |
 |-----|--------|
@@ -355,7 +251,7 @@ KAPTEIN_EXTENSIONS_DIR=./extensions kaptein-tui   # control where lenses are dis
 | `i` | Diagnose the selected pod |
 | `:q` / `:q!` / `:x` / `:wq` | Quit (vim-style; `Esc` / `Ctrl-C` also quit) |
 
-### 4.2 Lens-driven navigation (M2.2)
+### 3.2 Lens-driven navigation (M2.2)
 
 The TUI discovers **lens kinds** at startup. A lens is a declarative view definition
 (`extension.yaml` + a lens YAML) that binds a CRD to columns, status inference, and
@@ -364,11 +260,11 @@ defaulting to `./extensions`) makes its CRD navigable **with no recompile** — 
 `Tab` to cycle to it. The lens's declared columns become the table columns; its status
 rules drive the status chip.
 
-See §6 for how lenses work and how to author them.
+See §5 for how lenses work and how to author them.
 
 ---
 
-## 5. The governed MCP server (`kaptein mcp`)
+## 4. The governed MCP server (`kaptein mcp`)
 
 `kaptein mcp` exposes a **read-only, governed** Model Context Protocol server over
 stdio, so AI agents can drive Kaptein through the *same* guardrails as a human.
@@ -377,7 +273,7 @@ stdio, so AI agents can drive Kaptein through the *same* guardrails as a human.
 kaptein mcp
 ```
 
-### 5.1 Tools
+### 4.1 Tools
 
 | Tool | Description |
 |------|-------------|
@@ -391,7 +287,7 @@ kaptein mcp
 | `blast_radius` | Owners + dependents of a resource (cascade-delete impact). |
 | `what_changed_between` | Events in a time window. |
 
-### 5.2 Governance (ADR-0010)
+### 4.2 Governance (ADR-0010)
 
 - **RBAC preflight** runs before every tool call, against the *call's own* arguments
   (the right verb, resource, group, namespace).
@@ -404,14 +300,14 @@ kaptein mcp
   and the outcome (`Rejected` for denied calls).
 - **An agent never writes to the API server** — it can only open a PR (Phase 2 / M2.7).
 
-### 5.3 Contract versioning
+### 4.3 Contract versioning
 
 The server advertises its contract version and refuses a client whose declared
 `_meta["io.kaptein/apiVersion"]` has a different major.
 
 ---
 
-## 6. Extensions & lenses
+## 5. Extensions & lenses
 
 Kaptein's extension model is **data first, code second** (ADR-0004). Three tiers:
 
@@ -424,7 +320,7 @@ Kaptein's extension model is **data first, code second** (ADR-0004). Three tiers
 Every extension is declared by an `extension.yaml` manifest, discovered from
 Git-backed paths (no central marketplace), and can be enabled/disabled.
 
-### 6.1 The extension manifest (`extension.yaml`)
+### 5.1 The extension manifest (`extension.yaml`)
 
 ```yaml
 id: com.example.cnpg-lens
@@ -436,7 +332,7 @@ entrypoint: lens.cnpg.yaml
 permissions: []   # empty = default-deny (tiers 2/3)
 ```
 
-### 6.2 A lens (view definition)
+### 5.2 A lens (view definition)
 
 ```yaml
 id: com.example.cnpg-lens
@@ -491,7 +387,7 @@ actions:
 Shipped lenses (under `extensions/`): CNPG, Strimzi Kafka, KubeVirt, cert-manager,
 Keycloak, Tekton, Velero, Karpenter, Knative — all MIT/Apache-2.0.
 
-### 6.3 Extension & lens lifecycle
+### 5.3 Extension & lens lifecycle
 
 ```bash
 # Discover + validate manifests in a directory
@@ -506,7 +402,7 @@ kaptein extension disable com.example.cnpg-lens
 kaptein lenses -d extensions
 ```
 
-### 6.4 Lens authoring tools
+### 5.4 Lens authoring tools
 
 ```bash
 # Validate a lens against the schema (reviewable in PRs)
@@ -519,7 +415,7 @@ kaptein viewdef-schema
 kaptein viewdef-render -f extensions/lens.cnpg.yaml -r fixture.json
 ```
 
-### 6.5 Lens-driven `get`
+### 5.5 Lens-driven `get`
 
 ```bash
 kaptein get --gvk postgresql.cnpg.io/v1/Cluster --lens extensions/lens.cnpg.yaml
@@ -530,7 +426,7 @@ the built-in four-column view.
 
 ---
 
-## 7. Configuration
+## 6. Configuration
 
 Kaptein reads a single TOML config file:
 
@@ -578,9 +474,9 @@ degrading.
 
 ---
 
-## 8. Worked examples
+## 7. Worked examples
 
-### 8.1 "Why is this pod crashing?"
+### 7.1 "Why is this pod crashing?"
 
 ```bash
 kaptein diagnose --name crashy-pod --namespace prod
@@ -588,14 +484,14 @@ kaptein logs --name crashy-pod --namespace prod --tail 100 --regex "panic|error"
 kaptein describe --name crashy-pod --namespace prod
 ```
 
-### 8.2 "What broke in the last 30 minutes?"
+### 7.2 "What broke in the last 30 minutes?"
 
 ```bash
 kaptein overview --minutes 30
 kaptein events --namespace prod --minutes 30
 ```
 
-### 8.3 "Can I even delete this?"
+### 7.3 "Can I even delete this?"
 
 ```bash
 kaptein can --verb delete --resource deployments --namespace prod
@@ -604,14 +500,14 @@ kaptein preflight --resource deployments --group apps -n prod
 kaptein delete --gvk apps/v1/Deployment --name web -n prod --confirm --break-glass "incident-123"
 ```
 
-### 8.4 "Make this CRD navigable in the TUI"
+### 7.4 "Make this CRD navigable in the TUI"
 
-1. Write `extensions/my-crd/extension.yaml` and a lens YAML (see §6.2).
+1. Write `extensions/my-crd/extension.yaml` and a lens YAML (see §5.2).
 2. Validate: `kaptein viewdef-validate -f extensions/my-crd/lens.yaml`
 3. Check discovery: `kaptein lenses -d extensions`
 4. Run `kaptein-tui` and press `Tab` until your CRD appears — no recompile.
 
-### 8.5 "Let an agent read the cluster, safely"
+### 7.5 "Let an agent read the cluster, safely"
 
 ```bash
 export KAPTEIN_SA_TOKEN="$(kubectl create token kaptein-agent -n kaptein)"
@@ -622,7 +518,7 @@ kaptein mcp
 
 ---
 
-## 9. Testing & verification
+## 8. Testing & verification
 
 - **Unit/contract tests** (renderer-agnostic, no cluster):
   `cargo test --workspace`
@@ -633,7 +529,7 @@ kaptein mcp
 
 ---
 
-## 10. Versioning & compatibility
+## 9. Versioning & compatibility
 
 Kaptein is SemVer. Three contracts are versioned independently:
 

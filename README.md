@@ -389,6 +389,7 @@ extensions/        # example extensions (lenses, plugins, integrations)
 docs/
   adr/             # architecture decision records (see ADR-0001)
   architecture.md  # architecture overview
+  INSTALL.md       # installation guide (cargo, install.sh, Krew, container, source)
   USAGE.md         # usage manual (CLI, TUI, MCP, config, lenses)
 CONTRIBUTING.md    # contributing guide
 SECURITY.md        # security policy & disclosure (the canonical threat model)
@@ -397,6 +398,7 @@ LICENSE            # BUSL-1.1 (source-available; converts to MIT on Change Date)
 
 The full operator's manual — CLI reference, TUI keybindings, the governed MCP server,
 configuration, and the lens/extension system — is in [`docs/USAGE.md`](docs/USAGE.md).
+Installation instructions are in [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ---
 
@@ -427,7 +429,8 @@ guardrail ([#16](https://github.com/egkristi/Kaptein/issues/16)).
 
 > **Looking for how to *use* Kaptein?** See [`docs/USAGE.md`](docs/USAGE.md) — the
 > operator's manual with the full CLI reference, TUI keybindings, the governed MCP
-> server, configuration, and the lens/extension system.
+> server, configuration, and the lens/extension system. (Installing? See
+> [`docs/INSTALL.md`](docs/INSTALL.md).)
 
 Two binaries ship:
 
