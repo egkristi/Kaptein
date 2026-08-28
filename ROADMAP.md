@@ -137,9 +137,13 @@ Milestones:
       50 000-row synthetic plane and reports p50/p99/max over 200 iterations, exiting
       non-zero if p99 exceeds an 8 ms budget (half the 16 ms keystroke-to-frame target,
       of which query is the dominant part). A `bench` job in `ci.yml` runs it and fails on
-      regression. The **kwok** synthetic-cluster harness (thousands of fake nodes/pods) and
-      the end-to-end RSS/cold-start numbers remain the frontend-level Phase 1 tail — this
-      bench gates the one number the view-model owns in isolation.*
+      regression. *(v0.30.0 →: the bench also measures **steady-state RSS** — it holds the
+      50k-row plane and reads `VmRSS` from `/proc/self/status`, gating it against the
+      250 MB target (measured ~16 MB on Linux; skipped on non-Linux where the p99 latency
+      gate still applies).)* The **kwok** synthetic-cluster harness (thousands of fake
+      nodes/pods) and the end-to-end frontend RSS/cold-start numbers remain the
+      frontend-level Phase 1 tail — this bench gates the two numbers the view-model owns
+      in isolation.*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 

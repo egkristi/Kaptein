@@ -4,6 +4,15 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **M1.8 — the benchmark now also measures steady-state RSS.** `benches/query.rs` holds
+  the 50 000-row plane and reads `VmRSS` from `/proc/self/status`, gating it against the
+  250 MB budget (measured ~16 MB; the RSS gate is Linux-only, the p99 latency gate still
+  applies everywhere). The "steady-state RSS < 250 MB at 50 000 objects" budget is now
+  measured, not aspirational.
+
 ## [0.30.0] - 2026-08-28
 
 ### Changed

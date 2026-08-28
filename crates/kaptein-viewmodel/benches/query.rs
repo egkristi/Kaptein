@@ -2,16 +2,17 @@
 //!
 //! This is the view-model half of the kwok harness's performance budget: it drives the
 //! `MemPlane::query` hot spot (sort + filter + window) over a synthetic 50 000-row
-//! plane and reports the p99 latency. The full kwok harness owns the end-to-end
-//! keystroke-to-frame, RSS, and cold-start numbers (frontend-level, needs a cluster
-//! synthetic); this bench owns the one number the view-model can measure portably and
-//! gate on its own: **p99 query latency at 50 000 objects**.
+//! plane and reports the p99 latency **and** the steady-state memory footprint. The full
+//! kwok harness owns the end-to-end keystroke-to-frame, RSS, and cold-start numbers
+//! (frontend-level, needs a cluster synthetic); this bench owns the two numbers the
+//! view-model can measure portably and gate on its own: **p99 query latency** and
+//! **process RSS** at 50 000 objects.
 //!
 //! Run with `cargo bench -p kaptein-viewmodel --bench query` (release mode). A non-zero
-//! exit is a regression — CI treats it as a failure. The budget is deliberately a
-//! generous wall-clock bound (the same "fails loudly, not precisely" philosophy as the
-//! `#[test]` guard): an accidental O(n²) sort blows orders of magnitude past it, while
-//! the linear path passes with a wide margin on any CI runner.
+//! exit is a regression — CI treats it as a failure. The budgets are deliberately
+//! generous wall-clock/memory bounds (the same "fails loudly, not precisely" philosophy
+//! as the `#[test]` guard): an accidental O(n²) sort or an unbounded per-row allocation
+//! blows orders of magnitude past them, while the linear path passes with a wide margin.
 
 use std::time::Instant;
 
@@ -22,6 +23,12 @@ use kaptein_viewmodel::{Cell, DataPlane, MemPlane, Query, Row, RowId, Schema, So
 /// budget is set at half that. Generous enough to be noise-immune on CI, tight enough
 /// that a quadratic regression (hundreds of ms) fails loudly.
 const P99_QUERY_BUDGET_MS: u128 = 8;
+
+/// Steady-state process RSS budget at 50 000 rows (megabytes). The roadmap's target is
+/// 250 MB for the whole TUI (frontend + plane); the plane alone must stay well under it.
+/// A per-row leak (e.g. a `Vec` growth bug or a clone per row) would blow past this while
+/// the linear path sits far below.
+const RSS_BUDGET_MB: u64 = 250;
 
 /// Number of rows in the synthetic store (the roadmap's "50 000 objects in store").
 const ROWS: usize = 50_000;
@@ -43,6 +50,22 @@ fn row(i: usize) -> Row {
         // heterogeneous Number fallback.
         cells: vec![text(&format!("name-{i}")), Cell::Number { value: i as i64 }],
     }
+}
+
+/// The process's resident set size in megabytes, read from `/proc/self/status` (Linux).
+/// Returns `None` on non-Linux (macOS/Windows), where the RSS budget is not gated — the
+/// p99 latency budget still applies everywhere.
+fn resident_mb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let vm_rss_kb = status.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        if key == "VmRSS" {
+            value.split_whitespace().next()?.parse::<u64>().ok()
+        } else {
+            None
+        }
+    })?;
+    Some(vm_rss_kb / 1024)
 }
 
 fn main() {
@@ -100,6 +123,20 @@ fn main() {
     if p99 > P99_QUERY_BUDGET_MS {
         eprintln!("REGRESSION: p99 query latency {p99} ms exceeds budget {P99_QUERY_BUDGET_MS} ms");
         std::process::exit(1);
+    }
+
+    // Steady-state memory: report the RSS while the 50k-row plane is held. Gated on
+    // Linux only (the RSS budget is the frontend-level target; this guards the plane's
+    // own footprint, which must stay well under it).
+    match resident_mb() {
+        Some(rss) => {
+            println!("steady-state RSS with {ROWS} rows held: {rss} MB");
+            if rss > RSS_BUDGET_MB {
+                eprintln!("REGRESSION: RSS {rss} MB exceeds budget {RSS_BUDGET_MB} MB");
+                std::process::exit(1);
+            }
+        }
+        None => println!("steady-state RSS: not measured on this platform"),
     }
 }
 
