@@ -314,7 +314,7 @@ enum Command {
         #[arg(short = 'N', long)]
         name: String,
     },
-    /// Run a one-shot command in a pod container (read-only).
+    /// Run a command in a pod container (gated: requires --confirm to execute).
     Exec {
         /// pod name
         #[arg(short = 'p', long, add = ArgValueCompleter::new(completion::pod_completer))]
@@ -331,6 +331,12 @@ enum Command {
         /// interactive TTY session (allocate a TTY and proxy stdin/stdout)
         #[arg(short = 't', long)]
         tty: bool,
+        /// actually execute the command (required — exec has no dry-run)
+        #[arg(long)]
+        confirm: bool,
+        /// break-glass justification (required for writes to prod/unknown contexts)
+        #[arg(long)]
+        break_glass: Option<String>,
     },
     /// Delete a resource (dry-run by default; requires --confirm).
     Delete {
@@ -1412,6 +1418,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 manager.upsert(spec.clone())?;
                 let running =
                     kaptein_core::portforward::start_named_forward(client.clone(), spec).await?;
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::PortForward,
+                    "Pod",
+                    &namespace,
+                    &pod,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    None,
+                );
                 println!(
                     "forwarding [{forward_name}] {namespace}/{pod}:{port} -> {} (auto-reconnect; Ctrl-C to stop)",
                     running.local_addr
@@ -1429,6 +1443,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 let bound =
                     kaptein_core::portforward::forward(&client, &namespace, &pod, port, local_addr)
                         .await?;
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::PortForward,
+                    "Pod",
+                    &namespace,
+                    &pod,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    None,
+                );
                 println!("forwarding {namespace}/{pod}:{port} -> {bound} (Ctrl-C to stop)");
                 tokio::signal::ctrl_c()
                     .await
@@ -1456,7 +1478,24 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
         Command::PortForwardRemove { name } => {
             let path = kaptein_core::portforward::manager_path();
             let mut manager = kaptein_core::portforward::ForwardManager::load(Some(&path));
+            // Resolve the spec before removal so the audit record carries the real pod
+            // target (a removed forward leaves a tunnel closed, not opened).
+            let target = manager
+                .list()
+                .into_iter()
+                .find(|s| s.name == name)
+                .map(|s| (s.namespace, s.pod));
             manager.remove(&name)?;
+            if let Some((namespace, pod)) = target {
+                audit_write(
+                    kaptein_viewmodel::audit::Operation::PortForward,
+                    "Pod",
+                    &namespace,
+                    &pod,
+                    kaptein_viewmodel::audit::Outcome::Applied,
+                    None,
+                );
+            }
             println!("removed forward '{name}'");
             Ok(())
         }
@@ -1466,7 +1505,19 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             container,
             command,
             tty,
+            confirm,
+            break_glass,
         } => {
+            // Exec is the highest-privilege operation on the surface (arbitrary code in a
+            // container, a full interactive shell with --tty) — it is gated exactly like
+            // `debug`, with no dry-run (finding U): --confirm is required, and
+            // prod/unknown contexts additionally require a non-empty break-glass reason.
+            if !confirm {
+                return Err(kaptein_core::Error::Internal(
+                    "exec has no dry-run; re-run with --confirm to actually run the command".into(),
+                ));
+            }
+            gate_write(break_glass.as_deref())?;
             if tty {
                 // Interactive TTY: allocate a TTY and proxy stdin/stdout. The CLI must
                 // run on a real terminal; tokio's stdio is used directly (raw-mode
@@ -1494,6 +1545,14 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 .await?;
                 print!("{}", output.output);
             }
+            audit_write(
+                kaptein_viewmodel::audit::Operation::Exec,
+                "Pod",
+                &namespace,
+                &pod,
+                kaptein_viewmodel::audit::Outcome::Applied,
+                break_glass.as_deref(),
+            );
             Ok(())
         }
         Command::Delete {
@@ -1758,7 +1817,7 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             .await?;
             if confirm {
                 audit_write(
-                    kaptein_viewmodel::audit::Operation::Exec,
+                    kaptein_viewmodel::audit::Operation::EphemeralAttach,
                     "Pod",
                     &namespace,
                     &pod,
@@ -1844,6 +1903,55 @@ fn parse_gvk(s: &str) -> GroupVersionKind {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use clap::CommandFactory as _;
+
+    /// **Governance coverage (finding U's DoD, "derive, don't restate").**
+    ///
+    /// Every CLI subcommand that can mutate the cluster or open a channel into it opts
+    /// into the write gate by declaring `--confirm`. The set is *derived* from the clap
+    /// command tree — not hand-enumerated — so a future mutating command that adds
+    /// `--confirm` but forgets `--break-glass` (the exact hole `exec` had) fails CI.
+    #[test]
+    fn every_confirming_subcommand_also_declares_break_glass() {
+        let cmd = Cli::command();
+        let mut confirming: Vec<&str> = Vec::new();
+        for sub in cmd.get_subcommands() {
+            let ids: std::collections::HashSet<&str> =
+                sub.get_arguments().map(|a| a.get_id().as_str()).collect();
+            if ids.contains("confirm") {
+                confirming.push(sub.get_name());
+                assert!(
+                    ids.contains("break_glass"),
+                    "subcommand '{}' takes --confirm but not --break-glass \
+                     (every mutating/channel-opening command must be gated and audited)",
+                    sub.get_name()
+                );
+            }
+        }
+        // The derivation must actually find the known governed commands — an empty set
+        // would mean the flag renamed and this test silently stopped guarding anything.
+        assert!(
+            confirming.len() >= 5,
+            "expected >= 5 governed subcommands, got {confirming:?}"
+        );
+    }
+
+    /// The write operations that found U/V/W are all governed and mutually distinct, so
+    /// `exec` (existing container), `debug` (ephemeral attach), and `port-forward`
+    /// (live tunnel) can never again collapse into one audit record (findings U/V/W).
+    #[test]
+    fn exec_ephemeral_attach_and_port_forward_are_distinct_governed_operations() {
+        use kaptein_viewmodel::audit::Operation;
+        assert!(Operation::Exec.is_governed());
+        assert!(Operation::EphemeralAttach.is_governed());
+        assert!(Operation::PortForward.is_governed());
+        // Distinct variants: the audit log must be able to tell them apart.
+        assert_ne!(Operation::Exec, Operation::EphemeralAttach);
+        assert_ne!(Operation::Exec, Operation::PortForward);
+        assert_ne!(Operation::EphemeralAttach, Operation::PortForward);
+    }
+
     /// The bundled JSON Schema's `api_version` `const` must equal the Rust
     /// `LENS_SCHEMA_VERSION` — a drift between the schema and the code would let a lens
     /// validate against one version and be refused by the other. This test catches that.

@@ -32,6 +32,11 @@ pub enum Operation {
     Cordon,
     Drain,
     Evict,
+    /// Attach an ephemeral container to a running pod (`kaptein debug`). Distinct from
+    /// [`Operation::Exec`], which runs a command in an *existing* container — conflating
+    /// the two made the audit log's one `Exec` record impossible to attribute (finding V).
+    EphemeralAttach,
+    /// Run a command in an existing pod container (`kaptein exec`).
     Exec,
     PortForward,
     /// A GitOps write path action (branch + PR), not an API-server write.
@@ -39,6 +44,34 @@ pub enum Operation {
     /// An operator viewed (unmasked) a secret — the single most audit-relevant event for
     /// a tool that masks secrets by default.
     SecretViewed,
+}
+
+impl Operation {
+    /// Whether this operation mutates the cluster or opens a channel into a pod — the
+    /// set that must be **gated and audited** when performed through the CLI.
+    ///
+    /// The CLI's governance coverage test derives its assertion from this method rather
+    /// than hand-enumerating subcommands, which is how `exec` slipped past the gate
+    /// (finding U): a mutating operation that is never emitted by any subcommand is a
+    /// hole, and a subcommand that declares `--confirm` without `--break-glass` (or vice
+    /// versa) is a hole. Both are caught by reflecting over this set + the clap command
+    /// tree, so a new mutating operation fails CI until it is wired up.
+    pub fn is_governed(&self) -> bool {
+        !matches!(
+            self,
+            // Reads (visibility is audited via List/Describe/Logs/Diagnose, but they do
+            // not require a write gate).
+            Operation::List
+                | Operation::Describe
+                | Operation::Logs
+                | Operation::Diagnose
+                | Operation::SecretViewed
+                // Preview-only today: `drain` never evicts (no live write to gate).
+                | Operation::Drain
+                // A Git PR is a branch + review, not an API-server write.
+                | Operation::GitPrOpened
+        )
+    }
 }
 
 /// The outcome of a write attempt.

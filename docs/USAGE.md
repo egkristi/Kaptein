@@ -32,10 +32,10 @@ Kaptein classifies every kubeconfig context as `Prod`, `Staging`, or `Unknown`:
 - **`Unknown`** — read-only by default (the safe fallback for anything unmatched).
 
 Every mutating command (`delete`, `scale`, `restart`, `cordon`, `uncordon`, `evict`,
-`debug`) is **dry-run by default** and requires an explicit `--confirm` to actually
-apply. On `prod`/`unknown` contexts, a non-empty `--break-glass` reason is *also*
-required — the gate is enforced **before** the request reaches the API server (defense
-in depth with RBAC).
+`debug`, `exec`) is **gated by default**: most are dry-run until `--confirm`; `restart`
+and `exec` have no dry-run and require `--confirm` outright. On `prod`/`unknown`
+contexts, a non-empty `--break-glass` reason is *also* required — the gate is enforced
+**before** the request reaches the API server (defense in depth with RBAC).
 
 ### 1.3 Secrets are masked by default (M1.7)
 
@@ -170,7 +170,8 @@ kaptein config-validate                                      # check your config
 ### 2.9 Writes — dry-run by default
 
 Every write command prints a **dry-run** result unless you pass `--confirm`. On
-`prod`/`unknown` contexts you must *also* pass a `--break-glass` reason.
+`prod`/`unknown` contexts you must *also* pass a `--break-glass` reason. (`restart` and
+`exec` have no dry-run and require `--confirm` outright.)
 
 ```bash
 # Apply / edit (dry-run only — Kaptein never applies a manifest)
@@ -201,17 +202,24 @@ kaptein debug-containers --pod my-pod -n default
 kaptein debug --pod my-pod -n default --name debug --image busybox -- sleep 3600 --confirm
 ```
 
-### 2.10 Exec & port-forward (read-only)
+### 2.10 Exec & port-forward (gated + audited)
+
+`exec` runs arbitrary code inside a container (and `--tty` gives an interactive shell),
+so it is gated like the other mutating commands: it has **no dry-run** and requires an
+explicit `--confirm`, plus a `--break-glass` reason on prod/unknown contexts.
 
 ```bash
-kaptein exec --pod my-pod -n default -- ls -la
-kaptein exec --pod my-pod -n default --container sidecar -- cat /etc/hosts
-kaptein exec --pod my-pod -n default --tty -- /bin/sh        # interactive
+kaptein exec --pod my-pod -n default -- ls -la --confirm
+kaptein exec --pod my-pod -n default --container sidecar -- cat /etc/hosts --confirm
+kaptein exec --pod my-pod -n default --tty -- /bin/sh --confirm  # interactive
 ```
 
 `exec` streams combined stdout/stderr and surfaces the remote exit status: a command
 that fails inside the container (e.g. `echo` not found in a distroless image, or a
 non-zero exit) is reported as an error, not a silent empty success.
+
+Port-forwards are a live tunnel into a pod, so they are **audited** (a record is written
+when a forward is opened or removed):
 
 ```bash
 kaptein port-forward --pod my-pod -n default --port 8080

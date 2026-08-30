@@ -52,29 +52,19 @@ Milestones:
   - **Context guardrails**: prod-context red frame, read-only default, "break glass"
     confirmation; configurable per regex on context name
   - *Deferred to 1b:* SPIFFE, OIDC device flow, SA tokens
-  - **Open (re-audit v0.30.0, second pass) — *blocking*: the guardrail model has a hole
-    at its highest-privilege point.** `kaptein exec` takes no `--confirm`, no
-    `--break-glass`, never calls `gate_write`, and emits **no `AuditEvent`**. Arbitrary
-    code execution inside a production container — and with `--tty`, an interactive shell
-    — is therefore the *only* mutating operation on the surface with no gate and no trace,
-    while `cordon`/`uncordon` (reversible, low blast radius) require both. SECURITY.md
-    presents context guardrails as the prod control and the audit log as the
-    accountability control; for exec neither exists. Three related gaps
-    (`ISSUES.md` findings U, V, W):
-    1. **Gate and audit `exec`** — `--confirm` + `gate_write(break_glass)` + an
-       `Operation::Exec` event, matching `debug` exactly (finding U).
-    2. **Give ephemeral-container attach its own operation.** `Operation::Exec`'s only
-       emission site today is `Command::Debug`, so the audit log's one `Exec` record never
-       means exec. Add `Operation::Debug`/`EphemeralAttach` so the two are distinguishable
-       once (1) lands (finding V).
-    3. **Audit port-forward.** `Operation::PortForward` is defined and never emitted, yet a
-       named, persistent forward is a live tunnel into a pod that outlives the session that
-       created it (finding W).
+  - **Fixed (v0.30.0, second pass) — the guardrail hole at the highest-privilege point is
+    closed.** `kaptein exec` now takes `--confirm` (required — exec has no dry-run) and
+    `--break-glass`, gates through `gate_write`, and emits an `Operation::Exec` audit
+    event, matching `debug`. `debug` now emits a distinct `Operation::EphemeralAttach`
+    (finding V), and opening/removing a `port-forward` writes `Operation::PortForward`
+    (finding W). `ISSUES.md` findings U, V, W are resolved.
   - **DoD (falsifiable):** a *coverage test* asserts that **every** CLI subcommand that can
     mutate the cluster or open a channel into it takes `--confirm` + `--break-glass`, calls
     `gate_write`, and emits a distinct `Operation`. Enumerating that set by hand is what let
     `exec` slip; the test must derive it rather than restate it — otherwise the next
-    mutating command added will slip the same way.
+    mutating command added will slip the same way. *Landed: `every_confirming_subcommand_also_declares_break_glass`
+    derives the governed set from the clap command tree, and a second test asserts
+    `Exec`/`EphemeralAttach`/`PortForward` are distinct governed operations.*
 - **M1.2 Resource navigation**
   - Command palette + vim keymap + fuzzy jump
   - Built-in resources + all CRDs auto-discovered
@@ -295,12 +285,8 @@ Milestones:
     callers and is a `pub` second `DataPlane` implementation whose semantics *diverge*
     from the supported one — it uses the unbounded `discovery::list` that #27 moved off,
     always returns `Revision(0)` (so staleness detection silently no-ops), and its
-    `subscribe` returns `stream::empty()` (so no consumer ever gets a delta). This project
-    has repeatedly been bitten by "the code exists but the shipped path doesn't take it";
-    an *unused* implementation that behaves differently from the real one is the version
-    of that trap a future contributor walks into. Delete it, or at minimum `#[doc(hidden)]`
-    it and rename it so it cannot be mistaken for the supported plane
-    (`ISSUES.md` finding X).
+    `subscribe` returns `stream::empty()` (so no consumer ever gets a delta). *Fixed:
+    deleted* (`ISSUES.md` finding X).
 - **M2.0c Watch resilience & informer lifecycle** *(new per re-audit — ADR-0006 is ~30 %
   implemented)*
   - Relist-on-410, reconnect with backoff, `WatchEvent::Error` handling, and bookmark
@@ -692,14 +678,15 @@ Milestones:
 - **Immediate next steps** — *(Phase 0 is long done, and the entire v0.27.0 re-audit batch
   (#20–#31) is closed: bounded frontend seed, relist-on-reconnect, LRU admission, preflight
   pluralization, log redaction, all three distribution channels, and the query benchmark.
-  Findings P, Q, R, and S are fixed. The live next steps, in order:
-  **1. M1.1 — gate and audit `exec`** (findings U/V/W). This jumps the queue: it is a hole
-  in the guardrail model at its highest-privilege point, not a gap between a doc and its
-  implementation, and the fix is small and well-understood (mirror what `debug` already
-  does). **2. M2.0c** (findings M/N/O: hoist the `InformerManager` to session scope +
-  `release`/`touch`, and make the relist add as well as remove). **3.** the cheap cleanups —
-  delete `KubernetesPlane` (X) and clarify that `apply_patch_real` has no caller yet (Y).
-  Then **M2.0b** (kind/envtest + latest-three-minors conformance), the **M1.8 kwok harness**
+  Findings P, Q, R, S, U, V, W, X, and Y are fixed (the governance batch — gated/audited
+  `exec`, distinct `EphemeralAttach`, audited `port-forward`, a derive-don't-restate
+  coverage test, the dead `KubernetesPlane` deleted, and the `apply_patch_real` doc
+  clarified). The live next steps, in order:
+  **1. M2.0c** (findings M/N/O: hoist the `InformerManager` to session scope +
+  `release`/`touch`, and make the relist add as well as remove — write the
+  `InformerManager::live()` boundedness test first and watch it fail). **2.** the
+  remaining hygiene (finding T: core dumps). Then **M2.0b** (kind/envtest +
+  latest-three-minors conformance), the **M1.8 kwok harness**
   and visible-window query (finding Q's remaining half), **M2.1 browser UI**, **M2.2**
   per-lens action/health surfaces, and the distribution tail (Homebrew tap,
   release-triggered site/README version bump).)*

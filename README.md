@@ -411,8 +411,9 @@ glance](#status-at-a-glance) for the available/preview/planned breakdown, and
 [`ISSUES.md`](./ISSUES.md) for known issues.
 
 Writes are **opt-in and gated**: `delete`, `scale`, `restart`, `cordon`, `uncordon`,
-`evict`, and `debug` default to dry-run, require an explicit `--confirm`, and (for
-prod/unknown contexts) a break-glass justification. Everything else is read-only.
+`evict`, `debug`, and `exec` default to dry-run (or, for `restart`/`exec`, require
+`--confirm` outright) and require an explicit `--confirm`; for prod/unknown contexts a
+break-glass justification is *also* required. Everything else is read-only.
 
 **Limitations to read before relying on this** (all tracked):
 

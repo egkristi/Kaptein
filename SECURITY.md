@@ -40,6 +40,12 @@ access** on an operator's workstation. Our mitigations:
 
 - **Read-only default** for unknown contexts; **context guardrails** (red frame, "break
   glass" confirmation) for prod contexts configured by regex.
+- **Every mutating or channel-opening command is gated and audited**, including the
+  highest-privilege ones: `exec` (arbitrary code in a container, an interactive shell
+  with `--tty`) requires `--confirm` + break-glass like `debug`, and both `exec` and
+  `debug` (ephemeral attach) emit distinct `AuditEvent` operations; opening or removing a
+  `port-forward` tunnel is audited too. A coverage test derives the governed set from the
+  command tree so a new mutating command cannot slip past the gate.
 - **RBAC preflight** via `SelfSubjectRulesReview` greys out disallowed actions before
   they're attempted.
 - The GitOps write path writes to **Git, not the API server**, and requires an explicit

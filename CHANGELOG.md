@@ -18,8 +18,29 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - **Q** — `query_plane`'s doc comment claimed it avoided materializing the whole set,
     which it does not; corrected to state the actual behavior (the visible-window refactor
     remains M1.8).
+- **Re-audit findings (v0.30.0, second pass) — governance:**
+  - **U** — `kaptein exec` was the only mutating command with no gate and no audit trace
+    (arbitrary code in a container, a full interactive shell with `--tty`, no
+    `--confirm`, no `gate_write`, no `AuditEvent`). It now requires `--confirm` +
+    `--break-glass` and emits an `Operation::Exec` audit record, matching `debug`.
+  - **V** — `Operation::Exec` was emitted for the *debug* path (ephemeral attach),
+    mislabelling it. A new `Operation::EphemeralAttach` is emitted for `kaptein debug`,
+    and `Exec` now means exec, so the two are distinguishable in the audit log.
+  - **W** — `Operation::PortForward` was defined but never emitted. Opening a
+    port-forward (named or anonymous) and removing a named forward now write audit
+    records.
+  - **X** — deleted the superseded `KubernetesPlane` (an unused `DataPlane` impl with
+    divergent semantics: unbounded `discovery::list`, `Revision(0)`, empty subscribe).
+  - **Y** — clarified that `apply_patch_real` is pre-positioned for M2.3 with no caller
+    yet (`kaptein apply`/`edit` are dry-run-only).
 
 ### Added
+- **M1.1 — a governance coverage test (derive, don't restate).** The set of governed CLI
+  subcommands is derived from the clap command tree: any subcommand that declares
+  `--confirm` must also declare `--break-glass`, and `Exec`/`EphemeralAttach`/
+  `PortForward` are asserted to be distinct governed operations. This is the DoD that
+  would have caught finding U — a new mutating command that forgets half its gate fails
+  CI instead of shipping silently.
 - **M1.8 — the benchmark now also measures steady-state RSS.** `benches/query.rs` holds
   the 50 000-row plane and reads `VmRSS` from `/proc/self/status`, gating it against the
   250 MB budget (measured ~16 MB; the RSS gate is Linux-only, the p99 latency gate still

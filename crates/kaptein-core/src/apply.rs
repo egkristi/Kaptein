@@ -178,6 +178,11 @@ async fn apply_patch(
 /// (issue #16). The caller is responsible for the context guardrail
 /// (`guardrails::gate_write`) *before* invoking this; the function itself never forces
 /// ownership.
+///
+/// **Pre-positioned for M2.3 — no caller yet.** `kaptein apply` and `kaptein edit` are
+/// both dry-run-only today, and nothing else invokes this, so no live apply ships yet
+/// (finding Y). The `force: false` refusal is tested, but it guards a path that is not
+/// yet reachable.
 pub async fn apply_patch_real(client: &Client, manifest: &str) -> Result<DryRun, Error> {
     apply_patch(client, manifest, false, false).await
 }
