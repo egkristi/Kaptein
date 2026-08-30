@@ -6,6 +6,19 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+- **Re-audit findings (v0.30.0):**
+  - **P** — `redact_line` recompiled two regexes (including the ~20-branch sensitive-key
+    alternation) on every log line; now `LazyLock`ed (a follow stream no longer spends its
+    time compiling regexes).
+  - **R** — dynamic shell completion could hang on a blackholed endpoint; the
+    cluster-querying completers are now wrapped in a 300 ms `tokio::time::timeout`.
+  - **S** — `README.md`'s *Build & test* block still showed the removed
+    `./target/release/kaptein-tui` binary; now `./target/release/kaptein tui`.
+  - **Q** — `query_plane`'s doc comment claimed it avoided materializing the whole set,
+    which it does not; corrected to state the actual behavior (the visible-window refactor
+    remains M1.8).
+
 ### Added
 - **M1.8 — the benchmark now also measures steady-state RSS.** `benches/query.rs` holds
   the 50 000-row plane and reads `VmRSS` from `/proc/self/status`, gating it against the
@@ -25,6 +38,12 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `Cell::Redacted`, and `cell_text` renders it as the `[REDACTED]` mask — a frontend
   renders a mask with no string comparison, and the lens-driven view reaches the `Row` as
   the typed variant (with a test pinning it).
+- **M1.6 — init-container diagnostics.** `diagnose` only inspected `container_statuses`,
+  so a pod stuck on a failed init container fell through to the generic `not_ready`.
+  `diagnose` now inspects `init_container_statuses` and surfaces `init_container_error`
+  (terminated non-zero) / `init_container_waiting` (waiting with a reason), checked before
+  the scheduling reasons in the `Pending` branch — an `Init:Error` pod reads as "init
+  container X failed". Added a `init_container_error.json` fixture + unit tests.
 
 ## [0.30.0] - 2026-08-28
 

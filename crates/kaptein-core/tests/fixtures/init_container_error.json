@@ -1,0 +1,53 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": { "name": "init-crash", "namespace": "default" },
+  "spec": {
+    "initContainers": [{ "name": "migrate", "image": "busybox" }],
+    "containers": [{ "name": "app", "image": "busybox" }]
+  },
+  "status": {
+    "phase": "Pending",
+    "conditions": [
+      { "type": "Initialized", "status": "False", "reason": "ContainersNotInitialized" },
+      { "type": "Ready", "status": "False", "reason": "PodInitializing" }
+    ],
+    "initContainerStatuses": [
+      {
+        "name": "migrate",
+        "ready": false,
+        "restartCount": 3,
+        "state": {
+          "terminated": {
+            "exitCode": 1,
+            "reason": "Error",
+            "startedAt": "2025-01-01T00:00:00Z",
+            "finishedAt": "2025-01-01T00:00:01Z",
+            "containerID": "containerd://init123"
+          }
+        },
+        "lastState": {
+          "terminated": {
+            "exitCode": 1,
+            "reason": "Error",
+            "startedAt": "2025-01-01T00:00:02Z",
+            "finishedAt": "2025-01-01T00:00:03Z",
+            "containerID": "containerd://init123"
+          }
+        }
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "app",
+        "ready": false,
+        "restartCount": 0,
+        "state": {
+          "waiting": {
+            "reason": "PodInitializing"
+          }
+        }
+      }
+    ]
+  }
+}

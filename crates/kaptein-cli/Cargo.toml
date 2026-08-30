@@ -19,7 +19,7 @@ kaptein-core = { version = "0.30.0", path = "../kaptein-core" }
 kaptein-viewmodel = { version = "0.30.0", path = "../kaptein-viewmodel" }
 kaptein-tui = { version = "0.30.0", path = "../kaptein-tui" }
 kube = { workspace = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "time"] }
 futures-util = { workspace = true }
 clap = { version = "4", features = ["derive", "unstable-ext"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }

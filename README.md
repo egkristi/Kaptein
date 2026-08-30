@@ -518,7 +518,7 @@ cargo build --release
 ./target/release/kaptein scale --gvk apps/v1/Deployment --name <deploy> --replicas 3 --confirm
 
 # TUI (vim navigation; Tab switches kind, n cycles namespace, d describe, i diagnose)
-./target/release/kaptein-tui
+./target/release/kaptein tui
 ```
 
 Point `KUBECONFIG` at any cluster to test; read-only commands never mutate the cluster.

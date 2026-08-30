@@ -60,6 +60,14 @@ Milestones:
   - Exec/attach, ephemeral containers, node debug pods
   - Port-forward manager (named, persistent, auto-reconnect)
   - Krew shell-out
+  - **Fixed (v0.30.0 →) — dynamic shell completion can hang the shell.**
+    `completion.rs` states its own contract as "completion degrades to 'no candidates' —
+    never a panic or a **hang**", but each completer called `rt.block_on(...)` around a
+    kube query with no `tokio::time::timeout`. Against an endpoint that *drops* rather
+    than refuses (a firewalled or stale kubeconfig cluster — common on a laptop that
+    moved networks), tab-completion blocked for the client's full timeout. Each
+    cluster-querying completer is now wrapped in a 300 ms `tokio::time::timeout`, returning
+    `[]` on elapse (`ISSUES.md` finding R).
 - **M1.3 Edit & apply**
   - `$EDITOR` handoff for edits; server-side dry-run + diff before apply
   - *OpenAPI/CRD schema validation lands in Phase 2 with the lens engine*
@@ -83,6 +91,13 @@ Milestones:
   - **A canned pod-status fixture corpus** — JSON fixtures for the common failure shapes
     (CrashLoopBackOff, exit-0 Job, ImagePullBackOff, unschedulable, probe failure) with
     expected findings, so the engine is regression-tested as packs grow (see the review).
+  - *Landed (v0.30.0 →): **init-container diagnostics.** `diagnose` now inspects
+    `init_container_statuses` (previously only `container_statuses`) and surfaces
+    `init_container_error` (terminated non-zero) / `init_container_waiting` (waiting with a
+    reason like `ImagePullBackOff`/`CrashLoopBackOff`) — checked **before** the scheduling
+    reasons in the `Pending` branch, so an `Init:Error`/`PodInitializing` pod reads as
+    "init container X failed", not "pending" or "not ready". A `init_container_error.json`
+    fixture + unit tests pin it.*
 - **M1.7 Secret masking & redaction — *blocking*** *(elevated from M3b.2 per review)*
   - A single `kaptein-core` redaction choke point through which **every** serialized
     resource passes before reaching a frontend, the MCP `describe` tool, or an audit log
@@ -111,6 +126,12 @@ Milestones:
     `pod_logs`) — issue #22. Secret annotation redaction was narrowed to
     `last-applied-configuration`, Helm release-values/`.values`, and sensitive-named keys,
     preserving `meta.helm.sh/*`/Argo CD metadata — issue #29.
+  - **Fixed (v0.30.0 →) — `redact_line` recompiled its regexes on every line.**
+    `regex::Regex::new` was called *inside* the per-line function, including the ~20-branch
+    `SENSITIVE_KEY_ALT` alternation, and `redact_line` runs per line in `pod_logs`,
+    `multi_pod_logs`, and `follow_logs` — the streaming path. Both patterns are now
+    hoisted into `static … : LazyLock<Regex>` (MSRV 1.97), so a follow stream no longer
+    spends its time compiling (`ISSUES.md` finding P).
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
@@ -265,6 +286,41 @@ Milestones:
     a test kills a watch, deletes an object out-of-band, and asserts the row disappears
     after reconnect; and `InformerManager::live()` is observably bounded by `max_watches`
     while driving the TUI through more distinct views than the cap allows.
+  - *Landed (v0.28.x → v0.29.0): all three v0.27.0 gaps closed — `watch_loop` relists and
+    reconciles on every reconnect (#20), `LivePlane` registers with an `InformerManager`
+    and degrades to a bounded list on `Denied` (#25), and `register` performs LRU
+    admission, evicting the least-recently-used entry when the cap is full (#26).*
+  - **Re-opened (re-audit v0.30.0) — the second half of the DoD still does not hold.**
+    The mechanism is now correct; the *wiring* still never exercises it. See `ISSUES.md`
+    findings M, N, O.
+    1. **The manager is per plane, so the cap is unreachable.** The `informers` field is
+       documented as "shared across clones so the cap is enforced across *all* live planes
+       in a process, not per plane (issue #25)" — but `new_with_policy` and
+       `new_lens_with_policy` each build `Arc::new(InformerManager::new(policy))`, and the
+       TUI's `rebuild_plane` calls `new_plane(...)`, not `clone`. Every kind/namespace
+       switch gets a fresh manager holding exactly one watch, so `max_watches` (16) is
+       never reached and LRU/TTL/degrade-to-list are dead paths. The DoD's second clause —
+       *"`InformerManager::live()` is observably bounded while driving the TUI through more
+       distinct views than the cap allows"* — is precisely the assertion that would have
+       caught this, and it was never written. **Write that test first.**
+    2. **`release` and `touch` have no callers.** `rebuild_plane` aborts the watch task
+       without releasing its slot, and nothing refreshes recency, so `last_touched` is
+       always registration time and the LRU has no usage signal. Fixing (1) alone converts
+       this into a slot leak — after `max_watches` view switches every new view degrades to
+       a one-shot list and the TUI silently stops being live. **(1) and (2) are one change**:
+       hoist the manager to session scope, release on rebuild (or hold a Drop guard), and
+       touch on query.
+    3. **Reconcile removes but never adds.** `relist_and_reconcile` drops rows absent from
+       the relist but never upserts rows present in the relist and missing from the plane,
+       so objects **created during an outage stay invisible** until they next change — the
+       mirror of the ghost rows #20 removed. The relist is metadata-only and therefore
+       cannot carry `status`, so this needs a decision (full-object relist vs. metadata
+       upsert plus a deferred status fetch), not a patch.
+  - **Added to the DoD:** a test drives the TUI through more distinct (kind, namespace)
+    views than `max_watches` and asserts `live() <= max_watches` **and** that the
+    most-recently-used view still holds a live watch; and a reconnect test asserts an
+    object *created* during the outage appears after reconnect, not only that a deleted
+    one disappears.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -543,14 +599,30 @@ Milestones:
   When a DoD cannot be written that way, that is a signal the milestone is really two
   milestones.
 
-- **Immediate next steps** — *(Phase 0 is long done. The live next steps are the
-  re-audit re-opens — **M2.0** (bounded seed on the frontend path), **M2.0c** (relist on
-  reconnect, wire `InformerManager`, LRU-or-amend-the-ADR), **M1.7** (log redaction),
-  **M1b.4** (preflight plural must match the request) — then the remaining **M2.0b**
-  (kind/envtest + latest-three-minors conformance), **M1.8 kwok harness**, **M2.1 browser
-  UI**, **M2.2 lens-driven navigation**, and the **distribution** fixes (Krew placeholders,
-  installer signature verification). The SLSA-provenance and release-gate-hygiene pieces
-  are done.)*
+- **Immediate next steps** — *(Phase 0 is long done, and the entire v0.27.0 re-audit batch
+  (#20–#31) is closed: bounded frontend seed, relist-on-reconnect, LRU admission, preflight
+  pluralization, log redaction, all three distribution channels, and the query benchmark.
+  The live next steps are the v0.30.0 re-audit re-opens — **M2.0c** (findings M/N/O: hoist
+  the `InformerManager` to session scope + `release`/`touch`, and make the relist add as
+  well as remove), **M1.7** (finding P: hoist the `redact_line` regexes out of the per-line
+  path), **M1.2** (finding R: timeout the completion queries) — then **M2.0b** (kind/envtest
+  + latest-three-minors conformance), the **M1.8 kwok harness** and visible-window query
+  (finding Q), **M2.1 browser UI**, **M2.2** per-lens action/health surfaces, and the
+  remaining distribution tail (Homebrew tap, release-triggered site/README version bump).
+  One documentation fix is outstanding and trivial: `README.md`'s Build & test block still
+  invokes `./target/release/kaptein-tui`, a binary v0.30.0 removed — finding S.)*
+
+- **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson
+  ("the shipped path must take it") worked: every v0.27.0 finding is genuinely closed, and
+  the mechanisms added are correct on their own terms. The new failure mode is one level
+  up. Three of this cycle's findings (M, N, O) are *second-order consequences of the
+  fixes themselves*: a manager that is shared-by-`Clone` but constructed per caller, a
+  lifecycle API whose release half was never called, a reconcile that handles one
+  direction of drift. Each passes its own unit tests. What would have caught all three is
+  the DoD clause that was written and then not implemented — *"`InformerManager::live()`
+  is observably bounded while driving the TUI through more distinct views than the cap
+  allows"*. **A DoD assertion that is written but never turned into a test is worth
+  nothing.** Before closing M2.0c this time, write that test first and watch it fail.
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the

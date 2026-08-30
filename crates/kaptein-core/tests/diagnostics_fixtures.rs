@@ -102,3 +102,18 @@ fn resource_pressure_is_detected() {
     let got = codes(&pod);
     assert!(got.contains(&"resource_pressure".into()), "got {got:?}");
 }
+
+#[test]
+fn init_container_failure_is_detected() {
+    let pod = load_fixture("init_container_error.json");
+    let got = codes(&pod);
+    assert!(
+        got.contains(&"init_container_error".into()),
+        "an init container that failed must surface as init_container_error, got {got:?}"
+    );
+    // The specific init-container signal must not be masked by the generic fallback.
+    assert!(
+        !got.iter().any(|c| c == "not_ready"),
+        "init container failure should not collapse to the generic not_ready, got {got:?}"
+    );
+}

@@ -92,29 +92,46 @@ the milestone column names where the fix landed.
 | K | #30 | Low | Dead `VERSION_TAG` removed from `install.sh`. | Distribution |
 | L | #31 | High | Release workflow now builds, pushes, and cosign-signs `ghcr.io/egkristi/kaptein`. | Distribution |
 
-Together, D, E, and L mean **all three advertised install paths in `README.md` are either
-unverified or non-functional**: the script checks integrity but not authenticity, the Krew
-manifest is a placeholder template, and the container image does not exist. Treat that
-cluster as one release-blocking item, not three cosmetic ones.
+D, E, and L were, together, the "all three advertised install paths are broken" cluster
+flagged at v0.27.0. **All three are now resolved** — the installer cosign-verifies against
+the OIDC identity, the Krew manifest is rendered at release time with real digests, and the
+container image is built, pushed, and signed. Distribution is a working channel, not a set
+of files (the one exception is the *central* Krew index, which is license-blocked — #34).
+
+### Re-audit findings (v0.30.0) — new, not yet filed
+
+Found by an external re-audit of the shipped v0.30.0 artifact (216 commits, 15 703 lines,
+192 tests green, clippy clean). The v0.27.0 batch is genuinely fixed — these are new, and
+three of them (M, N, O) are the *second-order* consequences of those fixes.
+
+| # | Severity | Finding | Owner |
+|---|----------|---------|-------|
+| M | High | **The informer cap is unreachable in the shipped TUI.** `LivePlane`'s `informers` field is documented as "Shared across clones so the cap is enforced across *all* live planes in a process, not per plane (issue #25)" — but `new_with_policy` and `new_lens_with_policy` each construct `Arc::new(InformerManager::new(policy))`, and the TUI's `rebuild_plane` calls `new_plane(...)` (a constructor, not `clone`) on every kind/namespace switch. Each plane therefore gets a **fresh manager holding exactly one watch**, so `max_watches` (default 16) can never be reached and the LRU, the TTL, and the degrade-to-list path are unreachable in the shipped TUI. #25 moved the problem one level rather than closing it; the field's own doc comment states the invariant its constructor violates. | M2.0c |
+| N | Medium | **`InformerManager::release` and `::touch` have no callers anywhere in the workspace.** `rebuild_plane` aborts the watch task without releasing its slot, and nothing refreshes recency — so every entry's `last_touched` is its registration time and the LRU has no usage signal. This is latent only because of M: fixing M alone (one shared manager per session) immediately turns it into a **slot leak**, where after `max_watches` view switches every new view degrades to a one-shot list and the TUI silently stops being live. **M and N must be fixed in the same change.** | M2.0c |
+| O | Medium | **`relist_and_reconcile` removes but never adds.** It builds `live_ids` from a metadata list and removes plane rows absent from it, but never upserts rows that are *in* the relist and missing from the plane. Objects **created during a watch outage stay invisible** until they next change — the exact mirror of the ghost-row bug #20 that this function was written to fix. Note the relist is metadata-only, so it cannot upsert a correct `status` (status comes from the full object): the fix is a design decision (full-object relist, or a metadata upsert with a deferred status fetch), not a one-liner. | M2.0c |
+| P | Medium | **`redact_line` compiles two regexes on every log line.** `regex::Regex::new` is called inside the per-line function — including the ~20-branch `SENSITIVE_KEY_ALT` alternation — and `redact_line` is invoked per line by `pod_logs`, `multi_pod_logs`, and `follow_logs` (the streaming path). There is no `LazyLock`/`OnceLock` anywhere in `kaptein-core`. On a follow stream the regex compilation dominates the work. Introduced by the #22 fix; `std::sync::LazyLock` is the fix (MSRV 1.97 allows it). *Fixed: both regexes are now `LazyLock`.* | M1.7 |
+| Q | Medium | **`query_plane` still requests the whole set.** The M1.8 work is real and substantial — sorting is an index permutation, the TUI re-queries only on a revision change, and `total` is carried separately — but `kaptein-tui::query_plane` still issues `Query { start: 0, end: 50_000 }`, so up to 50 000 `TableRow`s (each with per-cell `String`s) are materialized on **every revision change**, and on a busy cluster the revision advances per watch delta. `ROADMAP.md` is accurate here (it records "still open: querying *only* the visible window"), but `query_plane`'s own doc comment claims the TUI shows "N rows" and jumps to the bottom "**without materializing the whole set** — the M1.8 windowing fix", which is not what the function does. Fix the comment now; the windowing itself needs `selected`/`scroll`/fuzzy-jump reworked off a full `rows` vector, which is the deeper nav refactor M1.8 already names. *Fixed: the misleading doc comment is corrected; the windowing refactor remains open (M1.8).* | M1.8 |
+| R | Medium | **Dynamic shell completion can hang.** `completion.rs` states its contract as "completion degrades to 'no candidates' — never a panic or a **hang**", but `rt.block_on(...)` wraps the kube call with no `tokio::time::timeout`. Against a blackholed endpoint (firewall drops rather than refuses) tab-completion blocks for the client's full timeout. Wrap each completer in a short timeout (~300 ms) so the stated contract is enforced. *Fixed: `cluster_query` wraps each cluster-querying completer in a 300 ms `tokio::time::timeout`.* | M1.2 |
+| S | Low | **`README.md` tells users to run a binary that no longer exists.** Line 521 still shows `./target/release/kaptein-tui`, but v0.30.0 collapsed the TUI into `kaptein tui` and the `kaptein-tui` crate no longer declares a `[[bin]]`. `docs/INSTALL.md` and `docs/USAGE.md` are correct — only the README's *Build & test* block is stale. *Fixed: README now shows `./target/release/kaptein tui`.* | Docs |
+| T | Hygiene | **Core dumps are escalating, not static.** 14 dumps totalling **641 MB** are in the working tree, dated across four days. The *Hygiene notes* section below still says "Two dumps (~240 MB)" — understated ~3× and no longer a one-off. Something crashes on essentially every session and nothing identifies it. | Hygiene |
 
 ## Remaining review backlog (owned by milestones)
 
 The external review ranked these; they are now **milestones in `ROADMAP.md`** rather than
 unowned debt. Done items are struck through.
 
-1. **M1b.4 — MCP governance conformance** — *mostly done, one gap.* (commit 1cbe417):
+1. ~~**M1b.4 — MCP governance conformance**~~ (done, commits 1cbe417 → #21 fix):
    RBAC preflight + context classification + read-only guardrail run per tool call; audit
    emits `Outcome::Rejected`, real `target`, real `session_id`, post-execution outcome.
-   **Open: #21** — the preflight's kind→plural guess disagrees with the plural the request
-   uses, and because RBAC fails closed the governed surface *refuses* most CRDs.
-2. **M2.0 — wire `DataPlane` + informer store** — *re-opened.* (commits ad1cb5b → 13d8aae):
+   The preflight plural now comes from `ApiResource::from_gvk` — the same pluralizer the
+   request uses — so the gate and the call can no longer disagree (#21, closed).
+2. ~~**M2.0 — wire `DataPlane` + informer store**~~ (done, commits ad1cb5b → 13d8aae, #27):
    `MemPlane` + `table` (view-model DataPlane), `InformerStore`/`run_informer` +
    `list_metadata_bounded` (core), `KubernetesPlane`/`LivePlane` (integration), the TUI
    renders from a live informer-backed `DataPlane`, and a live `#[tokio::test]` exercises
-   the real kube client when `KUBECONFIG` is present. **Open: #27** — the DoD requires the
-   *shipped frontend path* to use the bounded store, and `LivePlane::seed` still calls the
-   unbounded `discovery::list`. Giving `run_informer` a CLI caller closed #18 but did not
-   satisfy this half of the DoD.
+   the real kube client when `KUBECONFIG` is present. `LivePlane::seed` now pages through
+   `list_bounded`, so the **shipped frontend path** is the bounded one — the half of the
+   DoD that #18's CLI caller did not satisfy (#27, closed).
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
    kind/envtest tier and Kubernetes-minor conformance remain open. A live integration-test
@@ -122,17 +139,22 @@ unowned debt. Done items are struck through.
    exercises the read path and the delete write path against a real cluster.*
 3b. **M2.0c — watch resilience & informer lifecycle** *(added by the v0.27.0 re-audit)*:
    relist-on-reconnect, and the ADR-0006 lifecycle policy actually enforced.
-   *`InformerManager` landed with a config-backed `[informer]` policy.* **Open: #20**
-   (reconnect re-watches without relisting → ghost rows), **#25** (the manager has no
-   caller, so the cap is policy without enforcement), **#26** (it is TTL-only despite the
-   "LRU + TTL" name).
+   *Landed: `InformerManager` with a config-backed `[informer]` policy; LRU admission
+   (#26); `watch_loop` relists and reconciles on every reconnect (#20); `LivePlane`
+   registers with the manager and degrades to a list on `Denied` (#25).* **Open —
+   findings M, N, O:** the manager is constructed **per plane**, so the cap is never
+   reached in the TUI (M); `release`/`touch` have no callers, so fixing M alone leaks
+   slots (N); and the relist reconciles deletions but never adds objects created during
+   an outage (O). The mechanism is correct; the wiring still does not exercise it.
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
-   aspirational. **Related: #28** — `query_plane` still requests 50 000 rows at ~10 Hz and
-   `MemPlane::query` clones-and-sorts the whole set per frame; that is the hot spot the
-   harness will trip over first. *Landed (v0.29.0 →): the view-model half is measured —
+   aspirational. *Landed (v0.29.0 →): the view-model half is measured —
    `benches/query.rs` drives `MemPlane::query` over 50k rows and gates p99 <8 ms via a
-   `bench` CI job. Remaining: the kwok synthetic-cluster harness and end-to-end
-   RSS/cold-start numbers.*
+   `bench` CI job; sorting is an index permutation and `cmp_cells` is allocation-free for
+   the common columns; the TUI re-queries only on a revision change and carries `total`
+   separately (#28, closed).* **Open — finding Q:** `query_plane` still asks for
+   `start: 0, end: 50_000`, so the whole set is materialized on every revision change.
+   *Remaining beyond that: the kwok synthetic-cluster harness and end-to-end RSS/
+   cold-start numbers.*
 5. ~~**Signed releases + SBOM**~~ (done, commit eba14d9 + SLSA provenance in
    `.github/workflows/release.yml`): cosign keyless + CycloneDX SBOM + SHA256SUMS, the
    SBOM is cosign-signed, and SLSA provenance is generated per release.
@@ -204,10 +226,14 @@ unowned debt. Done items are struck through.
 
 - `core` / `core.*` dumps are git-ignored; if a process crashes to a core dump in the
   working tree, find and fix the crashing process rather than committing around it.
-  **Two dumps (~240 MB) were present again during the v0.27.0 re-audit** — the ignore rule
-  is doing its job, but something is still crashing repeatedly and nothing tracks what.
-  Worth one session with `coredumpctl`/`gdb` to identify the binary before the next
-  release.
+  **This is getting worse, not staying flat** (finding T): 2 dumps / ~240 MB at the
+  v0.27.0 re-audit → **14 dumps / 641 MB** at v0.30.0, dated across four separate days.
+  The ignore rule is doing its job and hiding the signal. Two dumps recur at consistent
+  sizes (~158 MB and ~88 MB), which suggests two specific binaries crashing reproducibly
+  rather than random flakiness. Before the next release, run `coredumpctl list` (or
+  `gdb <binary> core.<pid>` / `file core.<pid>`) on one of each size to name them — a
+  process that dumps core on every session is a defect regardless of whether it is
+  Kaptein's own binary or a toolchain/editor process in the same tree.
 
 ## Audit provenance
 

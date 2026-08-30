@@ -46,6 +46,21 @@ fn filter<'a>(
     out
 }
 
+/// Run a cluster-querying future to completion, **bounded by a short timeout** (finding R):
+/// the stated contract is "completion degrades to no candidates — never a hang", but a
+/// blackholed endpoint (a firewall that drops rather than refuses) would otherwise block
+/// tab-completion for the client's full timeout. On timeout or error, return empty.
+fn cluster_query<T>(
+    rt: &tokio::runtime::Runtime,
+    fut: impl std::future::Future<Output = Vec<T>>,
+) -> Vec<T> {
+    rt.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_millis(300), fut)
+            .await
+            .unwrap_or_default()
+    })
+}
+
 /// Complete a **namespace** name from the live cluster (falling back to `kubectl get ns`
 /// when the client can't be built). Always returns `[]` on failure — completion must not
 /// block or error.
@@ -54,7 +69,7 @@ pub fn namespace_completer(current: &OsStr) -> Vec<CompletionCandidate> {
         return Vec::new();
     };
     let rt = runtime();
-    let names = rt.block_on(async {
+    let names = cluster_query(rt, async {
         let client = match kaptein_core::discovery::client().await {
             Ok(c) => c,
             Err(_) => return Vec::new(),
@@ -88,7 +103,7 @@ pub fn pod_completer(current: &OsStr) -> Vec<CompletionCandidate> {
         return Vec::new();
     };
     let rt = runtime();
-    let names = rt.block_on(async {
+    let names = cluster_query(rt, async {
         let client = match kaptein_core::discovery::client().await {
             Ok(c) => c,
             Err(_) => return Vec::new(),

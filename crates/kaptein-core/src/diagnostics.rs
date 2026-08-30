@@ -25,10 +25,20 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
         }];
     };
 
-    // Pending: check scheduling reasons first. PVC binding, taints, and resource
-    // pressure are the *most specific* unschedulable signals, checked before the generic
-    // `unschedulable` fallback.
+    // Pending: a pod that has been scheduled but whose **init containers** have not
+    // completed stays Pending with `PodInitializing`. That is the most specific signal
+    // (the pod is *not* unschedulable — it is stuck initializing), so check it before
+    // the scheduling reasons.
     if status.phase.as_deref() == Some("Pending") {
+        if let Some(f) = status
+            .init_container_statuses
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .find_map(init_container_finding)
+        {
+            return vec![f];
+        }
         if let Some(f) = pvc_binding_finding(status) {
             return vec![f];
         }
@@ -52,6 +62,21 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
 
     // Running/other: check container readiness and restarts.
     let mut findings = Vec::new();
+    // Init containers are the first thing that must succeed before any app container
+    // starts — a failed init container (waiting/terminated/ImagePullBackOff/CrashLoop)
+    // is the specific "why isn't this pod ready" signal, checked before the generic
+    // per-container loop so an `Init:Error` pod reads as "init container X failed", not
+    // the weaker "not ready".
+    for cs in status
+        .init_container_statuses
+        .as_ref()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(f) = init_container_finding(cs) {
+            findings.push(f);
+        }
+    }
     for cs in status.container_statuses.as_ref().into_iter().flatten() {
         // CrashLoopBackOff (current waiting + last_state.terminated) is the strongest
         // signal — report it first and skip the weaker "not ready" fallback.
@@ -311,6 +336,56 @@ fn container_not_ready_finding(cs: &ContainerStatus) -> Option<Finding> {
         });
     }
     None
+}
+
+/// An **init container** that has not completed successfully. Init containers run to
+/// completion before app containers start, so a waiting/failed init container is the
+/// specific "why isn't this pod ready" signal — an `Init:Error` / `Init:CrashLoopBackOff`
+/// pod should read "init container X failed", not the generic "not ready" fallback.
+///
+/// Surfaced reasons:
+/// - `terminated` with a non-zero exit (init ran and failed) — the exit code/reason.
+/// - `waiting` with a reason (`CrashLoopBackOff`, `ImagePullBackOff`, `CreateContainerConfigError`,
+///   …) — the reason the init container can't start.
+/// - `waiting` with no reason (still scheduling/pulling) — a generic "not running" signal.
+fn init_container_finding(cs: &ContainerStatus) -> Option<Finding> {
+    // A completed (exit 0) init container is not a finding — it succeeded.
+    if cs.ready {
+        return None;
+    }
+    if let Some(state) = cs.state.as_ref() {
+        // Terminated with a non-zero exit: the init ran and failed.
+        if let Some(terminated) = state.terminated.as_ref()
+            && terminated.exit_code != 0
+        {
+            let reason = terminated.reason.as_deref().unwrap_or("Error");
+            return Some(Finding {
+                code: "init_container_error".into(),
+                summary: format!(
+                    "Init container '{}' failed with exit code {} ({reason}).",
+                    cs.name, terminated.exit_code
+                ),
+            });
+        }
+        // Waiting: report the reason (ImagePullBackOff, CrashLoopBackOff, config error, …).
+        if let Some(waiting) = state.waiting.as_ref() {
+            return match waiting.reason.as_deref() {
+                Some(reason) => Some(Finding {
+                    code: "init_container_waiting".into(),
+                    summary: format!("Init container '{}' is waiting ({reason}).", cs.name),
+                }),
+                None => Some(Finding {
+                    code: "init_container_waiting".into(),
+                    summary: format!("Init container '{}' has not started.", cs.name),
+                }),
+            };
+        }
+    }
+    // Not ready with no state recorded (rare): still name the init container.
+    Some(Finding {
+        code: "init_container_waiting".into(),
+        summary: format!("Init container '{}' has not completed.", cs.name),
+    })
 }
 
 /// An out-of-memory kill: the container's current `terminated` state (or its
@@ -705,6 +780,90 @@ mod tests {
         assert!(
             findings.iter().any(|f| f.code == "image_pull"),
             "expected image_pull finding for a Running pod, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn init_container_terminated_nonzero_is_detected() {
+        let mut pod = pod_with("Pending", false);
+        if let Some(status) = &mut pod.status {
+            status.init_container_statuses = Some(vec![ContainerStatus {
+                name: "migrate".into(),
+                ready: false,
+                restart_count: 1,
+                state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 1,
+                        reason: Some("Error".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            findings.iter().any(|f| f.code == "init_container_error"),
+            "expected init_container_error, got {findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|f| f.code == "pending"),
+            "a failed init container must not collapse to generic pending, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn init_container_waiting_with_reason_is_detected() {
+        let mut pod = pod_with("Pending", false);
+        if let Some(status) = &mut pod.status {
+            status.init_container_statuses = Some(vec![ContainerStatus {
+                name: "pull-sidecar".into(),
+                ready: false,
+                restart_count: 0,
+                state: Some(ContainerState {
+                    waiting: Some(ContainerStateWaiting {
+                        reason: Some("ImagePullBackOff".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        let f = findings
+            .iter()
+            .find(|f| f.code == "init_container_waiting")
+            .expect("expected init_container_waiting");
+        assert!(f.summary.contains("ImagePullBackOff"), "{f:?}");
+    }
+
+    #[test]
+    fn completed_init_container_is_not_a_finding() {
+        let mut pod = pod_with("Running", true);
+        if let Some(status) = &mut pod.status {
+            status.init_container_statuses = Some(vec![ContainerStatus {
+                name: "migrate".into(),
+                ready: true,
+                restart_count: 0,
+                state: Some(ContainerState {
+                    terminated: Some(ContainerStateTerminated {
+                        exit_code: 0,
+                        reason: Some("Completed".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        let findings = diagnose(&pod);
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.code.starts_with("init_container")),
+            "a completed init container must not be a finding, got {findings:?}"
         );
     }
 }

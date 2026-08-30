@@ -169,12 +169,16 @@ pub fn redact_line(line: &str) -> String {
     let mut out = line.to_string();
 
     // 1. `Authorization: <scheme> <token>` (and `authorization=Bearer ...`): mask the
-    //    token after a Bearer/Basic scheme.
-    let auth = regex::Regex::new(
-        r#"(?i)\b(authorization|auth[_-]?token)(\s*[:=]\s*)(bearer|basic)\s+([^\s,;]+)"#,
-    )
-    .expect("auth log redaction regex is valid");
-    let ranges: Vec<(usize, usize)> = auth
+    //    token after a Bearer/Basic scheme. Compiled once (LazyLock) — this function runs
+    //    per log line in the `pod_logs`/`multi_pod_logs`/`follow_logs` streaming paths, so
+    //    recompiling the regex on every line would dominate the work (finding P).
+    static AUTH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(?i)\b(authorization|auth[_-]?token)(\s*[:=]\s*)(bearer|basic)\s+([^\s,;]+)"#,
+        )
+        .expect("auth log redaction regex is valid")
+    });
+    let ranges: Vec<(usize, usize)> = AUTH
         .captures_iter(&out)
         .map(|c| {
             let v = c.get(4).expect("token group");
@@ -190,11 +194,13 @@ pub fn redact_line(line: &str) -> String {
     //    suffix that would swallow it); the optional `"?` before the separator handles
     //    the JSON quoted-key form `"api_key": "…"`.
     const SENSITIVE_KEY_ALT: &str = r"(?:password|passwd|passphrase|token|secret|api[_-]?key|access[_-]?key|secret[_-]?key|client[_-]?secret|private[_-]?key|credentials?|credential|cookie|session|jwt|ssh[_-]?key)";
-    let kv = regex::Regex::new(&format!(
-        r#"(?i)\b{SENSITIVE_KEY_ALT}"?(\s*[:=]\s*)("[^"]*"|[^\s,;]+)"#
-    ))
-    .expect("log redaction regex is valid");
-    let ranges: Vec<(usize, usize)> = kv
+    static KV: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(&format!(
+            r#"(?i)\b{SENSITIVE_KEY_ALT}"?(\s*[:=]\s*)("[^"]*"|[^\s,;]+)"#
+        ))
+        .expect("log redaction regex is valid")
+    });
+    let ranges: Vec<(usize, usize)> = KV
         .captures_iter(&out)
         .map(|c| {
             let v = c.get(2).expect("value group");

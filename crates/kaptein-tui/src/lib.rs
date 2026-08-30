@@ -855,7 +855,11 @@ fn new_plane(
 /// Query the live plane (sort + filter in the view-model, window in the data plane) and
 /// map the resulting `Page` of `Row`s into geometry-local table rows. Returns the rows
 /// **and** the total matching count (`page.total`), so the TUI can show "N rows" and jump
-/// to the bottom (`G`) without materializing the whole set — the M1.8 windowing fix.
+/// to the bottom (`G`) while decoupling `total` from the materialized window.
+///
+/// The window is still the *whole* set (`start: 0, end: 50_000`): `total` is carried
+/// separately, but the full sorted/filtered set is materialized into `TableRow`s per
+/// query. Querying *only* the visible window is the remaining M1.8 nav refactor.
 /// The row's cells are the plane's schema columns in order — the lens's columns for a
 /// lens-driven kind, the built-in four for a built-in kind.
 async fn query_plane(
