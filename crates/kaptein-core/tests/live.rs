@@ -128,6 +128,48 @@ fn standalone_pod(name: &str) -> k8s_openapi::api::core::v1::Pod {
     }
 }
 
+/// A standalone Pod that **does** declare CPU/memory requests and limits — the negative
+/// control for the `missing_resources` overview test (it must not be flagged).
+fn provisioned_pod(name: &str) -> k8s_openapi::api::core::v1::Pod {
+    use k8s_openapi::api::core::v1::{Container, PodSpec, ResourceRequirements};
+    use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+    k8s_openapi::api::core::v1::Pod {
+        metadata: ObjectMeta {
+            name: Some(name.into()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: vec![Container {
+                name: "c".into(),
+                image: Some("busybox:1.36".into()),
+                command: Some(vec!["sleep".into(), "3600".into()]),
+                resources: Some(ResourceRequirements {
+                    requests: Some(
+                        [
+                            ("cpu".to_string(), Quantity("100m".to_string())),
+                            ("memory".to_string(), Quantity("64Mi".to_string())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    limits: Some(
+                        [
+                            ("cpu".to_string(), Quantity("1".to_string())),
+                            ("memory".to_string(), Quantity("128Mi".to_string())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        status: None,
+    }
+}
+
 /// The read path: `discovery::list` lists the just-created ConfigMap, and
 /// `describe_dynamic` round-trips its YAML with the secret-adjacent values intact.
 #[tokio::test]
@@ -523,6 +565,61 @@ async fn exec_runs_a_command_in_a_pod() {
     );
 
     guard.cleanup().await;
+}
+
+/// The `missing_resources` shipped path (M1.6/ADR-0015): a pod that declares no CPU/memory
+/// requests/limits must appear in `overview_with_health`'s `misconfigured_pods` section —
+/// proving the detection rule reaches the landing view through a real API server, not
+/// only through a unit test. A second pod that *does* declare requests+limits must not
+/// appear.
+#[tokio::test]
+async fn overview_flags_pods_missing_requests_and_limits() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let mut guard = Cleanup(&client, ns.clone());
+
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &ns);
+    // A pod with no `resources` at all → flagged as no_requests + no_limits.
+    pods.create(&PostParams::default(), &standalone_pod("bare"))
+        .await
+        .expect("create bare pod");
+    // A pod with requests + limits → NOT flagged.
+    pods.create(&PostParams::default(), &provisioned_pod("provisioned"))
+        .await
+        .expect("create provisioned pod");
+
+    // The overview lists pods across all namespaces; scope the assertion to the
+    // throwaway namespace's two pods rather than the whole cluster.
+    let since_ms = now_ms().saturating_sub(5 * 60 * 1000);
+    let overview =
+        kaptein_core::overview::overview_with_health(&client, Some(&ns), since_ms, Vec::new())
+            .await
+            .expect("overview_with_health");
+
+    let flagged: Vec<&str> = overview
+        .misconfigured_pods
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(
+        flagged.contains(&"bare"),
+        "a pod with no requests/limits must be flagged, got {flagged:?}"
+    );
+    assert!(
+        !flagged.contains(&"provisioned"),
+        "a pod with requests+limits must not be flagged, got {flagged:?}"
+    );
+
+    guard.cleanup().await;
+}
+
+/// Current epoch milliseconds (the live test's `since_ms` window).
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// RAII cleanup: the throwaway namespace is deleted explicitly via `cleanup()` (awaited),

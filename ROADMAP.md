@@ -129,7 +129,10 @@ Milestones:
     (which answers "why isn't this pod ready", not "is this pod misconfigured"), with
     four unit tests and two fixture-corpus tests (`no_requests.json`/`no_limits.json`)
     pinning it. **Recommending a value** remains M3b.1 (ADR-0015: render, don't
-    compute).*
+    compute).* *(v0.30.1 →: the **shipped path** is also pinned by a live test —
+    `overview_flags_pods_missing_requests_and_limits` runs `overview_with_health`
+    against a real API server and asserts a bare pod is flagged while a provisioned one
+    is not.)*
 - **M1.7 Secret masking & redaction — *blocking*** *(elevated from M3b.2 per review)*
   - A single `kaptein-core` redaction choke point through which **every** serialized
     resource passes before reaching a frontend, the MCP `describe` tool, or an audit log

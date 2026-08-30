@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **M1.6 — `missing_resources` shipped-path live test.** A new live test
+  `overview_flags_pods_missing_requests_and_limits` proves the `no_requests`/`no_limits`
+  rule reaches the landing view through a **real API server** (a bare pod is flagged, a
+  fully-provisioned pod is not) — closing the "shipped path takes it" loop for ADR-0015,
+  not just the unit-test loop.
 - **M1.8 — cold-start is now measured, not aspirational.** `benches/query.rs` now gates a
   third number: cold start (build a fresh 50k-row plane + first query) against the
   roadmap's 500 ms budget (measured ~24 ms). Together with p99 query latency (8 ms) and
