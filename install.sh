@@ -10,7 +10,7 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 #   # or, to pick a version and install dir:
-#   KAPTEIN_VERSION=v0.30.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+#   KAPTEIN_VERSION=v0.30.1 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 #
 # Environment variables:
 #   KAPTEIN_VERSION     release tag to install (default: latest)

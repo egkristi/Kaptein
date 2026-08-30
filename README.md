@@ -457,7 +457,7 @@ Actions OIDC identity, then installs to `~/.local/bin`:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 # pick a version / install dir:
-KAPTEIN_VERSION=v0.30.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+KAPTEIN_VERSION=v0.30.1 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
 Which to use: `cargo install` is the default for CLI-only users who already have Rust
