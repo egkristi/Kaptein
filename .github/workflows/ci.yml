@@ -47,8 +47,22 @@ jobs:
       - run: cargo test --workspace --locked
 
   live:
-    name: Live integration (kind)
+    name: Live integration (k8s ${{ matrix.k8s }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # M2.0b: latest-three-minors conformance — the live tier must pass on the
+      # three most recent Kubernetes minors, not just one default. The node images
+      # are pinned by digest (kind requires the `@sha256` for reproducibility and
+      # so an image is guaranteed to match this release).
+      matrix:
+        include:
+          - k8s: v1.37.0
+            node_image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+          - k8s: v1.36.4
+            node_image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+          - k8s: v1.35.8
+            node_image: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -60,6 +74,7 @@ jobs:
       - uses: helm/kind-action@v1
         with:
           cluster_name: kaptein-it
+          node_image: ${{ matrix.node_image }}
       - name: Wait for the API server
         run: |
           set -euo pipefail

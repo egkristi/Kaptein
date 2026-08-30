@@ -389,8 +389,10 @@ Milestones:
     state" rule — they stay CLI-gated and documented.*
   - *CI-wired (v0.30.1 →): a `live` job now runs the tier against a throwaway `kind`
     cluster on every push, so `KAPTEIN_LIVE_TESTS=1` is no longer a locally-only
-    opt-in — the shipped-path test actually runs in CI. Remaining: the
-    latest-three-minors conformance matrix.*
+    opt-in — the shipped-path test actually runs in CI. The job is a **latest-three-
+    minors conformance matrix** (v1.37 / v1.36 / v1.35, node images pinned by digest),
+    closing the milestone's "conformance check against the latest three Kubernetes
+    minors" clause.*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a

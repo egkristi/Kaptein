@@ -154,10 +154,11 @@ unowned debt. Done items are struck through.
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; a live
    integration-test tier (`crates/kaptein-core/tests/live.rs`, gated on
    `KAPTEIN_LIVE_TESTS=1`) exercises the read path and the delete write path against a
-   real cluster, and now runs **in CI** via a `live` job on a throwaway `kind` cluster.
-   Extended (v0.30.1 →) to eight paths: `restart`, `evict`, and `exec` are now
-   live-tested too (cordon/uncordon are deliberately excluded — they mutate a real
-   node). Remaining: the latest-three-minors conformance matrix.*
+   real cluster, and now runs **in CI** via a `live` job on a throwaway `kind` cluster,
+   as a **latest-three-minors conformance matrix** (v1.37 / v1.36 / v1.35). Extended
+   (v0.30.1 →) to eight paths: `restart`, `evict`, and `exec` are now live-tested too
+   (cordon/uncordon are deliberately excluded — they mutate a real node). This closes
+   the milestone.*
 3b. **M2.0c — watch resilience & informer lifecycle** *(added by the v0.27.0 re-audit)*:
    relist-on-reconnect, and the ADR-0006 lifecycle policy actually enforced.
    *Landed: `InformerManager` with a config-backed `[informer]` policy; LRU admission
