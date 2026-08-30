@@ -71,9 +71,13 @@ jobs:
       # gated on `KAPTEIN_LIVE_TESTS=1`) must actually run in CI against a real
       # API server, not just remain a hermetic-gated file. A throwaway `kind`
       # cluster provides that server without touching any shared state.
+      # `version` is pinned to a kind release new enough to generate the
+      # kubeadm config API that v1.37 accepts (v0.31.0 emits v1beta3, which
+      # kubeadm 1.37 rejects).
       - uses: helm/kind-action@v1
         with:
           cluster_name: kaptein-it
+          version: v0.33.0
           node_image: ${{ matrix.node_image }}
       - name: Wait for the API server
         run: |
