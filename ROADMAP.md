@@ -95,6 +95,10 @@ Milestones:
     whether anyone leaves the tool open
   - *The third question — "what is about to break" (certificates, quota, capacity) —
     needs subsystems from M3a/M3b and lands there, not in Phase 1.*
+  - *Extended (v0.30.1 →): the overview now also surfaces **misconfigured** pods —
+    `diagnostics::missing_resources` flags containers with no CPU/memory requests or
+    limits (ADR-0015), the shipped consumer of the M1.6 `no_requests`/`no_limits` rule
+    (read-only, no metrics).*
 - **M1.6 Minimal diagnostics rule engine**
   - One rule engine, **one rule pack**: "why isn't this pod ready" over events,
     scheduler reasons, probes, and PVC binding
@@ -118,6 +122,14 @@ Milestones:
     here. **Recommending a *value*** needs VPA or Prometheus and is M3b.1. Splitting them
     lets the cheap half — the one that catches the actual common misconfiguration — ship
     two phases earlier. Rule codes: `no_requests` / `no_limits`, with a fixture each.
+  - *Landed (v0.30.1 →): `diagnostics::missing_resources` is the detection half of
+    ADR-0015 — a pure `PodSpec` predicate over app + init containers that emits
+    `no_requests` (no `resources.requests.cpu`/`memory`) and `no_limits` (no
+    `resources.limits.cpu`/`memory`). It is a separate entry point from `diagnose`
+    (which answers "why isn't this pod ready", not "is this pod misconfigured"), with
+    four unit tests and two fixture-corpus tests (`no_requests.json`/`no_limits.json`)
+    pinning it. **Recommending a value** remains M3b.1 (ADR-0015: render, don't
+    compute).*
 - **M1.7 Secret masking & redaction — *blocking*** *(elevated from M3b.2 per review)*
   - A single `kaptein-core` redaction choke point through which **every** serialized
     resource passes before reaching a frontend, the MCP `describe` tool, or an audit log
@@ -367,9 +379,16 @@ Milestones:
     **live integration-test tier** now exists — `crates/kaptein-core/tests/live.rs`
     exercises the real kube client (list, describe, and the delete dry-run vs. real
     write path) against a cluster, self-cleaning in a throwaway namespace and gated on
-    `KAPTEIN_LIVE_TESTS=1` so the default run stays hermetic. Remaining: kind/envtest in
-    CI (a cluster is not guaranteed on ubuntu runners) and the latest-three-minors
-    conformance matrix.*
+    `KAPTEIN_LIVE_TESTS=1` so the default run stays hermetic.*
+  - *Extended (v0.30.1 →): the live tier now exercises **eight** paths, up from five —
+    adding `restart` (asserts the `restartedAt` annotation lands), `evict` (dry-run +
+    real evict against a throwaway standalone pod), and `exec` (runs `echo` in a running
+    pod and asserts the output). This closes the "exec/restart/evict not unit-tested
+    today" gap the milestone names. Cordon/uncordon are deliberately **not** exercised
+    here: they mutate a real node, which violates the tier's "never touch shared cluster
+    state" rule — they stay CLI-gated and documented, not live-tested. Remaining:
+    kind/envtest in CI (a cluster is not guaranteed on ubuntu runners) and the
+    latest-three-minors conformance matrix.*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a

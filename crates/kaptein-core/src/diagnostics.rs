@@ -4,7 +4,7 @@
 //! evidence chain, not just a verdict. This is the single engine that feeds the landing
 //! view, the TUI diagnostics, and the MCP diagnostic moat (ADR-0013).
 
-use k8s_openapi::api::core::v1::{ContainerStatus, Pod, PodCondition, PodStatus};
+use k8s_openapi::api::core::v1::{Container, ContainerStatus, Pod, PodCondition, PodStatus};
 
 /// A single diagnostic finding with an evidence-based reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +119,65 @@ pub fn diagnose(pod: &Pod) -> Vec<Finding> {
     findings
 }
 
+/// Detect containers that declare **no resource requests/limits** (ADR-0015, the Phase 1
+/// half of "missing limits/requests").
+///
+/// This is a pure `PodSpec` predicate — it needs no metrics, no Prometheus, no VPA — the
+/// same shape as every other rule in the pack. It is *not* part of [`diagnose`] (which
+/// answers "why isn't this pod ready"); it answers "is this pod misconfigured", and is
+/// consumed by the landing view and the cost/rightsizing surface rather than the
+/// readiness path. **Recommending a value** is a separate, Phase 3b concern (ADR-0015:
+/// Kaptein renders recommendations, it does not compute them).
+///
+/// Rules:
+/// - `no_requests` — a container declares no `resources.requests.cpu` **and** no
+///   `resources.requests.memory` (a requests map with only one of the two is still
+///   flagged, since the point is the *container* being underspecified).
+/// - `no_limits` — a container declares no `resources.limits.cpu` **and** no
+///   `resources.limits.memory`.
+pub fn missing_resources(pod: &Pod) -> Vec<Finding> {
+    let Some(spec) = &pod.spec else {
+        return Vec::new();
+    };
+
+    // App containers + init containers share the same rule (both are containers whose
+    // resource declaration is an operator's decision).
+    let containers: Vec<&Container> = spec
+        .containers
+        .iter()
+        .chain(spec.init_containers.iter().flatten())
+        .collect();
+
+    let mut findings = Vec::new();
+    for c in containers {
+        let resources = c.resources.as_ref();
+        let requests = resources.and_then(|r| r.requests.as_ref());
+        let limits = resources.and_then(|r| r.limits.as_ref());
+
+        if requests.is_none_or(|r| !r.contains_key("cpu") && !r.contains_key("memory")) {
+            findings.push(Finding {
+                code: "no_requests".into(),
+                summary: format!(
+                    "Container '{}' declares no CPU/memory requests (an unbounded request \
+                     breaks scheduling and fairness).",
+                    c.name
+                ),
+            });
+        }
+        if limits.is_none_or(|l| !l.contains_key("cpu") && !l.contains_key("memory")) {
+            findings.push(Finding {
+                code: "no_limits".into(),
+                summary: format!(
+                    "Container '{}' declares no CPU/memory limits (an unbounded limit can \
+                     exhaust the node).",
+                    c.name
+                ),
+            });
+        }
+    }
+    findings
+}
+
 /// Whether the pod's Ready condition is true.
 pub fn is_ready(status: &PodStatus) -> bool {
     status
@@ -128,7 +187,6 @@ pub fn is_ready(status: &PodStatus) -> bool {
         .flatten()
         .any(|c| c.type_ == "Ready" && c.status == "True")
 }
-
 fn unschedulable_finding(status: &PodStatus) -> Option<Finding> {
     let c = condition(status, "PodScheduled")?;
     if c.status == "False" {
@@ -865,5 +923,123 @@ mod tests {
                 .any(|f| f.code.starts_with("init_container")),
             "a completed init container must not be a finding, got {findings:?}"
         );
+    }
+
+    // --- missing_resources (ADR-0015, the Phase 1 "detect missing requests/limits" half)
+
+    #[test]
+    fn missing_resources_flags_containers_without_requests_or_limits() {
+        use k8s_openapi::api::core::v1::{Container, PodSpec};
+        let pod = Pod {
+            metadata: Default::default(),
+            spec: Some(PodSpec {
+                containers: vec![Container {
+                    name: "app".into(),
+                    image: Some("busybox".into()),
+                    // No `resources` at all.
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            status: None,
+        };
+        let findings = missing_resources(&pod);
+        let codes: Vec<&str> = findings.iter().map(|f| f.code.as_str()).collect();
+        assert!(codes.contains(&"no_requests"), "got {codes:?}");
+        assert!(codes.contains(&"no_limits"), "got {codes:?}");
+    }
+
+    #[test]
+    fn missing_resources_is_clean_when_requests_and_limits_are_set() {
+        use k8s_openapi::api::core::v1::{Container, PodSpec, ResourceRequirements};
+        use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+        let q = |s: &str| Quantity(s.to_string());
+        let pod = Pod {
+            metadata: Default::default(),
+            spec: Some(PodSpec {
+                containers: vec![Container {
+                    name: "app".into(),
+                    image: Some("busybox".into()),
+                    resources: Some(ResourceRequirements {
+                        requests: Some(
+                            [
+                                ("cpu".to_string(), q("100m")),
+                                ("memory".to_string(), q("64Mi")),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        limits: Some(
+                            [
+                                ("cpu".to_string(), q("1")),
+                                ("memory".to_string(), q("128Mi")),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            status: None,
+        };
+        assert!(missing_resources(&pod).is_empty());
+    }
+
+    #[test]
+    fn missing_resources_flags_init_containers_too() {
+        use k8s_openapi::api::core::v1::{Container, PodSpec};
+        let pod = Pod {
+            metadata: Default::default(),
+            spec: Some(PodSpec {
+                containers: vec![],
+                init_containers: Some(vec![Container {
+                    name: "migrate".into(),
+                    image: Some("busybox".into()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            status: None,
+        };
+        let findings = missing_resources(&pod);
+        let codes: Vec<&str> = findings.iter().map(|f| f.code.as_str()).collect();
+        assert!(codes.contains(&"no_requests"), "got {codes:?}");
+        assert!(codes.contains(&"no_limits"), "got {codes:?}");
+    }
+
+    #[test]
+    fn missing_resources_flags_partial_spec() {
+        // A container with requests but no limits is still missing limits (the point is
+        // the *container* being underspecified per axis).
+        use k8s_openapi::api::core::v1::{Container, PodSpec, ResourceRequirements};
+        use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+        let pod = Pod {
+            metadata: Default::default(),
+            spec: Some(PodSpec {
+                containers: vec![Container {
+                    name: "app".into(),
+                    image: Some("busybox".into()),
+                    resources: Some(ResourceRequirements {
+                        requests: Some(
+                            [("cpu".to_string(), Quantity("100m".to_string()))]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        limits: None,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            status: None,
+        };
+        let findings = missing_resources(&pod);
+        let codes: Vec<&str> = findings.iter().map(|f| f.code.as_str()).collect();
+        assert!(!codes.contains(&"no_requests"), "got {codes:?}");
+        assert!(codes.contains(&"no_limits"), "got {codes:?}");
     }
 }

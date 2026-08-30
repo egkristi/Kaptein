@@ -117,3 +117,25 @@ fn init_container_failure_is_detected() {
         "init container failure should not collapse to the generic not_ready, got {got:?}"
     );
 }
+
+#[test]
+fn missing_requests_is_detected_from_a_real_pod_spec() {
+    let pod = load_fixture("no_requests.json");
+    let got: Vec<String> = kaptein_core::diagnostics::missing_resources(&pod)
+        .into_iter()
+        .map(|Finding { code, .. }| code)
+        .collect();
+    assert!(got.contains(&"no_requests".into()), "got {got:?}");
+    assert!(got.contains(&"no_limits".into()), "got {got:?}");
+}
+
+#[test]
+fn missing_limits_is_detected_when_requests_are_set() {
+    let pod = load_fixture("no_limits.json");
+    let got: Vec<String> = kaptein_core::diagnostics::missing_resources(&pod)
+        .into_iter()
+        .map(|Finding { code, .. }| code)
+        .collect();
+    assert!(!got.contains(&"no_requests".into()), "got {got:?}");
+    assert!(got.contains(&"no_limits".into()), "got {got:?}");
+}

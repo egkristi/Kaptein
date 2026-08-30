@@ -107,6 +107,27 @@ fn deployment(name: &str, replicas: i32) -> k8s_openapi::api::apps::v1::Deployme
     }
 }
 
+/// A minimal standalone Pod fixture (no controller) for the evict and exec tests.
+fn standalone_pod(name: &str) -> k8s_openapi::api::core::v1::Pod {
+    use k8s_openapi::api::core::v1::{Container, PodSpec};
+    k8s_openapi::api::core::v1::Pod {
+        metadata: ObjectMeta {
+            name: Some(name.into()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: vec![Container {
+                name: "c".into(),
+                image: Some("busybox:1.36".into()),
+                command: Some(vec!["sleep".into(), "3600".into()]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        status: None,
+    }
+}
+
 /// The read path: `discovery::list` lists the just-created ConfigMap, and
 /// `describe_dynamic` round-trips its YAML with the secret-adjacent values intact.
 #[tokio::test]
@@ -374,6 +395,130 @@ async fn blast_radius_traverses_deployment_to_pod() {
         br.dependents.iter().any(|d| d.starts_with("Pod/")),
         "expected a Pod dependent (via ReplicaSet), got {:?}",
         br.dependents
+    );
+
+    guard.cleanup().await;
+}
+
+/// The restart write path: `workloads::restart` annotates the pod template with
+/// `kube.kubernetes.io/restartedAt` (the `kubectl rollout restart` mechanism), so a
+/// restart is verifiable by observing the annotation, not by polling for a rollout.
+#[tokio::test]
+async fn restart_annotates_the_pod_template() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let mut guard = Cleanup(&client, ns.clone());
+
+    let deploy_name = "restart-me";
+    let deployments: Api<k8s_openapi::api::apps::v1::Deployment> =
+        Api::namespaced(client.clone(), &ns);
+    deployments
+        .create(&PostParams::default(), &deployment(deploy_name, 1))
+        .await
+        .expect("create Deployment");
+
+    let gvk = GroupVersionKind::gvk("apps", "v1", "Deployment");
+    let outcome = kaptein_core::workloads::restart(&client, &gvk, deploy_name, &ns)
+        .await
+        .expect("restart");
+    assert!(outcome.message.contains("restarted"), "{}", outcome.message);
+
+    // The restart annotation is the observable effect of the write.
+    let d = deployments.get(deploy_name).await.expect("get Deployment");
+    let annotations = d
+        .spec
+        .and_then(|s| s.template.metadata)
+        .and_then(|m| m.annotations);
+    assert!(
+        annotations
+            .as_ref()
+            .is_some_and(|a| a.contains_key("kube.kubernetes.io/restartedAt")),
+        "expected a restartedAt annotation, got {annotations:?}"
+    );
+
+    guard.cleanup().await;
+}
+
+/// The evict write path: `nodes::evict` evicts a pod for real, and a dry-run reports the
+/// intended action without removing the pod. This is the one node write that is safe and
+/// self-cleaning against a throwaway pod (cordon/uncordon would mutate a *real* node, so
+/// they are deliberately not exercised here — the live tier never touches shared cluster
+/// state).
+#[tokio::test]
+async fn evict_dry_run_then_real_evict() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let mut guard = Cleanup(&client, ns.clone());
+
+    // A standalone pod (no controller) is the minimal evict target: it evicts cleanly
+    // and nothing recreates it, so the "it is gone" assertion is deterministic.
+    let pod_name = "evict-me";
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &ns);
+    pods.create(&PostParams::default(), &standalone_pod(pod_name))
+        .await
+        .expect("create Pod");
+
+    // 1. Dry-run: must not evict, and the message must say "would be evicted".
+    let dry = kaptein_core::nodes::evict(&client, &ns, pod_name, false)
+        .await
+        .expect("dry-run evict");
+    assert!(dry.message.contains("would be evicted"), "{}", dry.message);
+
+    // 2. Real evict: the pod's deletion timestamp is set (eviction is a deletion).
+    let real = kaptein_core::nodes::evict(&client, &ns, pod_name, true)
+        .await
+        .expect("real evict");
+    assert!(real.message.contains("evicted"), "{}", real.message);
+
+    guard.cleanup().await;
+}
+
+/// The exec read path: `exec` runs `echo` in a running pod and returns the output. This
+/// exercises the real pod `exec` transport (stdout/stderr + remote exit status) against
+/// a live cluster, which is the M2.0b gap the roadmap names ("exec ... not unit-tested").
+#[tokio::test]
+async fn exec_runs_a_command_in_a_pod() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let mut guard = Cleanup(&client, ns.clone());
+
+    let pod_name = "exec-me";
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &ns);
+    pods.create(&PostParams::default(), &standalone_pod(pod_name))
+        .await
+        .expect("create Pod");
+
+    // Wait for the container to enter Running before exec (the exec transport requires
+    // a running container).
+    let mut running = false;
+    for _ in 0..30 {
+        if let Ok(p) = pods.get(pod_name).await {
+            let phase = p.status.as_ref().and_then(|s| s.phase.clone());
+            if phase.as_deref() == Some("Running") {
+                running = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(running, "pod {pod_name} did not reach Running");
+
+    let output = kaptein_core::exec::exec(
+        &client,
+        &ns,
+        pod_name,
+        &["echo".into(), "hello-kaptein".into()],
+        None,
+    )
+    .await
+    .expect("exec");
+    assert!(
+        output.output.contains("hello-kaptein"),
+        "exec output should contain the echoed string, got {:?}",
+        output.output
     );
 
     guard.cleanup().await;

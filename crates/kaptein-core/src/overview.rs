@@ -32,6 +32,10 @@ pub struct Overview {
     pub recent_changes: Vec<ChangeRecord>,
     /// Pods that are not ready, with their diagnostics findings (what is broken, directly).
     pub unhealthy_pods: Vec<UnhealthyPod>,
+    /// Pods missing CPU/memory requests or limits (ADR-0015, the Phase 1 detection half
+    /// of "missing limits/requests"). Distinct from `unhealthy_pods`: a pod can be fully
+    /// Ready and still be misconfigured.
+    pub misconfigured_pods: Vec<UnhealthyPod>,
 }
 
 /// A pod that is not ready, plus the M1.6 findings explaining why.
@@ -51,7 +55,7 @@ pub async fn overview(
     since_ms: i64,
 ) -> Result<Overview, Error> {
     let events = recent_events(client, namespace, Some(since_ms)).await?;
-    Ok(summarize(events, Vec::new(), Vec::new()))
+    Ok(summarize(events, Vec::new(), Vec::new(), Vec::new()))
 }
 
 /// Build the landing view from the events API **and** the watch ring buffer — the full
@@ -63,7 +67,7 @@ pub async fn overview_with_ring(
     ring_changes: Vec<ChangeRecord>,
 ) -> Result<Overview, Error> {
     let events = recent_events(client, namespace, Some(since_ms)).await?;
-    Ok(summarize(events, ring_changes, Vec::new()))
+    Ok(summarize(events, ring_changes, Vec::new(), Vec::new()))
 }
 
 /// Build the landing view from events + the ring **+ the diagnostics engine**: list the
@@ -77,7 +81,10 @@ pub async fn overview_with_health(
 ) -> Result<Overview, Error> {
     let events = recent_events(client, namespace, Some(since_ms)).await?;
     let unhealthy = unhealthy_pods(client, namespace).await.unwrap_or_default();
-    Ok(summarize(events, ring_changes, unhealthy))
+    let misconfigured = misconfigured_pods(client, namespace)
+        .await
+        .unwrap_or_default();
+    Ok(summarize(events, ring_changes, unhealthy, misconfigured))
 }
 
 /// List pods and diagnose each, returning only those that are **not ready** with their
@@ -87,17 +94,10 @@ async fn unhealthy_pods(
     client: &Client,
     namespace: Option<&str>,
 ) -> Result<Vec<UnhealthyPod>, Error> {
-    let pods: Api<Pod> = match namespace {
-        Some(ns) => Api::namespaced(client.clone(), ns),
-        None => Api::all(client.clone()),
-    };
-    let list = pods
-        .list(&ListParams::default())
-        .await
-        .map_err(Error::Api)?;
+    let pods = list_pods(client, namespace).await?;
 
     let mut out = Vec::new();
-    for pod in list {
+    for pod in pods {
         let findings = crate::diagnostics::diagnose(&pod);
         if findings.is_empty() {
             continue;
@@ -118,12 +118,58 @@ async fn unhealthy_pods(
     Ok(out)
 }
 
-/// Pure aggregation over already-fetched events, ring changes, and unhealthy pods
-/// (testable without a client).
+/// List pods and run the ADR-0015 `missing_resources` predicate over each, returning
+/// those that declare no CPU/memory requests or limits. A best-effort read (degrades to
+/// empty on error), and the shipped consumer of `diagnostics::missing_resources` — the
+/// landing view surfaces "is anything misconfigured" alongside "is anything broken".
+async fn misconfigured_pods(
+    client: &Client,
+    namespace: Option<&str>,
+) -> Result<Vec<UnhealthyPod>, Error> {
+    let pods = list_pods(client, namespace).await?;
+
+    let mut out = Vec::new();
+    for pod in pods {
+        let findings = crate::diagnostics::missing_resources(&pod);
+        if findings.is_empty() {
+            continue;
+        }
+        out.push(UnhealthyPod {
+            namespace: pod.namespace().unwrap_or_default(),
+            name: pod.name_any(),
+            findings: findings
+                .into_iter()
+                .map(|f| format!("{}: {}", f.code, f.summary))
+                .collect(),
+        });
+    }
+    out.sort_by(|a, b| {
+        (a.namespace.clone(), a.name.clone()).cmp(&(b.namespace.clone(), b.name.clone()))
+    });
+    Ok(out)
+}
+
+/// List pods in a namespace (or all namespaces) — shared by the unhealthy and
+/// misconfigured scans.
+async fn list_pods(client: &Client, namespace: Option<&str>) -> Result<Vec<Pod>, Error> {
+    let pods: Api<Pod> = match namespace {
+        Some(ns) => Api::namespaced(client.clone(), ns),
+        None => Api::all(client.clone()),
+    };
+    Ok(pods
+        .list(&ListParams::default())
+        .await
+        .map_err(Error::Api)?
+        .items)
+}
+
+/// Pure aggregation over already-fetched events, ring changes, unhealthy pods, and
+/// misconfigured pods (testable without a client).
 fn summarize(
     events: Vec<EventSummary>,
     recent_changes: Vec<ChangeRecord>,
     unhealthy_pods: Vec<UnhealthyPod>,
+    misconfigured_pods: Vec<UnhealthyPod>,
 ) -> Overview {
     let total_events = events.len();
     let warnings: Vec<EventSummary> = events
@@ -143,6 +189,7 @@ fn summarize(
         affected_namespaces: affected,
         recent_changes,
         unhealthy_pods,
+        misconfigured_pods,
     }
 }
 
@@ -172,7 +219,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let o = summarize(events, vec![], vec![]);
+        let o = summarize(events, vec![], vec![], vec![]);
         assert_eq!(o.total_events, 3);
         assert_eq!(o.warnings.len(), 2);
         assert_eq!(o.affected_namespaces, ["a"]);
@@ -182,7 +229,7 @@ mod tests {
     #[test]
     fn summarize_no_warnings() {
         let events = [ev("b", "Normal", "p3")].into_iter().collect();
-        let o = summarize(events, vec![], vec![]);
+        let o = summarize(events, vec![], vec![], vec![]);
         assert_eq!(o.total_events, 1);
         assert!(o.warnings.is_empty());
         assert!(o.affected_namespaces.is_empty());
@@ -198,7 +245,7 @@ mod tests {
             name: "p4".into(),
             observed_at_ms: 100,
         }];
-        let o = summarize(events, changes, vec![]);
+        let o = summarize(events, changes, vec![], vec![]);
         assert_eq!(o.recent_changes.len(), 1);
         assert_eq!(o.recent_changes[0].name, "p4");
     }

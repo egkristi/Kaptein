@@ -154,16 +154,18 @@ unowned debt. Done items are struck through.
    latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
    kind/envtest tier and Kubernetes-minor conformance remain open. A live integration-test
    tier (`crates/kaptein-core/tests/live.rs`, gated on `KAPTEIN_LIVE_TESTS=1`) now
-   exercises the read path and the delete write path against a real cluster.*
+   exercises the read path and the delete write path against a real cluster. Extended
+   (v0.30.1 →) to eight paths: `restart`, `evict`, and `exec` are now live-tested too
+   (cordon/uncordon are deliberately excluded — they mutate a real node).*
 3b. **M2.0c — watch resilience & informer lifecycle** *(added by the v0.27.0 re-audit)*:
    relist-on-reconnect, and the ADR-0006 lifecycle policy actually enforced.
    *Landed: `InformerManager` with a config-backed `[informer]` policy; LRU admission
    (#26); `watch_loop` relists and reconciles on every reconnect (#20); `LivePlane`
-   registers with the manager and degrades to a list on `Denied` (#25).* **Open —
-   findings M, N, O:** the manager is constructed **per plane**, so the cap is never
-   reached in the TUI (M); `release`/`touch` have no callers, so fixing M alone leaks
-   slots (N); and the relist reconciles deletions but never adds objects created during
-   an outage (O). The mechanism is correct; the wiring still does not exercise it.
+   registers with the manager and degrades to a list on `Denied` (#25).* **Resolved —
+   findings M, N, O:** the manager is now session-scoped (M), the watch task releases its
+   slot via a `WatchSlotGuard` (N), and the relist upserts objects created during an
+   outage as well as removing deletions (O) — all pinned by the
+   `shared_manager_cap_is_enforced_across_planes_and_released_on_close` DoD test.
 4. **M1.8 — kwok performance harness**: the performance budget is measured, not
    aspirational. *Landed (v0.29.0 →): the view-model half is measured —
    `benches/query.rs` drives `MemPlane::query` over 50k rows and gates p99 <8 ms via a

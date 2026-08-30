@@ -1290,6 +1290,16 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 }
             }
             println!(
+                "  misconfigured pods (missing requests/limits): {}",
+                overview.misconfigured_pods.len()
+            );
+            for m in overview.misconfigured_pods {
+                println!("    [MISCONFIGURED] {}/{}", m.namespace, m.name);
+                for f in m.findings {
+                    println!("        - {f}");
+                }
+            }
+            println!(
                 "  recent changes (watch): {}",
                 overview.recent_changes.len()
             );

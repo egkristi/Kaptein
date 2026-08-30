@@ -243,6 +243,9 @@ Two things nobody does properly, which Kaptein treats as first-class:
 - ✅ *"Why isn't this pod ready?"* — a rule engine over events, scheduler reasons,
   node capacity, taints, imagePull, probe config, and PVC binding (`kaptein diagnose`
   and the MCP `diagnose`/`explain_pod_failure`/`why_is_job_pending` tools)
+- ✅ **Missing requests/limits detection** — `missing_resources` flags any container that
+  declares no CPU/memory requests or limits (the metrics-free half of "missing
+  limits/requests"; *recommending* a value needs VPA/Prometheus and is planned — ADR-0015)
 - ✅ **Governed MCP surface** (`kaptein mcp`): AI agents drive Kaptein through the same
   guardrails as a human — read-only today, PR-only writes later (ADR-0010)
 - 🛠️ Continuous sanity scan with score and trend: missing limits/requests, no PDB, no

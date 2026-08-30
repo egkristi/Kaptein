@@ -4,6 +4,27 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **M2.0b — the live integration-test tier now covers the remaining write paths.**
+  `crates/kaptein-core/tests/live.rs` grows from five to eight live tests: `restart`
+  (asserts the `kube.kubernetes.io/restartedAt` annotation lands on the pod template),
+  `evict` (dry-run + real evict against a throwaway standalone pod), and `exec` (runs
+  `echo` in a running pod and asserts the output). This closes the "exec/restart/evict
+  not unit-tested today" gap the milestone names. `cordon`/`uncordon` are deliberately
+  excluded — they mutate a real node, violating the tier's never-touch-shared-cluster-state
+  rule (they remain CLI-gated and documented).
+- **M1.6 — `missing_resources`: detect missing CPU/memory requests/limits (ADR-0015).**
+  A new `kaptein-core::diagnostics::missing_resources(pod)` predicate emits `no_requests`
+  and `no_limits` for any app or init container that declares no
+  `resources.requests.cpu`/`memory` (or limits). It is the cheap, metrics-free half of
+  "missing limits/requests" that ADR-0015 split off from the Phase 3b recommendation
+  work (Kaptein renders recommendations, it does not compute them) — four unit tests and
+  two fixture-corpus tests (`no_requests.json`/`no_limits.json`) pin it. The **shipped
+  path** is `kaptein overview`, which now lists "misconfigured pods (missing
+  requests/limits)" alongside the existing "unhealthy pods" section.
+
 ## [0.30.1] - 2026-08-30
 
 ### Fixed
