@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **M2.0b — the live integration-test tier now runs in CI.** A new `live` job in
+  `ci.yml` spins up a throwaway `kind` cluster and runs `cargo test -p kaptein-core
+  --test live` with `KAPTEIN_LIVE_TESTS=1`, so the shipped-path test no longer lives
+  only as a locally-gated opt-in. The exec test's pod-readiness wait was also widened
+  (15s → 60s) to tolerate a cold kind node's first image pull.
 - **M2.0b — the live integration-test tier now covers the remaining write paths.**
   `crates/kaptein-core/tests/live.rs` grows from five to eight live tests: `restart`
   (asserts the `kube.kubernetes.io/restartedAt` annotation lands on the pod template),

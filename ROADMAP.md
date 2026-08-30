@@ -386,8 +386,10 @@ Milestones:
     pod and asserts the output). This closes the "exec/restart/evict not unit-tested
     today" gap the milestone names. Cordon/uncordon are deliberately **not** exercised
     here: they mutate a real node, which violates the tier's "never touch shared cluster
-    state" rule — they stay CLI-gated and documented, not live-tested. Remaining:
-    kind/envtest in CI (a cluster is not guaranteed on ubuntu runners) and the
+    state" rule — they stay CLI-gated and documented.*
+  - *CI-wired (v0.30.1 →): a `live` job now runs the tier against a throwaway `kind`
+    cluster on every push, so `KAPTEIN_LIVE_TESTS=1` is no longer a locally-only
+    opt-in — the shipped-path test actually runs in CI. Remaining: the
     latest-three-minors conformance matrix.*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until

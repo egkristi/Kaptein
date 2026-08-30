@@ -46,6 +46,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
 
+  live:
+    name: Live integration (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # M2.0b: the live integration tier (`crates/kaptein-core/tests/live.rs`,
+      # gated on `KAPTEIN_LIVE_TESTS=1`) must actually run in CI against a real
+      # API server, not just remain a hermetic-gated file. A throwaway `kind`
+      # cluster provides that server without touching any shared state.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kaptein-it
+      - name: Wait for the API server
+        run: |
+          set -euo pipefail
+          kubectl cluster-info
+          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+      - name: Run the live integration tier
+        env:
+          KAPTEIN_LIVE_TESTS: "1"
+        run: cargo test -p kaptein-core --test live --locked
+
   bench:
     name: Perf budget (M1.8 query p99)
     runs-on: ubuntu-latest

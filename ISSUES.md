@@ -151,12 +151,13 @@ unowned debt. Done items are struck through.
    `list_bounded`, so the **shipped frontend path** is the bounded one — the half of the
    DoD that #18's CLI caller did not satisfy (#27, closed).
 3. **M2.0b — integration-test tier + platform CI matrix**: kind/envtest + Windows/macOS +
-   latest-three-minors conformance. *Windows/macOS test matrix added to CI; the
-   kind/envtest tier and Kubernetes-minor conformance remain open. A live integration-test
-   tier (`crates/kaptein-core/tests/live.rs`, gated on `KAPTEIN_LIVE_TESTS=1`) now
-   exercises the read path and the delete write path against a real cluster. Extended
-   (v0.30.1 →) to eight paths: `restart`, `evict`, and `exec` are now live-tested too
-   (cordon/uncordon are deliberately excluded — they mutate a real node).*
+   latest-three-minors conformance. *Windows/macOS test matrix added to CI; a live
+   integration-test tier (`crates/kaptein-core/tests/live.rs`, gated on
+   `KAPTEIN_LIVE_TESTS=1`) exercises the read path and the delete write path against a
+   real cluster, and now runs **in CI** via a `live` job on a throwaway `kind` cluster.
+   Extended (v0.30.1 →) to eight paths: `restart`, `evict`, and `exec` are now
+   live-tested too (cordon/uncordon are deliberately excluded — they mutate a real
+   node). Remaining: the latest-three-minors conformance matrix.*
 3b. **M2.0c — watch resilience & informer lifecycle** *(added by the v0.27.0 re-audit)*:
    relist-on-reconnect, and the ADR-0006 lifecycle policy actually enforced.
    *Landed: `InformerManager` with a config-backed `[informer]` policy; LRU admission

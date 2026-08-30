@@ -492,9 +492,10 @@ async fn exec_runs_a_command_in_a_pod() {
         .expect("create Pod");
 
     // Wait for the container to enter Running before exec (the exec transport requires
-    // a running container).
+    // a running container). Generous timeout: a cold kind node pulls the image on the
+    // first run, which can take longer than the local cluster's cache.
     let mut running = false;
-    for _ in 0..30 {
+    for _ in 0..120 {
         if let Ok(p) = pods.get(pod_name).await {
             let phase = p.status.as_ref().and_then(|s| s.phase.clone());
             if phase.as_deref() == Some("Running") {
