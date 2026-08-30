@@ -247,7 +247,7 @@ jobs:
       # crate but forgets a doc can't ship silently.
       - run: |
           set -euo pipefail
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml"))["workspace"]["package"]["version"])')"
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
           tag="v${version}"
           missing=0
           for f in README.md install.sh Dockerfile docs/INSTALL.md; do
