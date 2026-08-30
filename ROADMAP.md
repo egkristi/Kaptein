@@ -52,6 +52,29 @@ Milestones:
   - **Context guardrails**: prod-context red frame, read-only default, "break glass"
     confirmation; configurable per regex on context name
   - *Deferred to 1b:* SPIFFE, OIDC device flow, SA tokens
+  - **Open (re-audit v0.30.0, second pass) — *blocking*: the guardrail model has a hole
+    at its highest-privilege point.** `kaptein exec` takes no `--confirm`, no
+    `--break-glass`, never calls `gate_write`, and emits **no `AuditEvent`**. Arbitrary
+    code execution inside a production container — and with `--tty`, an interactive shell
+    — is therefore the *only* mutating operation on the surface with no gate and no trace,
+    while `cordon`/`uncordon` (reversible, low blast radius) require both. SECURITY.md
+    presents context guardrails as the prod control and the audit log as the
+    accountability control; for exec neither exists. Three related gaps
+    (`ISSUES.md` findings U, V, W):
+    1. **Gate and audit `exec`** — `--confirm` + `gate_write(break_glass)` + an
+       `Operation::Exec` event, matching `debug` exactly (finding U).
+    2. **Give ephemeral-container attach its own operation.** `Operation::Exec`'s only
+       emission site today is `Command::Debug`, so the audit log's one `Exec` record never
+       means exec. Add `Operation::Debug`/`EphemeralAttach` so the two are distinguishable
+       once (1) lands (finding V).
+    3. **Audit port-forward.** `Operation::PortForward` is defined and never emitted, yet a
+       named, persistent forward is a live tunnel into a pod that outlives the session that
+       created it (finding W).
+  - **DoD (falsifiable):** a *coverage test* asserts that **every** CLI subcommand that can
+    mutate the cluster or open a channel into it takes `--confirm` + `--break-glass`, calls
+    `gate_write`, and emits a distinct `Operation`. Enumerating that set by hand is what let
+    `exec` slip; the test must derive it rather than restate it — otherwise the next
+    mutating command added will slip the same way.
 - **M1.2 Resource navigation**
   - Command palette + vim keymap + fuzzy jump
   - Built-in resources + all CRDs auto-discovered
@@ -268,6 +291,16 @@ Milestones:
     `discovery::list_bounded` (full objects, limit 500) instead of the unbounded
     `discovery::list`, so the frontend path is bounded while preserving the status column
     (verified live against the cluster) — issue #27.
+  - **Cleanup (re-audit v0.30.0, second pass):** delete `KubernetesPlane`. It has zero
+    callers and is a `pub` second `DataPlane` implementation whose semantics *diverge*
+    from the supported one — it uses the unbounded `discovery::list` that #27 moved off,
+    always returns `Revision(0)` (so staleness detection silently no-ops), and its
+    `subscribe` returns `stream::empty()` (so no consumer ever gets a delta). This project
+    has repeatedly been bitten by "the code exists but the shipped path doesn't take it";
+    an *unused* implementation that behaves differently from the real one is the version
+    of that trap a future contributor walks into. Delete it, or at minimum `#[doc(hidden)]`
+    it and rename it so it cannot be mistaken for the supported plane
+    (`ISSUES.md` finding X).
 - **M2.0c Watch resilience & informer lifecycle** *(new per re-audit — ADR-0006 is ~30 %
   implemented)*
   - Relist-on-410, reconnect with backoff, `WatchEvent::Error` handling, and bookmark
@@ -659,15 +692,17 @@ Milestones:
 - **Immediate next steps** — *(Phase 0 is long done, and the entire v0.27.0 re-audit batch
   (#20–#31) is closed: bounded frontend seed, relist-on-reconnect, LRU admission, preflight
   pluralization, log redaction, all three distribution channels, and the query benchmark.
-  The live next steps are the v0.30.0 re-audit re-opens — **M2.0c** (findings M/N/O: hoist
-  the `InformerManager` to session scope + `release`/`touch`, and make the relist add as
-  well as remove), **M1.7** (finding P: hoist the `redact_line` regexes out of the per-line
-  path), **M1.2** (finding R: timeout the completion queries) — then **M2.0b** (kind/envtest
-  + latest-three-minors conformance), the **M1.8 kwok harness** and visible-window query
-  (finding Q), **M2.1 browser UI**, **M2.2** per-lens action/health surfaces, and the
-  remaining distribution tail (Homebrew tap, release-triggered site/README version bump).
-  One documentation fix is outstanding and trivial: `README.md`'s Build & test block still
-  invokes `./target/release/kaptein-tui`, a binary v0.30.0 removed — finding S.)*
+  Findings P, Q, R, and S are fixed. The live next steps, in order:
+  **1. M1.1 — gate and audit `exec`** (findings U/V/W). This jumps the queue: it is a hole
+  in the guardrail model at its highest-privilege point, not a gap between a doc and its
+  implementation, and the fix is small and well-understood (mirror what `debug` already
+  does). **2. M2.0c** (findings M/N/O: hoist the `InformerManager` to session scope +
+  `release`/`touch`, and make the relist add as well as remove). **3.** the cheap cleanups —
+  delete `KubernetesPlane` (X) and clarify that `apply_patch_real` has no caller yet (Y).
+  Then **M2.0b** (kind/envtest + latest-three-minors conformance), the **M1.8 kwok harness**
+  and visible-window query (finding Q's remaining half), **M2.1 browser UI**, **M2.2**
+  per-lens action/health surfaces, and the distribution tail (Homebrew tap,
+  release-triggered site/README version bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson
   ("the shipped path must take it") worked: every v0.27.0 finding is genuinely closed, and
@@ -680,6 +715,18 @@ Milestones:
   is observably bounded while driving the TUI through more distinct views than the cap
   allows"*. **A DoD assertion that is written but never turned into a test is worth
   nothing.** Before closing M2.0c this time, write that test first and watch it fail.
+
+- **What the second v0.30.0 pass adds** — finding U is a different species from everything
+  above it, and worth separating. M through T were *drift*: a doc that outran its code, a
+  mechanism wired one level short. U is an **omission in the model itself** — `exec` was
+  never gated because the guardrail set was enumerated by hand, command by command, and
+  the most dangerous command was simply not on the list. Every audit so far has asked
+  "does the shipped path take it?", which finds drift. It does not find something that was
+  never enumerated. The countermeasure is different in kind: **derive the guarded set
+  rather than restate it.** A coverage test that walks the CLI's own command enumeration
+  and asserts every mutating variant carries `--confirm`, `--break-glass`, `gate_write`,
+  and a distinct `Operation` would have failed the day `exec` was added — and will fail
+  the day the next one is. Prefer that shape wherever a rule applies "to all X".
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the
