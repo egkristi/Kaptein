@@ -176,8 +176,9 @@ unowned debt. Done items are struck through.
    separately (#28, closed).* **Resolved — finding Q:** `query_plane` now materializes
    only the visible window (`start`/`end`), with `clamp_viewport` keeping
    `selected`/`scroll` valid and fuzzy-jump snapshotting the full set once on entry.
-   *Remaining beyond that: the kwok synthetic-cluster harness and end-to-end RSS/
-   cold-start numbers.*
+   *The bench now also gates steady-state RSS (250 MB) and **cold start** (500 ms, seed +
+   first query), so all three view-model-ownable numbers are measured. Remaining: the
+   kwok synthetic-cluster harness and the end-to-end frontend keystroke-to-frame number.*
 5. ~~**Signed releases + SBOM**~~ (done, commit eba14d9 + SLSA provenance in
    `.github/workflows/release.yml`): cosign keyless + CycloneDX SBOM + SHA256SUMS, the
    SBOM is cosign-signed, and SLSA provenance is generated per release.

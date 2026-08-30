@@ -30,6 +30,14 @@ const P99_QUERY_BUDGET_MS: u128 = 8;
 /// the linear path sits far below.
 const RSS_BUDGET_MB: u64 = 250;
 
+/// Cold-start budget: seed 50 000 rows into a fresh `MemPlane` **and** answer the first
+/// query, in milliseconds. The roadmap's target is "cold start to first usable frame
+/// < 500 ms"; the `LivePlane::seed` → `MemPlane::upsert` path plus the first sort/window
+/// query is the view-model-ownable half of that (the kube `list` that fills it is
+/// network-bound and measured by the kwok harness, not this offline bench). An O(n²) seed
+/// or an eager per-row allocation blow past this; the linear path sits far below.
+const COLD_START_BUDGET_MS: u128 = 500;
+
 /// Number of rows in the synthetic store (the roadmap's "50 000 objects in store").
 const ROWS: usize = 50_000;
 
@@ -137,6 +145,26 @@ fn main() {
             }
         }
         None => println!("steady-state RSS: not measured on this platform"),
+    }
+
+    // Cold start: build a *fresh* plane, seed all 50k rows, and answer the first query.
+    // This measures the view-model-ownable half of "cold start to first usable frame"
+    // (seed + first sort/window); the kube list that fills it is network-bound and the
+    // kwok harness's job.
+    let cold_start = Instant::now();
+    let fresh = MemPlane::new(Schema {
+        column_ids: vec!["name".to_string(), "count".to_string()],
+    });
+    for i in 0..ROWS {
+        fresh.upsert(row(i));
+    }
+    let first = block_on(fresh.query(&query)).expect("first query");
+    assert_eq!(first.total, ROWS);
+    let cold_ms = cold_start.elapsed().as_millis();
+    println!("cold start (seed {ROWS} rows + first query): {cold_ms} ms");
+    if cold_ms > COLD_START_BUDGET_MS {
+        eprintln!("REGRESSION: cold start {cold_ms} ms exceeds budget {COLD_START_BUDGET_MS} ms");
+        std::process::exit(1);
     }
 }
 

@@ -7,6 +7,12 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **M1.8 — cold-start is now measured, not aspirational.** `benches/query.rs` now gates a
+  third number: cold start (build a fresh 50k-row plane + first query) against the
+  roadmap's 500 ms budget (measured ~24 ms). Together with p99 query latency (8 ms) and
+  steady-state RSS (250 MB), the bench gates all three view-model-ownable numbers; the
+  kwok synthetic-cluster harness and end-to-end keystroke-to-frame number remain the
+  frontend-level tail.
 - **Distribution & release sync — version-drift guard.** A new `version-sync` CI job
   derives the workspace version from `Cargo.toml` and fails if `README.md`/`install.sh`/
   `Dockerfile`/`docs/INSTALL.md` do not all reference `v<version>` — the

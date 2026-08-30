@@ -206,10 +206,13 @@ Milestones:
       regression. *(v0.30.0 →: the bench also measures **steady-state RSS** — it holds the
       50k-row plane and reads `VmRSS` from `/proc/self/status`, gating it against the
       250 MB target (measured ~16 MB on Linux; skipped on non-Linux where the p99 latency
-      gate still applies).)* The **kwok** synthetic-cluster harness (thousands of fake
-      nodes/pods) and the end-to-end frontend RSS/cold-start numbers remain the
-      frontend-level Phase 1 tail — this bench gates the two numbers the view-model owns
-      in isolation.*
+      gate still applies).)* *(v0.30.1 →: the bench now also measures **cold start** — it
+      builds a fresh plane, seeds all 50k rows, and answers the first query, gating the
+      whole at the roadmap's 500 ms (measured ~24 ms; the kube `list` that fills a real
+      plane is network-bound and remains the kwok harness's job). The **kwok**
+      synthetic-cluster harness (thousands of fake nodes/pods) and the end-to-end
+      frontend keystroke-to-frame number remain the frontend-level Phase 1 tail — this
+      bench gates the three numbers the view-model owns in isolation.*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
