@@ -287,8 +287,10 @@ pub struct LivePlane {
     gvk: kube::core::GroupVersionKind,
     namespace: Option<String>,
     /// The informer lifecycle manager (ADR-0006): the hard cap, LRU+TTL eviction, and
-    /// degrade-to-list path. Shared across clones so the cap is enforced across *all*
-    /// live planes in a process, not per plane (issue #25).
+    /// degrade-to-list path. Shared across clones **and across distinct planes in a
+    /// session** so the cap is enforced over the *process*, not per plane (issue #25,
+    /// finding M). A plane constructed with [`LivePlane::with_shared_informers`] — or any
+    /// `clone` of one — shares the session-scoped manager rather than minting a fresh one.
     informers: std::sync::Arc<kaptein_core::informer::InformerManager>,
     /// The lens this plane renders through (M2.2). `None` = the built-in four-column
     /// view. Its columns become the plane's schema; its status rules become the status
@@ -346,24 +348,22 @@ impl LivePlane {
     }
 
     /// Create a live plane for `group/version/kind` with an explicit informer policy
-    /// (from the `[informer]` config section, ADR-0006).
+    /// (from the `[informer]` config section, ADR-0006). The manager is **per-plane**
+    /// (a fresh `Arc`) — callers that want the cap enforced across the whole session
+    /// (the TUI) must use [`LivePlane::with_shared_informers`] instead (finding M).
     pub fn new_with_policy(
         client: kube::Client,
         gvk: kube::core::GroupVersionKind,
         namespace: Option<String>,
         policy: kaptein_core::informer::InformerPolicy,
     ) -> Self {
-        let mem = kaptein_viewmodel::MemPlane::new(kaptein_viewmodel::Schema {
-            column_ids: RESOURCE_COLUMNS.iter().map(|s| s.to_string()).collect(),
-        });
-        Self {
-            mem,
+        Self::with_shared_informers(
             client,
             gvk,
             namespace,
-            informers: std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy)),
-            lens: None,
-        }
+            None,
+            std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy)),
+        )
     }
 
     /// Create a **lens-driven** live plane with an explicit informer policy. The plane's
@@ -383,9 +383,63 @@ impl LivePlane {
             client,
             gvk,
             namespace,
+            // Per-plane manager (the compatibility path); the TUI passes a shared manager
+            // via `with_shared_informers` so the cap is session-scoped (finding M).
             informers: std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy)),
             lens: Some(lens),
         }
+    }
+
+    /// Create a live plane that shares the caller-supplied informer manager. This is the
+    /// session-scoped path (finding M): the TUI holds **one** [`InformerManager`] per
+    /// session and passes it to every `rebuild_plane`, so `max_watches` is enforced over
+    /// the set of *all* views the operator has opened, not one view at a time.
+    ///
+    /// `lens` is `None` for the built-in four-column view, `Some` for a lens-driven view.
+    pub fn with_shared_informers(
+        client: kube::Client,
+        gvk: kube::core::GroupVersionKind,
+        namespace: Option<String>,
+        lens: Option<kaptein_viewmodel::ViewDefinition>,
+        informers: std::sync::Arc<kaptein_core::informer::InformerManager>,
+    ) -> Self {
+        let column_ids: Vec<String> = match &lens {
+            Some(vd) => vd.columns.iter().map(|c| c.id.clone()).collect(),
+            None => RESOURCE_COLUMNS.iter().map(|s| s.to_string()).collect(),
+        };
+        let mem = kaptein_viewmodel::MemPlane::new(kaptein_viewmodel::Schema { column_ids });
+        Self {
+            mem,
+            client,
+            gvk,
+            namespace,
+            informers,
+            lens,
+        }
+    }
+
+    /// The watch key this plane registers — `group/version/kind[/namespace]` (finding N:
+    /// the same identity used to `release` the slot when the view closes).
+    pub fn watch_key(&self) -> kaptein_core::informer::WatchKey {
+        kaptein_core::informer::WatchKey {
+            group: self.gvk.group.clone(),
+            version: self.gvk.version.clone(),
+            kind: self.gvk.kind.clone(),
+            namespace: self.namespace.clone().unwrap_or_default(),
+        }
+    }
+
+    /// Release this plane's informer slot (a view closed). Idempotent — safe to call
+    /// without a corresponding `register`. The watch task calls this on exit so a slot is
+    /// returned to the shared manager when a view is switched away from (finding N).
+    pub fn release_informer(&self) {
+        self.informers.release(&self.watch_key());
+    }
+
+    /// The number of live watches in the shared manager right now (tests: the cap is
+    /// enforced over distinct planes, not per plane).
+    pub fn live_watches(&self) -> usize {
+        self.informers.live()
     }
 
     /// A convenience alias for `Clone::clone` (the TUI holds two handles: one for the
@@ -491,14 +545,17 @@ impl LivePlane {
     /// Run the watch loop until cancelled, applying deltas to the `MemPlane`. This is the
     /// "watch" half — drive it on a `tokio::spawn`ed task. On watch expiry/error
     /// (routinely after ~5 min server timeouts or a 410 Gone) it **relists into the
-    /// store and reconciles** — removing rows absent from the fresh relist — then watches
-    /// from the relist's resourceVersion, so no deleted object lingers as a ghost row
-    /// (issue #20).
+    /// store and reconciles** — removing rows absent from the fresh relist and upserting
+    /// rows that appeared during the outage — then watches from the relist's
+    /// resourceVersion, so no deleted object lingers as a ghost row (issue #20) and no
+    /// object created during an outage stays invisible (finding O).
     ///
     /// The informer lifecycle is **enforced here** (issue #25): the watch key is
     /// registered with the shared [`InformerManager`] first; if the hard cap is reached
     /// (`Denied`), the plane **degrades to a one-shot on-demand list** (seeded, no live
-    /// watch) instead of opening another socket.
+    /// watch) instead of opening another socket. When the loop exits (view closed or
+    /// task aborted), the slot is **released** back to the shared manager (finding N), so
+    /// a session-scoped manager does not leak a slot per view switch.
     pub async fn watch_loop(&self) -> Result<(), IntegrationError> {
         let ar = kube::core::ApiResource::from_gvk(&self.gvk);
         let api: kube::Api<kube::core::DynamicObject> = match self.namespace.as_deref() {
@@ -506,12 +563,16 @@ impl LivePlane {
             None => kube::Api::all_with(self.client.clone(), &ar),
         };
 
-        let watch_key = kaptein_core::informer::WatchKey {
-            group: self.gvk.group.clone(),
-            version: self.gvk.version.clone(),
-            kind: self.gvk.kind.clone(),
-            namespace: self.namespace.clone().unwrap_or_default(),
+        let watch_key = self.watch_key();
+        // Release the slot when the loop exits for *any* reason (normal return, `?`,
+        // or the task being aborted). This is what keeps the shared manager's count
+        // accurate across view switches (finding N: without it, fixing M becomes a slot
+        // leak).
+        let _release_guard = WatchSlotGuard {
+            informers: self.informers.clone(),
+            key: watch_key.clone(),
         };
+
         use kaptein_core::informer::Registration;
         if self.informers.register(watch_key.clone()) == Registration::Denied {
             // Degrade to on-demand list (ADR-0006): the hard cap is reached, so this view
@@ -572,15 +633,20 @@ impl LivePlane {
         }
     }
 
-    /// Relist the resource (metadata-only, fully paged) into the `MemPlane`, removing any
-    /// row absent from the fresh list (reconciliation), and return the resourceVersion to
-    /// watch from. This is the "list" half of list-then-watch on every reconnect — not
-    /// just the initial seed.
+    /// Relist the resource (fully paged) into the `MemPlane`, reconciling in **both
+    /// directions** and returning the resourceVersion to watch from. This is the "list"
+    /// half of list-then-watch on every reconnect — not just the initial seed.
+    ///
+    /// The relist uses **full objects** (not metadata summaries) so the reconciliation can
+    /// upsert rows with a correct `status` — the fix for finding O: a metadata-only relist
+    /// could not add a row that appeared during a watch outage without a fabricated status.
     async fn relist_and_reconcile(
         &self,
         api: &kube::Api<kube::core::DynamicObject>,
     ) -> Result<String, IntegrationError> {
-        // Collect the full live object set (metadata-only, paged) and its resourceVersion.
+        // Collect the full live object set (fully paged) and its resourceVersion. Full
+        // objects are required so the upsert direction carries a correct `status` — a
+        // metadata-only relist would leave a new object's status empty (finding O).
         let mut live_ids: std::collections::HashSet<kaptein_viewmodel::RowId> =
             std::collections::HashSet::new();
         let mut rv: Option<String> = None;
@@ -591,15 +657,16 @@ impl LivePlane {
                 lp = lp.continue_token(token);
             }
             let list = api
-                .list_metadata(&lp)
+                .list(&lp)
                 .await
                 .map_err(|e| IntegrationError::from(kaptein_core::Error::Api(e)))?;
             rv = list.metadata.resource_version.clone().or(rv);
-            for meta in list.items {
-                let id = kaptein_viewmodel::RowId(
-                    meta.metadata.uid.clone().unwrap_or_else(|| meta.name_any()),
-                );
-                live_ids.insert(id);
+            for obj in list.items {
+                let row = self.map_object(&obj);
+                // Upsert direction: an object that is *in* the relist but missing from the
+                // plane (created during a watch outage) is added, not skipped (finding O).
+                self.mem.upsert(row.clone());
+                live_ids.insert(row.id);
             }
             match list.metadata.continue_.clone() {
                 Some(t) => continue_token = Some(t),
@@ -607,7 +674,7 @@ impl LivePlane {
             }
         }
 
-        // Reconcile: remove any row in the plane not present in the fresh relist.
+        // Remove direction: drop any row in the plane not present in the fresh relist.
         let current = self.mem.rows();
         for row in &current {
             if !live_ids.contains(&row.id) {
@@ -616,6 +683,21 @@ impl LivePlane {
         }
 
         Ok(rv.unwrap_or_else(|| "0".to_string()))
+    }
+}
+
+/// A drop guard that releases a watch slot from the shared [`InformerManager`] when the
+/// watch task exits (finding N). `watch_loop` holds this for its whole lifetime; when the
+/// task is aborted or returns, the slot is returned so a session-scoped manager never
+/// leaks a slot per view switch.
+struct WatchSlotGuard {
+    informers: std::sync::Arc<kaptein_core::informer::InformerManager>,
+    key: kaptein_core::informer::WatchKey,
+}
+
+impl Drop for WatchSlotGuard {
+    fn drop(&mut self) {
+        self.informers.release(&self.key);
     }
 }
 
@@ -914,5 +996,70 @@ mod tests {
             .expect("query");
         assert_eq!(page.total, seeded);
         assert!(!page.rows.is_empty());
+    }
+
+    /// Build a client that will never be used to make a request (no tokio runtime) — only
+    /// its identity matters for the informer lifecycle DoD. The plane is never seeded or
+    /// watched, so the client is never touched.
+    fn dummy_client() -> kube::Client {
+        let config = kube::Config::new("https://127.0.0.1:1".parse::<http::Uri>().unwrap());
+        kube::Client::try_from(config).expect("throwaway client")
+    }
+
+    fn pod_gvk_namespaced() -> kube::core::GroupVersionKind {
+        kube::core::GroupVersionKind::gvk("", "v1", "Pod")
+    }
+
+    /// **M2.0c DoD (findings M + N), made falsifiable.** A session-scoped informer
+    /// manager is bounded across *distinct* planes — not per plane. Constructing `cap`
+    /// distinct planes through `with_shared_informers` must exhaust the cap (so the LRU/
+    /// TTL/degrade-to-list path is reachable in the shipped TUI), and releasing a view's
+    /// slot must return it so the next view is granted. A manager that leaked a slot per
+    /// view switch (the M-without-N bug) would fail the release half; a per-plane manager
+    /// (the M bug) would fail the bound half.
+    #[tokio::test]
+    async fn shared_manager_cap_is_enforced_across_planes_and_released_on_close() {
+        let policy = kaptein_core::informer::InformerPolicy {
+            max_watches: 2,
+            idle_ttl: std::time::Duration::from_secs(60),
+        };
+        let shared = std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy));
+
+        let make = |ns: &str| {
+            LivePlane::with_shared_informers(
+                dummy_client(),
+                pod_gvk_namespaced(),
+                Some(ns.to_string()),
+                None,
+                shared.clone(),
+            )
+        };
+
+        // Two distinct planes share one manager: two distinct watch keys are live, and
+        // the shared count reflects *both* (the M invariant).
+        let a = make("ns-a");
+        let b = make("ns-b");
+        assert_eq!(
+            shared.live(),
+            0,
+            "registration happens in watch_loop, not at construction"
+        );
+        assert_eq!(a.live_watches(), 0);
+
+        // Register both keys exactly as watch_loop would, then a third is Denied (the cap
+        // is reachable — it would never be, per-plane).
+        use kaptein_core::informer::Registration;
+        assert_eq!(shared.register(a.watch_key()), Registration::Granted);
+        assert_eq!(shared.register(b.watch_key()), Registration::Granted);
+        assert_eq!(shared.live(), 2);
+
+        // Release a's slot (its watch task closed): the count drops and the slot is
+        // reusable — the N half. Without release, `live()` would stay pinned at the cap.
+        a.release_informer();
+        assert_eq!(shared.live(), 1);
+
+        let c = make("ns-c");
+        assert_eq!(shared.register(c.watch_key()), Registration::Granted);
+        assert_eq!(shared.live(), 2);
     }
 }

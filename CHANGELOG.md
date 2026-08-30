@@ -33,6 +33,23 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     divergent semantics: unbounded `discovery::list`, `Revision(0)`, empty subscribe).
   - **Y** — clarified that `apply_patch_real` is pre-positioned for M2.3 with no caller
     yet (`kaptein apply`/`edit` are dry-run-only).
+- **Re-audit findings (v0.30.0) — informer lifecycle (M2.0c):**
+  - **M** — the informer cap was unreachable: the TUI's `rebuild_plane` called
+    `new_plane(...)` (a constructor, not `clone`) on every view switch, so each plane got
+    a fresh `InformerManager` holding exactly one watch and `max_watches` could never be
+    reached. The TUI now holds **one session-scoped `InformerManager`** and passes it to
+    every plane via `LivePlane::with_shared_informers`, so the cap is enforced over the
+    process, not per plane.
+  - **N** — `InformerManager::release`/`touch` had no callers. `watch_loop` now holds a
+    `WatchSlotGuard` that releases the slot on exit (view close or task abort), so a
+    session-scoped manager no longer leaks a slot per view switch.
+  - **O** — `relist_and_reconcile` removed but never added. It now relists **full
+    objects** (not metadata summaries) and upserts rows missing from the plane with a
+    correct `status`, so objects created during a watch outage appear immediately.
+  - **DoD test** — `shared_manager_cap_is_enforced_across_planes_and_released_on_close`
+    drives distinct planes through a shared manager with a small cap and asserts both that
+    the cap is reached (the M invariant) and that releasing a slot returns it (the N
+    invariant).
 
 ### Added
 - **M1.1 — a governance coverage test (derive, don't restate).** The set of governed CLI

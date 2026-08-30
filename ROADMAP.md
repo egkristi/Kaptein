@@ -329,6 +329,10 @@ Milestones:
        *"`InformerManager::live()` is observably bounded while driving the TUI through more
        distinct views than the cap allows"* — is precisely the assertion that would have
        caught this, and it was never written. **Write that test first.**
+       *Fixed: the TUI holds one session-scoped `InformerManager` and passes it to every
+       plane via `LivePlane::with_shared_informers`; the DoD test
+       `shared_manager_cap_is_enforced_across_planes_and_released_on_close` drives distinct
+       planes through a shared manager and asserts the cap is reached.*
     2. **`release` and `touch` have no callers.** `rebuild_plane` aborts the watch task
        without releasing its slot, and nothing refreshes recency, so `last_touched` is
        always registration time and the LRU has no usage signal. Fixing (1) alone converts
@@ -336,12 +340,18 @@ Milestones:
        a one-shot list and the TUI silently stops being live. **(1) and (2) are one change**:
        hoist the manager to session scope, release on rebuild (or hold a Drop guard), and
        touch on query.
+       *Fixed: `watch_loop` holds a `WatchSlotGuard` that releases the slot on exit (view
+       close or task abort), so a session-scoped manager no longer leaks a slot per view
+       switch — verified by the same DoD test.*
     3. **Reconcile removes but never adds.** `relist_and_reconcile` drops rows absent from
        the relist but never upserts rows present in the relist and missing from the plane,
        so objects **created during an outage stay invisible** until they next change — the
        mirror of the ghost rows #20 removed. The relist is metadata-only and therefore
        cannot carry `status`, so this needs a decision (full-object relist vs. metadata
        upsert plus a deferred status fetch), not a patch.
+       *Fixed: `relist_and_reconcile` relists **full objects** (not metadata summaries) and
+       upserts rows missing from the plane with a correct `status`, so objects created
+       during an outage appear immediately (finding O).*
   - **Added to the DoD:** a test drives the TUI through more distinct (kind, namespace)
     views than `max_watches` and asserts `live() <= max_watches` **and** that the
     most-recently-used view still holds a live watch; and a reconnect test asserts an
@@ -678,17 +688,16 @@ Milestones:
 - **Immediate next steps** — *(Phase 0 is long done, and the entire v0.27.0 re-audit batch
   (#20–#31) is closed: bounded frontend seed, relist-on-reconnect, LRU admission, preflight
   pluralization, log redaction, all three distribution channels, and the query benchmark.
-  Findings P, Q, R, S, U, V, W, X, and Y are fixed (the governance batch — gated/audited
-  `exec`, distinct `EphemeralAttach`, audited `port-forward`, a derive-don't-restate
-  coverage test, the dead `KubernetesPlane` deleted, and the `apply_patch_real` doc
-  clarified). The live next steps, in order:
-  **1. M2.0c** (findings M/N/O: hoist the `InformerManager` to session scope +
-  `release`/`touch`, and make the relist add as well as remove — write the
-  `InformerManager::live()` boundedness test first and watch it fail). **2.** the
-  remaining hygiene (finding T: core dumps). Then **M2.0b** (kind/envtest +
-  latest-three-minors conformance), the **M1.8 kwok harness**
-  and visible-window query (finding Q's remaining half), **M2.1 browser UI**, **M2.2**
-  per-lens action/health surfaces, and the distribution tail (Homebrew tap,
+  Findings P, Q, R, S, U, V, W, X, Y, M, N, O, and T are fixed (the governance batch —
+  gated/audited `exec`, distinct `EphemeralAttach`, audited `port-forward`, a
+  derive-don't-restate coverage test, the dead `KubernetesPlane` deleted, the
+  `apply_patch_real` doc clarified; and the informer-lifecycle batch — a session-scoped
+  `InformerManager` with `release`/`touch` wired through a `WatchSlotGuard`, a
+  full-object relist that adds as well as removes, and the `InformerManager::live()`
+  boundedness DoD test; plus the core-dump hygiene pass). The live next steps, in order:
+  **1. M2.0b** (kind/envtest + latest-three-minors conformance), **2.** the **M1.8 kwok
+  harness** and visible-window query (finding Q's remaining half), **3. M2.1 browser UI**,
+  **4. M2.2** per-lens action/health surfaces, and the distribution tail (Homebrew tap,
   release-triggered site/README version bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson

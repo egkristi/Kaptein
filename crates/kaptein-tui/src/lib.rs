@@ -234,10 +234,17 @@ async fn run_event_loop(
     let mut sort_key = SortColumn(0);
     let mut sort_descending = false;
 
+    // One informer lifecycle manager per **session** (finding M): every plane the TUI
+    // builds shares this manager, so `max_watches` is enforced over the set of all views
+    // the operator opens, not per plane. The policy comes from `[informer]` config.
+    let informers = std::sync::Arc::new(kaptein_core::informer::InformerManager::new(
+        kaptein_core::config::load().informer.to_policy(),
+    ));
+
     // An informer-backed live data plane (ADR-0006): seeded once, kept fresh by a
     // background watch task. Sorting/filtering and the table itself read the in-memory
     // plane — the TUI does *not* re-list the cluster per keystroke.
-    let mut plane = new_plane(client, &kind, namespace.clone());
+    let mut plane = new_plane(client, &kind, namespace.clone(), &informers);
     plane
         .seed()
         .await
@@ -471,6 +478,7 @@ async fn run_event_loop(
                             &mut sort_descending,
                             &mut plane,
                             &mut watch,
+                            &informers,
                             &mut rows,
                             &mut selected,
                             &mut scroll,
@@ -512,7 +520,15 @@ async fn run_event_loop(
                     if kind.cluster_scoped {
                         namespace = None;
                     }
-                    rebuild_plane(client, &mut plane, &mut watch, &kind, namespace.clone()).await?;
+                    rebuild_plane(
+                        client,
+                        &mut plane,
+                        &mut watch,
+                        &kind,
+                        namespace.clone(),
+                        &informers,
+                    )
+                    .await?;
                     let (new_rows, new_total) =
                         query_plane(&plane, &kind, sort_key, sort_descending).await?;
                     rows = new_rows;
@@ -525,7 +541,15 @@ async fn run_event_loop(
                 }
                 KeyCode::Char('n') if palette_query.is_none() => {
                     namespace = cycle_namespace(client, namespace.clone()).await?;
-                    rebuild_plane(client, &mut plane, &mut watch, &kind, namespace.clone()).await?;
+                    rebuild_plane(
+                        client,
+                        &mut plane,
+                        &mut watch,
+                        &kind,
+                        namespace.clone(),
+                        &informers,
+                    )
+                    .await?;
                     let (new_rows, new_total) =
                         query_plane(&plane, &kind, sort_key, sort_descending).await?;
                     rows = new_rows;
@@ -740,6 +764,7 @@ async fn execute_command(
     sort_descending: &mut bool,
     plane: &mut kaptein_integration::LivePlane,
     watch: &mut Option<tokio::task::JoinHandle<Result<(), kaptein_integration::IntegrationError>>>,
+    informers: &std::sync::Arc<kaptein_core::informer::InformerManager>,
     rows: &mut Vec<TableRow>,
     selected: &mut usize,
     scroll: &mut usize,
@@ -789,7 +814,7 @@ async fn execute_command(
         }
     }
     if need_rebuild {
-        rebuild_plane(client, plane, watch, kind, namespace.clone()).await?;
+        rebuild_plane(client, plane, watch, kind, namespace.clone(), informers).await?;
     }
     // Re-query the (possibly rebuilt) live plane — no new API list.
     *rows = query_plane(plane, kind, *sort_key, *sort_descending)
@@ -809,12 +834,15 @@ async fn rebuild_plane(
     watch: &mut Option<tokio::task::JoinHandle<Result<(), kaptein_integration::IntegrationError>>>,
     kind: &Kind,
     namespace: Option<String>,
+    informers: &std::sync::Arc<kaptein_core::informer::InformerManager>,
 ) -> io::Result<()> {
-    // Stop the old watch task (best-effort; the stream ends on abort).
+    // Stop the old watch task (best-effort; the stream ends on abort). The aborted
+    // task's `WatchSlotGuard` releases the old view's slot back to the shared manager
+    // (finding N), so a session-scoped cap does not leak a slot per view switch.
     if let Some(handle) = watch.take() {
         handle.abort();
     }
-    *plane = new_plane(client, kind, namespace);
+    *plane = new_plane(client, kind, namespace, informers);
     plane
         .seed()
         .await
@@ -826,28 +854,31 @@ async fn rebuild_plane(
     Ok(())
 }
 
-/// Build a `LivePlane` honoring the `[informer]` config policy (ADR-0006's configurable
-/// watch cap + idle TTL), so the TUI's watch budget is operator-tunable. A lens-driven
-/// kind builds a lens plane (M2.2), so its declared columns become the plane's schema.
+/// Build a `LivePlane` sharing the session-scoped informer manager (finding M). The
+/// policy comes from the shared manager (created once from `[informer]` config), so the
+/// TUI's watch budget is operator-tunable **and** enforced across all views in the
+/// session, not per plane. A lens-driven kind builds a lens plane (M2.2), so its
+/// declared columns become the plane's schema.
 fn new_plane(
     client: &Client,
     kind: &Kind,
     namespace: Option<String>,
+    informers: &std::sync::Arc<kaptein_core::informer::InformerManager>,
 ) -> kaptein_integration::LivePlane {
-    let policy = kaptein_core::config::load().informer.to_policy();
     match &kind.lens {
-        Some(vd) => kaptein_integration::LivePlane::new_lens_with_policy(
+        Some(vd) => kaptein_integration::LivePlane::with_shared_informers(
             client.clone(),
             kind.gvk.clone(),
             namespace,
-            vd.clone(),
-            policy,
+            Some(vd.clone()),
+            informers.clone(),
         ),
-        None => kaptein_integration::LivePlane::new_with_policy(
+        None => kaptein_integration::LivePlane::with_shared_informers(
             client.clone(),
             kind.gvk.clone(),
             namespace,
-            policy,
+            None,
+            informers.clone(),
         ),
     }
 }

@@ -1219,6 +1219,7 @@ version = "0.30.0"
 dependencies = [
  "async-trait",
  "futures-util",
+ "http",
  "k8s-openapi",
  "kaptein-core",
  "kaptein-viewmodel",
