@@ -98,6 +98,13 @@ Milestones:
     reasons in the `Pending` branch, so an `Init:Error`/`PodInitializing` pod reads as
     "init container X failed", not "pending" or "not ready". A `init_container_error.json`
     fixture + unit tests pin it.*
+  - **Added: *detecting* missing requests/limits is a Phase 1 rule** (ADR-0015). `README.md`
+    §4 reads as one feature, but it is two with very different costs: **detecting that a
+    container declares no requests/limits needs no metrics at all** — it is a pure
+    `PodSpec` predicate, the same shape as every rule already in the pack, and it ships
+    here. **Recommending a *value*** needs VPA or Prometheus and is M3b.1. Splitting them
+    lets the cheap half — the one that catches the actual common misconfiguration — ship
+    two phases earlier. Rule codes: `no_requests` / `no_limits`, with a fixture each.
 - **M1.7 Secret masking & redaction — *blocking*** *(elevated from M3b.2 per review)*
   - A single `kaptein-core` redaction choke point through which **every** serialized
     resource passes before reaching a frontend, the MCP `describe` tool, or an audit log
@@ -446,6 +453,20 @@ Milestones:
     and a configurable retention TTL
   - Scrub backwards, diff two timestamps, "what changed between 14:20 and 14:35"
   - Events + Git deploy markers on one timeline
+  - **Boundary: this store holds resource *state*, never usage *metrics*** (ADR-0015).
+    Once redb is in the codebase the reasoning *"we already have a store — just add usage
+    samples"* becomes available, and it is wrong. The time machine writes are
+    low-frequency and event-driven (one per object change, bounded by the watch stream);
+    per-container usage samples arrive at metrics cadence across the whole fleet, which is
+    a different write volume and retention profile by orders of magnitude. Taking that
+    step turns Kaptein into a time-series database and breaches the "no metrics/log store"
+    non-goal. **Guard it:** the store's key space is `(resource identity, revision/time)`
+    per ADR-0003 — a schema that cannot express a metric sample is the cheapest possible
+    enforcement, so keep it that way rather than generalizing the key.
+  - *The one legitimate use of this store for rightsizing is the opposite direction:
+    M3b.1 asks the time machine "was this workload redeployed since the recommendation's
+    samples were taken?" — a state query, and the differentiator no other rightsizing tool
+    can answer.*
 - **M3a.2 Fleet**
   - Fleet query (one query, all clusters); cross-cluster diff + drift matrix
   - Saved queries in Git; scheduled reports; **query-as-policy** (fail CI on rows)
@@ -478,8 +499,44 @@ Milestones:
 - **M3b.1 Cost & capacity**
   - Allocation per namespace/label/team/workload (showback + chargeback)
   - Cloud billing import (Azure/AWS/GCP) + on-prem TCO model
-  - Rightsizing, idle/waste, budgets + alerting, carbon estimate
+  - Idle/waste, budgets + alerting, carbon estimate
   - Capacity simulation (lose a node / an AZ)
+  - **Rightsizing — three tiers, and Kaptein never computes the recommendation**
+    (ADR-0015). The mechanism was previously unspecified ("rightsizing from actual
+    usage" implies Prometheus; Goldilocks implies VPA); it is now decided:
+    1. **Read VPA recommendations** when the `VerticalPodAutoscaler` CRD is present — a
+       cross-resource join between the workload's `resources.requests` and the VPA's
+       `status.recommendation.containerRecommendations[]`.
+    2. **Query a coarse estimate from Prometheus** when VPA is absent — live query,
+       **nothing stored**, labelled as the cruder estimate it is.
+    3. **No recommender of our own.** No usage-history store, no histogram/decay model,
+       no checkpointing — that is VPA's job (`kubernetes/autoscaler`, SIG-Autoscaling),
+       and building it would breach the "no metrics/log store" non-goal.
+  - **The moat is adjudication, not the number** (ADR-0015) — the same split as ADR-0013's
+    MCP taxonomy. Every recommendation names its **source** (VPA / PromQL / none) and
+    carries a confidence signal, and these rules live in the **diagnostics engine**
+    (M1.6 → M3a.4), not in cost-surface code:
+    - provenance — how much history backs it (VPA checkpoints carry sample counts)
+    - **HPA conflict** — an HPA scaling on CPU alongside a VPA recommending CPU on the
+      same workload is a documented upstream footgun; Kaptein sees both objects
+    - **staleness from deploys** — the time machine knows the workload was redeployed
+      since the samples were taken, so the recommendation describes the *old* image
+      (nothing else in this space can say this)
+    - **pod-level `resources` incompatibility** — VPA does not support workloads defining
+      pod-level resource stanzas; flag it rather than show a number admission will reject
+    - **blast radius** — applying it may make the pod unschedulable, breach a
+      ResourceQuota, or change QoS class
+    - **remediation** — open a PR against the owning manifest (M2.3 / ADR-0008).
+      Goldilocks stops at the number; the loop is the differentiator.
+  - **Blocked on a lens-schema gap:** the tier-1 join is not expressible today —
+    `ViewDefinition` has a single `target` GVK and all field paths resolve against that
+    one object. Cross-resource joins must land in M2.2 first; this is a better acceptance
+    test for the schema than the three single-object lenses ADR-0012 originally chose.
+  - **DoD (falsifiable):** on a cluster with VPA, a rightsizing row shows current vs.
+    recommended with the source labelled `vpa` and a sample-count-backed confidence; on a
+    cluster with Prometheus only, the same row reads `promql (estimate)`; on a cluster with
+    neither it reads "no recommendation available" — **never a fabricated number** — and a
+    workload with a CPU-scaling HPA carries the conflict warning.
 - **M3b.2 Security & compliance (kubescape class)**
   - Posture: CIS, NSA/CISA, MITRE ATT&CK, NSM *Grunnprinsipper*, **CRA, NIS2, DORA**
   - Image scan (Trivy/Grype), SBOM, cosign/sigstore, SLSA

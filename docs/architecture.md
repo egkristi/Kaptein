@@ -168,6 +168,11 @@ PR, it shows *why*. See ADR-0008.
 The watch stream persists to a local embedded store using an append-only, log-structured
 layout with compaction + retention TTL (see ADR-0003).
 
+This store holds resource **state**, never usage **metrics** (ADR-0015). Its key space is
+`(resource identity, revision/time)`, which cannot express a metric sample — keep it that
+way. "No metrics/log store" is a non-goal, and a generalized key is the step that would
+quietly turn this into a time-series database.
+
 ## The governed MCP surface
 
 `kaptein mcp` exposes the view-model as a governed MCP server. Every tool call passes
@@ -201,6 +206,13 @@ produce an evidence chain. It lives in `kaptein-diagnostics` (a module in the vi
 split out when it grows), and its **rule packs are lenses** — so every new lens
 contributes diagnostics, and the engine is exactly what the MCP diagnostic tools call
 (ADR-0013).
+
+Recommendation **adjudication** lives here too, not in the cost surface (ADR-0015): the
+rules that decide whether a rightsizing number is trustworthy — how much history backs it,
+whether an HPA conflicts with it, whether the workload was redeployed since the samples
+were taken, what applying it would break — are cross-referencing rules over live state,
+events, and history, which is exactly this engine's shape. The number is a commodity; the
+adjudication is the moat.
 
 ## Audit sink
 
@@ -238,3 +250,4 @@ inference**, **KubeVirt**, and **CNPG** — as acceptance tests, not frozen in P
 - ADR-0012 — lens schema acceptance tests
 - ADR-0013 — MCP tool taxonomy
 - ADR-0014 — collapse to four crates
+- ADR-0015 — render resource recommendations, never compute them
