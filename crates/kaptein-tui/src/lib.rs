@@ -185,7 +185,7 @@ impl SortColumn {
 /// A tabular row (geometry-local, mirrors the render contract's `Row`). The cells are
 /// the *display* text of the row's cells, in the view-model's column order — so a
 /// lens-driven kind with N columns has N cells, and the built-in four-column view has 4.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct TableRow {
     name: String,
     namespace: String,
@@ -254,19 +254,21 @@ async fn run_event_loop(
         async move { plane.watch_loop().await }
     }));
 
-    let (mut rows, mut total) = query_plane(&plane, &kind, sort_key, sort_descending).await?;
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
+    // Number of table rows visible in the current terminal (set each frame; drives the
+    // scroll window instead of a hardcoded constant).
+    let mut page_height: usize = 10;
+    let (mut rows, mut total) =
+        query_plane(&plane, &kind, sort_key, sort_descending, 0, page_height).await?;
     // The selected resource's RBAC-preflighted action graph (M2.2 "per-action RBAC
     // grey-out"): computed once per (kind, namespace), so an action the operator is not
     // permitted to take is greyed out *before* they try it, not after a 403.
     let mut actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
-    // Number of table rows visible in the current terminal (set each frame; drives the
-    // scroll window instead of a hardcoded constant).
-    let mut page_height: usize = 10;
     // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query. The
-    // unfiltered list is preserved in `jump_master` so backspace can restore rows.
+    // unfiltered list is preserved in `jump_master` so backspace can restore rows; its
+    // total is preserved separately so the status line stays correct while jumping.
     let mut jump_query: Option<String> = None;
     let mut jump_master: Vec<TableRow> = Vec::new();
     // Command-palette mode: Some(query) means the palette is open (vim-style ':').
@@ -278,15 +280,26 @@ async fn run_event_loop(
 
     loop {
         // Refresh from the live plane only when its revision advanced (a watch delta
-        // landed). No API call per keystroke and no redundant per-frame clone+sort.
-        // Skipped while fuzzy-jump mode is active (its filtered `rows` is authoritative).
+        // landed), and only the visible window is re-queried. No API call per keystroke
+        // and no per-frame materialization of the whole set. Skipped while fuzzy-jump
+        // mode is active (its filtered `rows` is authoritative).
         if jump_query.is_none() && palette_query.is_none() {
             let rev = plane.mem().revision();
             if rev != last_revision {
-                let (new_rows, new_total) =
-                    query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                let (new_rows, new_total, sel, scr) = requery_window(
+                    &plane,
+                    &kind,
+                    sort_key,
+                    sort_descending,
+                    selected,
+                    scroll,
+                    page_height,
+                )
+                .await?;
                 rows = new_rows;
                 total = new_total;
+                selected = sel;
+                scroll = scr;
                 last_revision = rev;
             }
         }
@@ -329,18 +342,18 @@ async fn run_event_loop(
             let header = Block::default().title(status_line).borders(Borders::ALL);
             frame.render_widget(header, chunks[0]);
 
-            // Materialize only the visible window (virtualization): the table renders
-            // `scroll..scroll+page_height`, so allocating ratatui `Row`s for all 50k
-            // objects every frame is wasted work. This is the change that keeps the
-            // M1.8 perf budget reachable.
-            let view_start = scroll.min(rows.len());
-            let view_end = (scroll + page_height).min(rows.len()).max(view_start);
-            let table_rows: Vec<Row> = rows[view_start..view_end]
+            // `rows` is already the visible window (`query_plane` materializes only
+            // `[scroll, scroll+page_height)`, M1.8), so no sub-slicing is needed here —
+            // the table renders exactly the rows that were queried. In normal mode the
+            // selected row sits at `selected - scroll`; in jump mode `scroll == 0` and
+            // `selected` indexes `rows` directly (the fuzzy-ranked list).
+            let in_jump = jump_query.is_some();
+            let selected_offset = if in_jump { selected } else { selected.saturating_sub(scroll) };
+            let table_rows: Vec<Row> = rows
                 .iter()
                 .enumerate()
                 .map(|(offset, r)| {
-                    let absolute = view_start + offset;
-                    let base = if absolute == selected {
+                    let base = if offset == selected_offset {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
                         Style::default()
@@ -429,11 +442,21 @@ async fn run_event_loop(
                     palette_query = None;
                 }
                 KeyCode::Esc if jump_query.is_some() => {
-                    // Cancel jump mode: restore the unfiltered list.
+                    // Cancel jump mode: restore the unfiltered list (re-query the visible
+                    // window, not the full set).
                     jump_query = None;
-                    rows = jump_master.clone();
-                    selected = 0;
-                    scroll = 0;
+                    let (new_rows, new_total) = query_plane(
+                        &plane,
+                        &kind,
+                        sort_key,
+                        sort_descending,
+                        scroll,
+                        scroll + page_height,
+                    )
+                    .await?;
+                    rows = new_rows;
+                    total = new_total;
+                    selected = selected.min(total.saturating_sub(1));
                 }
                 KeyCode::Esc => break,
                 KeyCode::Char('c')
@@ -482,6 +505,7 @@ async fn run_event_loop(
                             &mut rows,
                             &mut selected,
                             &mut scroll,
+                            page_height,
                             &mut detail,
                         )
                         .await?;
@@ -496,7 +520,21 @@ async fn run_event_loop(
                 KeyCode::Char('j') | KeyCode::Down if palette_query.is_none() => {
                     selected = (selected + 1).min(total.saturating_sub(1));
                     if selected >= scroll + page_height {
-                        scroll += 1;
+                        scroll = selected.saturating_add(1).saturating_sub(page_height);
+                    }
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
                     }
                 }
                 KeyCode::Char('k') | KeyCode::Up if palette_query.is_none() => {
@@ -504,14 +542,56 @@ async fn run_event_loop(
                     if selected < scroll {
                         scroll = selected;
                     }
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
                 }
                 KeyCode::Char('g') if palette_query.is_none() => {
                     selected = 0;
                     scroll = 0;
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
                 }
                 KeyCode::Char('G') if palette_query.is_none() => {
                     selected = total.saturating_sub(1);
                     scroll = selected.saturating_sub(page_height);
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
                 }
                 KeyCode::Tab if palette_query.is_none() => {
                     kind = next_kind(&kinds, &kind);
@@ -529,13 +609,14 @@ async fn run_event_loop(
                         &informers,
                     )
                     .await?;
+                    selected = 0;
+                    scroll = 0;
                     let (new_rows, new_total) =
-                        query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                        query_plane(&plane, &kind, sort_key, sort_descending, 0, page_height)
+                            .await?;
                     rows = new_rows;
                     total = new_total;
                     last_revision = plane.mem().revision();
-                    selected = 0;
-                    scroll = 0;
                     detail = None;
                     actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
                 }
@@ -550,13 +631,14 @@ async fn run_event_loop(
                         &informers,
                     )
                     .await?;
+                    selected = 0;
+                    scroll = 0;
                     let (new_rows, new_total) =
-                        query_plane(&plane, &kind, sort_key, sort_descending).await?;
+                        query_plane(&plane, &kind, sort_key, sort_descending, 0, page_height)
+                            .await?;
                     rows = new_rows;
                     total = new_total;
                     last_revision = plane.mem().revision();
-                    selected = 0;
-                    scroll = 0;
                     detail = None;
                     actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
                 }
@@ -564,16 +646,46 @@ async fn run_event_loop(
                     sort_key = next_sort_key(sort_key, kind.headers.len());
                     selected = 0;
                     scroll = 0;
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
                 }
                 KeyCode::Char('S') if palette_query.is_none() => {
                     sort_descending = !sort_descending;
                     selected = 0;
                     scroll = 0;
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
                 }
                 KeyCode::Char('d') if palette_query.is_none() => {
                     if action_is_forbidden(&actions, "describe") {
                         detail = Some("describe is forbidden by RBAC preflight.".into());
-                    } else if let Some(r) = rows.get(selected) {
+                    } else if let Some(r) =
+                        selected_row(&rows, selected, scroll, jump_query.is_some())
+                    {
                         detail = describe(client, &kind, r).await.ok();
                     }
                 }
@@ -581,7 +693,7 @@ async fn run_event_loop(
                     if action_is_forbidden(&actions, "diagnose") {
                         detail = Some("diagnose is forbidden by RBAC preflight.".into());
                     } else if kind.is_pods()
-                        && let Some(r) = rows.get(selected)
+                        && let Some(r) = selected_row(&rows, selected, scroll, jump_query.is_some())
                     {
                         detail = diagnose(client, r).await.ok();
                     } else {
@@ -589,9 +701,16 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Char('/') if palette_query.is_none() => {
-                    // Enter fuzzy-jump mode (empty query = show all). Snapshot the
-                    // unfiltered list so backspace can restore filtered-out rows.
-                    jump_master = rows.clone();
+                    // Enter fuzzy-jump mode (empty query = show all). Snapshot the full
+                    // set (one query) so backspace can re-rank against it — the fuzzy
+                    // list is a search over the whole store, not just the visible window.
+                    let (master, master_total) =
+                        query_plane(&plane, &kind, sort_key, sort_descending, 0, 50_000).await?;
+                    jump_master = master;
+                    rows = jump_master.clone();
+                    total = master_total;
+                    selected = 0;
+                    scroll = 0;
                     jump_query = Some(String::new());
                 }
                 KeyCode::Char(c) if jump_query.is_some() && c != '/' => {
@@ -617,8 +736,33 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Enter if jump_query.is_some() => {
-                    // Exit jump mode, keeping the current (fuzzy-ranked) selection.
+                    // Exit jump mode, keeping the current (fuzzy-ranked) selection. Find
+                    // the selected row's *absolute* index in the sorted store (one full
+                    // query), then re-window to it.
+                    let chosen_name =
+                        selected_row(&rows, selected, 0, true).map(|r| r.name.clone());
                     jump_query = None;
+                    if let Some(name) = chosen_name {
+                        let (full, full_total) =
+                            query_plane(&plane, &kind, sort_key, sort_descending, 0, 50_000)
+                                .await?;
+                        total = full_total;
+                        if let Some(abs) = full.iter().position(|r| r.name == name) {
+                            selected = abs;
+                        }
+                        scroll = clamp_viewport(total, selected, 0, page_height).1;
+                        let (new_rows, new_total) = query_plane(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            scroll,
+                            scroll + page_height,
+                        )
+                        .await?;
+                        rows = new_rows;
+                        total = new_total;
+                    }
                 }
                 _ => {}
             }
@@ -768,6 +912,7 @@ async fn execute_command(
     rows: &mut Vec<TableRow>,
     selected: &mut usize,
     scroll: &mut usize,
+    page_height: usize,
     detail: &mut Option<String>,
 ) -> io::Result<bool> {
     let mut need_rebuild = false;
@@ -816,8 +961,9 @@ async fn execute_command(
     if need_rebuild {
         rebuild_plane(client, plane, watch, kind, namespace.clone(), informers).await?;
     }
-    // Re-query the (possibly rebuilt) live plane — no new API list.
-    *rows = query_plane(plane, kind, *sort_key, *sort_descending)
+    // Re-query the (possibly rebuilt) live plane — no new API list. These palette
+    // commands reset to the top, so query the first visible window only.
+    *rows = query_plane(plane, kind, *sort_key, *sort_descending, 0, page_height)
         .await?
         .0;
     *selected = 0;
@@ -888,9 +1034,10 @@ fn new_plane(
 /// **and** the total matching count (`page.total`), so the TUI can show "N rows" and jump
 /// to the bottom (`G`) while decoupling `total` from the materialized window.
 ///
-/// The window is still the *whole* set (`start: 0, end: 50_000`): `total` is carried
-/// separately, but the full sorted/filtered set is materialized into `TableRow`s per
-/// query. Querying *only* the visible window is the remaining M1.8 nav refactor.
+/// `start`/`end` are the **visible window** (M1.8, finding Q): only the requested slice
+/// is materialized into `TableRow`s — `MemPlane::query` sorts/filters an index
+/// permutation and clones only `[start, end)`. A busy cluster advancing the revision per
+/// watch delta now re-materializes a few dozen rows, not 50 000.
 /// The row's cells are the plane's schema columns in order — the lens's columns for a
 /// lens-driven kind, the built-in four for a built-in kind.
 async fn query_plane(
@@ -898,6 +1045,8 @@ async fn query_plane(
     kind: &Kind,
     sort_key: SortColumn,
     descending: bool,
+    start: usize,
+    end: usize,
 ) -> io::Result<(Vec<TableRow>, usize)> {
     let column_ids = plane.column_ids();
     let sort_column = column_ids
@@ -907,8 +1056,8 @@ async fn query_plane(
     use kaptein_integration::kaptein_viewmodel::DataPlane as _;
     let page = plane
         .query(&kaptein_integration::kaptein_viewmodel::Query {
-            start: 0,
-            end: 50_000,
+            start,
+            end,
             sort: Some(kaptein_integration::kaptein_viewmodel::SortSpec {
                 column: sort_column,
                 descending,
@@ -948,6 +1097,104 @@ async fn query_plane(
         })
         .collect();
     Ok((rows, total))
+}
+
+/// Clamp an absolute `(selected, scroll)` pair into a valid `page_height`-sized window
+/// over `total` rows. Pure geometry (no terminal, no plane) so it is unit-testable.
+///
+/// Returns the corrected `(selected, scroll)`: `selected` is kept within `[0, total)`,
+/// and `scroll` is moved so `selected` always sits inside `[scroll, scroll + page_height)`.
+fn clamp_viewport(
+    total: usize,
+    selected: usize,
+    scroll: usize,
+    page_height: usize,
+) -> (usize, usize) {
+    if total == 0 {
+        return (0, 0);
+    }
+    let page_height = page_height.max(1);
+    let selected = selected.min(total - 1);
+    let mut scroll = scroll.min(total.saturating_sub(1));
+    if selected < scroll {
+        scroll = selected;
+    } else if selected >= scroll.saturating_add(page_height) {
+        scroll = selected.saturating_add(1).saturating_sub(page_height);
+    }
+    (selected, scroll)
+}
+
+/// The selected `TableRow`, given the current display list and mode. In **normal** mode
+/// `rows` is the visible window and `selected`/`scroll` are absolute indices, so the row
+/// is at `selected - scroll`. In **jump** mode `rows` is the fuzzy-ranked list and
+/// `selected` indexes it directly (`scroll` is `0`), so the row is at `selected`.
+fn selected_row(
+    rows: &[TableRow],
+    selected: usize,
+    scroll: usize,
+    in_jump: bool,
+) -> Option<&TableRow> {
+    if in_jump {
+        rows.get(selected)
+    } else {
+        rows.get(selected.saturating_sub(scroll))
+    }
+}
+
+/// Re-query the visible window after a revision change, clamping the viewport so the
+/// selection stays valid against the new `total`. Returns `(rows, total, selected, scroll)`.
+async fn requery_window(
+    plane: &kaptein_integration::LivePlane,
+    kind: &Kind,
+    sort_key: SortColumn,
+    descending: bool,
+    selected: usize,
+    scroll: usize,
+    page_height: usize,
+) -> io::Result<(Vec<TableRow>, usize, usize, usize)> {
+    let (rows, total) = query_plane(
+        plane,
+        kind,
+        sort_key,
+        descending,
+        scroll,
+        scroll + page_height,
+    )
+    .await?;
+    let (selected, scroll) = clamp_viewport(total, selected, scroll, page_height);
+    Ok((rows, total, selected, scroll))
+}
+
+/// Re-query the visible window and assign the four viewport state variables in place.
+/// Used by the key handlers after a nav/sort change. The window is re-fetched at the
+/// (possibly clamped) scroll so `rows` always matches `[scroll, scroll+page_height)`.
+#[allow(clippy::too_many_arguments)]
+async fn requery_and_assign(
+    plane: &kaptein_integration::LivePlane,
+    kind: &Kind,
+    sort_key: SortColumn,
+    descending: bool,
+    rows: &mut Vec<TableRow>,
+    total: &mut usize,
+    selected: &mut usize,
+    scroll: &mut usize,
+    page_height: usize,
+) -> io::Result<()> {
+    let (new_rows, new_total, new_selected, new_scroll) = requery_window(
+        plane,
+        kind,
+        sort_key,
+        descending,
+        *selected,
+        *scroll,
+        page_height,
+    )
+    .await?;
+    *rows = new_rows;
+    *total = new_total;
+    *selected = new_selected;
+    *scroll = new_scroll;
+    Ok(())
 }
 
 async fn cycle_namespace(client: &Client, current: Option<String>) -> io::Result<Option<String>> {
@@ -1033,4 +1280,74 @@ fn action_is_forbidden(actions: &[Action], id: &str) -> bool {
     actions
         .iter()
         .any(|a| a.id == id && matches!(a.state, ActionState::Forbidden { .. }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn trow(name: &str) -> TableRow {
+        TableRow {
+            name: name.into(),
+            namespace: "ns".into(),
+            cells: vec![name.into()],
+        }
+    }
+
+    #[test]
+    fn clamp_viewport_keeps_selection_inside_window() {
+        // 100 rows, 10-row page: selection at the top, middle, and bottom all stay valid.
+        assert_eq!(clamp_viewport(100, 0, 0, 10), (0, 0));
+        assert_eq!(clamp_viewport(100, 5, 0, 10), (5, 0));
+        assert_eq!(clamp_viewport(100, 99, 90, 10), (99, 90));
+        // Selection pushed past the page end moves scroll forward.
+        assert_eq!(clamp_viewport(100, 10, 0, 10), (10, 1));
+        // Selection scrolled past the top pulls scroll back.
+        assert_eq!(clamp_viewport(100, 3, 5, 10), (3, 3));
+    }
+
+    #[test]
+    fn clamp_viewport_handles_empty_and_short_lists() {
+        assert_eq!(clamp_viewport(0, 0, 0, 10), (0, 0));
+        assert_eq!(clamp_viewport(3, 5, 0, 10), (2, 0)); // selected clamped to total-1
+        assert_eq!(clamp_viewport(1, 0, 0, 10), (0, 0));
+    }
+
+    #[test]
+    fn clamp_viewport_zero_page_height_is_safe() {
+        // page_height 0 must not underflow; treated as 1. selected=99 forces scroll to
+        // 99 (selected - page_height + 1) so the selection stays in the window.
+        assert_eq!(clamp_viewport(100, 99, 0, 0), (99, 99));
+    }
+
+    #[test]
+    fn selected_row_uses_absolute_index_in_normal_mode() {
+        // Normal mode: rows is the window [scroll, scroll+len), selected is absolute.
+        let rows = vec![trow("a"), trow("b"), trow("c")];
+        // selected=5, scroll=5 → first row of the window.
+        assert_eq!(
+            selected_row(&rows, 5, 5, false).map(|r| r.name.as_str()),
+            Some("a")
+        );
+        // selected=7, scroll=5 → third row.
+        assert_eq!(
+            selected_row(&rows, 7, 5, false).map(|r| r.name.as_str()),
+            Some("c")
+        );
+        // selected below scroll clamps to the first windowed row (never underflows).
+        assert_eq!(
+            selected_row(&rows, 4, 5, false).map(|r| r.name.as_str()),
+            Some("a")
+        );
+    }
+
+    #[test]
+    fn selected_row_indexes_directly_in_jump_mode() {
+        let rows = vec![trow("x"), trow("y")];
+        assert_eq!(
+            selected_row(&rows, 1, 0, true).map(|r| r.name.as_str()),
+            Some("y")
+        );
+        assert_eq!(selected_row(&rows, 9, 0, true), None);
+    }
 }

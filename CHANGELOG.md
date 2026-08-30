@@ -7,6 +7,14 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **M1.8 — visible-window query (finding Q, the last open re-audit finding).**
+  `kaptein-tui::query_plane` now takes `start`/`end` and materializes only the visible
+  window instead of `Query { start: 0, end: 50_000 }` — a busy cluster advancing the
+  revision per watch delta re-materializes a few dozen rows, not 50 000. Navigation
+  (`j`/`k`/`g`/`G`/sort) re-queries the window; a pure, unit-tested `clamp_viewport`
+  keeps `selected`/`scroll` valid; fuzzy-jump snapshots the full set once on `/` and
+  re-windows to the chosen row on `Enter`. Five new TUI unit tests pin the viewport and
+  selection-index geometry.
 - **M2.0b — the live integration-test tier now runs in CI.** A new `live` job in
   `ci.yml` spins up a throwaway `kind` cluster and runs `cargo test -p kaptein-core
   --test live` with `KAPTEIN_LIVE_TESTS=1`, so the shipped-path test no longer lives

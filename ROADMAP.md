@@ -189,6 +189,14 @@ Milestones:
       the `G`/`j` navigation use the true post-filter count, decoupled from the
       materialized window. Still open: querying *only* the visible window (a deeper nav
       refactor), and the kwok harness that measures the p99 budget.*
+    - *Landed (v0.30.1 →): the **visible-window query** (finding Q's remaining half).
+      `query_plane` now takes `start`/`end` and materializes only `[scroll,
+      scroll+page_height)` — a busy cluster advancing the revision per watch delta
+      re-materializes a few dozen rows, not 50 000. `selected`/`scroll` are kept valid by
+      a pure, unit-tested `clamp_viewport`; navigation (`j`/`k`/`g`/`G`/sort) re-queries
+      the window; fuzzy-jump snapshots the full set once on `/` and re-windows to the
+      chosen row on `Enter`. The kwok synthetic-cluster harness remains the frontend-level
+      Phase 1 tail.*
     - *Landed (v0.29.0 →): the **view-model half of the budget is now measured, not
       aspirational**. `crates/kaptein-viewmodel/benches/query.rs` is a dependency-free,
       release-mode benchmark that drives `MemPlane::query` (sort + filter + window) over a
