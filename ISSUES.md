@@ -195,8 +195,11 @@ unowned debt. Done items are struck through.
    `kubectl krew install --manifest-url=https://github.com/egkristi/Kaptein/releases/latest/download/kaptein.yaml`.
    The **central** `kubernetes-sigs/krew-index` is a CNCF repo that requires OSI-approved
    open source, so a BUSL-1.1 plugin is not eligible (issue #34 stays open as the
-   license-blocked central-index PR; the custom index is the shipped resolution). *Remaining:
-   a Homebrew tap and a release-triggered site/README version bump.*
+   license-blocked central-index PR; the custom index is the shipped resolution).
+   *Version drift is now **guarded**: a `version-sync` CI job derives the workspace
+   version from `Cargo.toml` and fails if any of `README.md`/`install.sh`/`Dockerfile`/
+   `docs/INSTALL.md` drift from `v<version>`. Remaining: a Homebrew tap and an automated
+   release-triggered site/README version bump.*
 9. ~~**Contract-version enforcement**~~ (done, commit 485045c): MCP server advertises the
    contract version and refuses a client whose declared `_meta["io.kaptein/apiVersion"]`
    has a different major; rule in `kaptein-viewmodel::versioned` (lens/WIT gates land

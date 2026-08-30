@@ -233,3 +233,31 @@ jobs:
           # The Dockerfile must be present and pin a version arg.
           grep -q "ARG KAPTEIN_VERSION" Dockerfile || { echo "Dockerfile missing version arg"; exit 1; }
           echo "Distribution artifacts OK"
+
+  version-sync:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The release "Distribution & release sync" DoD: the workspace version and the
+      # user-facing version pins (README/install.sh/Dockerfile/INSTALL) must not drift —
+      # the review found "five releases of drift". The set is *derived* (the workspace
+      # `version` from `Cargo.toml` is the single source of truth; every `v<version>`
+      # pin in the user-facing files must equal it), so a future release that bumps the
+      # crate but forgets a doc can't ship silently.
+      - run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml"))["workspace"]["package"]["version"])')"
+          tag="v${version}"
+          missing=0
+          for f in README.md install.sh Dockerfile docs/INSTALL.md; do
+            if ! grep -qF "$tag" "$f"; then
+              echo "error: $f does not reference $tag (workspace version $version)" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "error: user-facing version pins drifted from the workspace version" >&2
+            exit 1
+          fi
+          echo "Version pins consistent at $tag"

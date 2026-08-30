@@ -683,6 +683,12 @@ Milestones:
     `ghcr.io/egkristi/kaptein` (issue #31). The unused `VERSION_TAG` was removed (issue #30).
     `README.md` now documents all three as real channels. *Remaining: a Homebrew tap and a
     release-triggered site/README version bump.*
+  - *Guarded (v0.30.1 →): a `version-sync` CI job derives the workspace version from
+    `Cargo.toml` and fails if `README.md`/`install.sh`/`Dockerfile`/`docs/INSTALL.md`
+    do not all reference `v<version>` — the derive-don't-restate guard against the
+    "five releases of drift" the milestone names. The Homebrew tap and an automated
+    release-triggered bump remain (the latter would fight the manual release commit on a
+    PR-protected branch, so the consistency gate is the shipped form).*
   - **Resolved (v0.29.0):** `kubectl krew install kaptein` now works end to end — not via
     the central `kubernetes-sigs/krew-index` (a CNCF repo that requires OSI-approved open
     source, which BUSL-1.1 is not), but via a **custom index**

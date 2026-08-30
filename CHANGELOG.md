@@ -7,6 +7,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
+- **Distribution & release sync — version-drift guard.** A new `version-sync` CI job
+  derives the workspace version from `Cargo.toml` and fails if `README.md`/`install.sh`/
+  `Dockerfile`/`docs/INSTALL.md` do not all reference `v<version>` — the
+  derive-don't-restate guard against the "five releases of drift" the review found.
 - **M1.8 — visible-window query (finding Q, the last open re-audit finding).**
   `kaptein-tui::query_plane` now takes `start`/`end` and materializes only the visible
   window instead of `Query { start: 0, end: 50_000 }` — a busy cluster advancing the
