@@ -474,7 +474,12 @@ Milestones:
     **CLI-level integration tier** (which can `assert_cmd` the built `kaptein` binary and
     drive `mcp` over stdio) is the correct home for those two clauses and is tracked as a
     follow-on, not claimed as done here. The M2.0b DoD text is amended to scope the
-    core live tier to the library write paths and name the CLI tier separately.*
+    core live tier to the library write paths and name the CLI tier separately.
+    *(v0.31.0 →: the **CLI binary** clause is now covered too — `delete_confirm_round_trips_through_the_cli`
+    drives the real `run(cli)` dispatch (`--confirm` + `--break-glass` → `gate_write` →
+    core delete → audit) against a live cluster and asserts the object is removed; it runs
+    in the `live` CI job alongside the core tier. Only the **MCP protocol** remains a
+    follow-on, since driving `mcp` over stdio needs the CLI process itself.)*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a

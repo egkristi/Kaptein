@@ -20,10 +20,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     per-candidate allocations; and `benches/query.rs` now gates a fuzzy re-rank (4 ms vs
     11 ms before).
   - **AB** — M2.0b's live tier was missing port-forward; it now has
-    `port_forward_binds_and_bridges` against a throwaway `nc -l` pod. The MCP-protocol and
-    CLI-binary clauses are honestly narrowed out of the core live tier (they live in the
-    `kaptein-cli` binary crate, which core cannot depend on) and tracked as a CLI-level
-    integration tier rather than claimed.
+    `port_forward_binds_and_bridges` against a throwaway `nc -l` pod. The **CLI binary**
+    clause is also now covered: `delete_confirm_round_trips_through_the_cli` drives the
+    real `run(cli)` dispatch (`--confirm` + `--break-glass` → `gate_write` → core delete →
+    audit) against a live cluster, in CI. Only the **MCP protocol** clause remains a
+    follow-on (driving `mcp` over stdio needs the CLI process itself).
 
 ## [0.31.0] - 2026-09-01
 

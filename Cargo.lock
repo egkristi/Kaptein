@@ -1185,6 +1185,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "futures-util",
+ "k8s-openapi",
  "kaptein-core",
  "kaptein-tui",
  "kaptein-viewmodel",

@@ -2057,4 +2057,98 @@ mod tests {
             }
         );
     }
+
+    /// **M2.0b "the CLI binary itself" (finding AB), made live.** Drives the actual
+    /// `run(cli)` dispatch — argument parsing, `--confirm` → `gate_write`, the core
+    /// delete, and the `audit_write` path — against a real API server. This is the layer
+    /// finding U lived in (the `--confirm`/`--break-glass`/audit wiring), previously
+    /// exercised only by unit tests over the clap tree. Gated on `KAPTEIN_LIVE_TESTS` so
+    /// the default run stays hermetic. The audit-write assertion lives in `audit.rs`'s
+    /// own unit test (the CLI path here proves the dispatch end-to-end and that the
+    /// object is actually removed).
+    #[tokio::test]
+    async fn delete_confirm_round_trips_through_the_cli() {
+        use k8s_openapi::api::core::v1::{ConfigMap, Namespace};
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+        use kube::api::{Api, PostParams};
+
+        if std::env::var_os("KAPTEIN_LIVE_TESTS").is_none() {
+            eprintln!("skipping CLI live test: KAPTEIN_LIVE_TESTS not set");
+            return;
+        }
+        let client = match kaptein_core::discovery::client().await {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("skipping CLI live test: cluster unreachable ({e})");
+                return;
+            }
+        };
+
+        // Throwaway namespace + a ConfigMap to delete.
+        let ns = format!("kaptein-cli-it-{}", std::process::id());
+        let namespaces: Api<Namespace> = Api::all(client.clone());
+        namespaces
+            .create(
+                &PostParams::default(),
+                &Namespace {
+                    metadata: ObjectMeta {
+                        name: Some(ns.clone()),
+                        ..Default::default()
+                    },
+                    spec: None,
+                    status: None,
+                },
+            )
+            .await
+            .expect("create namespace");
+
+        let cm_name = "delete-me";
+        let configmaps: Api<ConfigMap> = Api::namespaced(client.clone(), &ns);
+        configmaps
+            .create(
+                &PostParams::default(),
+                &ConfigMap {
+                    metadata: ObjectMeta {
+                        name: Some(cm_name.into()),
+                        ..Default::default()
+                    },
+                    data: None,
+                    binary_data: None,
+                    immutable: None,
+                },
+            )
+            .await
+            .expect("create ConfigMap");
+
+        // Drive the real CLI dispatch: `kaptein delete --gvk v1/ConfigMap --name
+        // delete-me -n <ns> --confirm --break-glass <reason>` (read-only default →
+        // explicit opt-in; a prod/unknown context additionally requires break-glass,
+        // so this exercises the full `gate_write` path).
+        let cli = Cli::parse_from([
+            "kaptein",
+            "delete",
+            "--gvk",
+            "v1/ConfigMap",
+            "--name",
+            cm_name,
+            "-n",
+            &ns,
+            "--confirm",
+            "--break-glass",
+            "live-test",
+        ]);
+        run(cli)
+            .await
+            .expect("delete --confirm --break-glass succeeds");
+
+        // The ConfigMap must actually be gone (the dispatch reached the API server).
+        assert!(
+            configmaps.get_opt(cm_name).await.expect("get").is_none(),
+            "delete --confirm must remove the ConfigMap"
+        );
+
+        // Cleanup: the throwaway namespace (deleting it removes any remaining object).
+        use kube::api::DeleteParams;
+        let _ = namespaces.delete(&ns, &DeleteParams::default()).await;
+    }
 }

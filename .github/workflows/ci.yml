@@ -89,6 +89,11 @@ jobs:
           KAPTEIN_LIVE_TESTS: "1"
         run: cargo test -p kaptein-core --test live --locked
 
+      - name: Run the live CLI tier
+        env:
+          KAPTEIN_LIVE_TESTS: "1"
+        run: cargo test -p kaptein -- delete_confirm_round_trips_through_the_cli --locked
+
   bench:
     name: Perf budget (M1.8 query p99)
     runs-on: ubuntu-latest
