@@ -18,6 +18,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `kaptein viewdef render` now also prints a lens's health findings against the fixture.
   This closes the earlier "health checks" doc-vs-code gap in the data model (the per-lens
   *surface* that renders findings remains M2.4+).
+- **M2.2 — the daily-driver TUI now surfaces per-lens health findings.** A new `h` key
+  evaluates the selected lens-driven resource's declared health checks and shows one
+  finding per failure (or `healthy`) in the detail pane, via a new
+  `kaptein-core::describe::get_dynamic_redacted` (redacted JSON — a health predicate can
+  never read a plaintext secret). This closes the "code exists but the shipped path
+  doesn't take it" gap: `evaluate_health` was reachable only through the `viewdef-render`
+  dev command, not the frontend an operator actually uses.
 - **M2.2 — shipped lens set is now regression-tested end to end.** The canonical CNPG lens
   (`extensions/lens.cnpg.yaml`) now declares a real `health` check (`status.readyInstances
   >= 1`), and a new `every_shipped_lens_validates_through_load_lens` test walks the

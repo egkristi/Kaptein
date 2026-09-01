@@ -539,8 +539,9 @@ Milestones:
     `SelfSubjectRulesReview` for the target GVK (pluralized with kube's own pluralizer) and
     downgrades in place — the **shipped path** — and the TUI renders the forbidden marker
     and refuses the `d`/`i` bindings for a greyed-out action. **Still open (Phase 2+):**
-    per-lens health *surfaces* (rendering findings in a frontend panel, M2.4+ — the
-    data-model + evaluation half landed here), and the browser UI's lens navigation (M2.1).
+    a dedicated per-lens health *panel* (the TUI now surfaces findings via the `h` key,
+    M2.2 data model + evaluation; a richer panel is M2.4+), and the browser UI's lens
+    navigation (M2.1).
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only

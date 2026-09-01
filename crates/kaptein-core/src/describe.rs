@@ -56,6 +56,27 @@ pub async fn describe_dynamic_policy(
     serde_yaml::to_string(&obj).map_err(|e| Error::Internal(e.to_string()))
 }
 
+/// Fetch a resource as a **redacted JSON value** — the input to lens health evaluation
+/// (`kaptein_viewmodel::evaluate_health`). Redaction is applied *before* serialization,
+/// so a lens health check can never read a plaintext secret. Shares the same fetch shape
+/// as [`describe_dynamic_policy`] (one `Api::get`, redacted), but returns the raw object
+/// as JSON so a frontend can evaluate declared health predicates against it.
+pub async fn get_dynamic_redacted(
+    client: &Client,
+    gvk: &kube::core::GroupVersionKind,
+    namespace: Option<&str>,
+    name: &str,
+) -> Result<serde_json::Value, Error> {
+    let ar = kube::core::ApiResource::from_gvk(gvk);
+    let api: Api<kube::api::DynamicObject> = match namespace {
+        Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),
+        None => Api::all_with(client.clone(), &ar),
+    };
+    let mut obj = api.get(name).await.map_err(Error::Api)?;
+    crate::redact::redact_object(&mut obj);
+    serde_json::to_value(&obj).map_err(|e| Error::Internal(e.to_string()))
+}
+
 /// Fetch the most recent log lines from every container of a pod.
 ///
 /// Returns a `(container, line)` list. `tail_lines` caps the volume; `follow` is not yet

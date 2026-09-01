@@ -437,7 +437,7 @@ async fn run_event_loop(
                         .join(", ")
                 };
                 format!(
-                    "Actions: {actions_line}\nPress d to describe, i to diagnose the selected resource."
+                    "Actions: {actions_line}\nPress d to describe, i to diagnose, h for health checks."
                 )
             });
             let detail_para = Paragraph::new(detail_text)
@@ -733,6 +733,24 @@ async fn run_event_loop(
                         }
                     } else {
                         detail = Some("Diagnostics are available for pods only.".into());
+                    }
+                }
+                KeyCode::Char('h') if palette_query.is_none() => {
+                    // Per-lens health (M2.2): evaluate the selected lens-driven resource's
+                    // declared health checks and show one finding per failure (or
+                    // "healthy"). Built-in kinds have no lens, so nothing to evaluate.
+                    if kind.lens.is_none() {
+                        detail =
+                            Some("Health checks are available for lens-driven kinds only.".into());
+                    } else {
+                        let selected: Option<&TableRow> = if jump_query.is_some() {
+                            jump_selected_row(&jump_master, &jump_order, selected)
+                        } else {
+                            selected_row(&rows, selected, scroll, false)
+                        };
+                        if let Some(r) = selected {
+                            detail = lens_health(client, &kind, r).await.ok();
+                        }
                     }
                 }
                 KeyCode::Char('/') if palette_query.is_none() => {
@@ -1286,6 +1304,46 @@ async fn diagnose(client: &Client, row: &TableRow) -> io::Result<String> {
     }
 }
 
+/// Evaluate a lens-driven kind's declared health checks against the selected resource
+/// (M2.2 per-lens health). Fetches the **redacted** object once, runs the view-model's
+/// `evaluate_health` (the same engine `viewdef-render` uses), and formats a finding per
+/// failing check — or "healthy" when every check holds. This is the daily-driver surface:
+/// the TUI shows what the lens's health predicates say, not just the status chip.
+async fn lens_health(client: &Client, kind: &Kind, row: &TableRow) -> io::Result<String> {
+    let vd = match &kind.lens {
+        Some(vd) if !vd.health.is_empty() => vd,
+        _ => return Ok("This lens declares no health checks.".to_string()),
+    };
+    let ns = if kind.cluster_scoped || row.namespace.is_empty() {
+        None
+    } else {
+        Some(row.namespace.as_str())
+    };
+    let value = kaptein_core::describe::get_dynamic_redacted(client, &kind.gvk, ns, &row.name)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let findings = kaptein_integration::kaptein_viewmodel::evaluate_health(vd, &value);
+    Ok(format_health_findings(&row.name, &findings))
+}
+
+/// Format a resource's health findings for the detail pane: "name: healthy" when there
+/// are none, else one `id: label_key (level)` line per failing check. Pure (no I/O) so
+/// it is unit-testable; the fetch + evaluation live in [`lens_health`].
+fn format_health_findings(
+    name: &str,
+    findings: &[kaptein_integration::kaptein_viewmodel::HealthFinding],
+) -> String {
+    if findings.is_empty() {
+        format!("{name}: healthy")
+    } else {
+        findings
+            .iter()
+            .map(|f| format!("{}: {} ({:?})", f.id, f.label_key, f.level))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 /// Build the RBAC-preflighted action graph for a kind (M2.2 per-action RBAC grey-out).
 ///
 /// A lens-driven kind contributes its declared actions; a built-in kind contributes the
@@ -1419,5 +1477,28 @@ mod tests {
         // An empty query matches everything in input order.
         let all = fuzzy_rerank(&master, "");
         assert_eq!(all, vec![0usize, 1, 2]);
+    }
+
+    #[test]
+    fn format_health_findings_reports_healthy_or_one_line_per_failure() {
+        use kaptein_integration::kaptein_viewmodel::{HealthFinding, StatusLevel};
+        assert_eq!(format_health_findings("pg", &[]), "pg: healthy");
+        let findings = vec![
+            HealthFinding {
+                id: "ready-instances".into(),
+                label_key: "health.ready-instances".into(),
+                level: StatusLevel::Error,
+            },
+            HealthFinding {
+                id: "replication-lag".into(),
+                label_key: "health.replication-lag".into(),
+                level: StatusLevel::Warning,
+            },
+        ];
+        let out = format_health_findings("pg", &findings);
+        assert_eq!(
+            out,
+            "ready-instances: health.ready-instances (Error)\nreplication-lag: health.replication-lag (Warning)"
+        );
     }
 }

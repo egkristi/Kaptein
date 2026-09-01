@@ -170,8 +170,8 @@ chosen data-first:
 1. ✅ **View definitions (lenses)** — declarative YAML binding a CRD to columns,
    status inference (scalar + Kubernetes-condition rules), health checks, and actions.
    No code, PR-reviewable, checked into Git. **Ships today** (the engine + a lens set +
-   lens-driven TUI navigation). *(Per-lens health *surfaces* — rendering findings in a
-   frontend panel — are planned, M2.4+.)*
+   lens-driven TUI navigation, with `h` showing a lens's health findings for the selected
+   resource). *(A dedicated per-lens health *panel* — M2.4+.)*
 2. 🛠️ **WASM component-model plugins (WIT)** — sandboxed, language-agnostic code for when
    real logic is required. Behaves identically in every frontend. *(Planned, M2.6.)*
 3. ✅ **Shell-out integrations** — external binaries (Krew plugins, `kustomize`, `helm`)
@@ -304,12 +304,12 @@ Tekton, Velero, Karpenter, and Knative are supported *without hardcoding anythin
 your teams can write their own for internal CRDs.
 
 ✅ Ships today: the schema, validator, status/condition rule evaluation, **health-check
-evaluation** (`evaluate_health`), `render_row`, the `extension.yaml` manifest +
-`list/validate/enable/disable` lifecycle, a lens set for all eight targets under
-[`extensions/`](./extensions), and **lens-driven navigation** — `kaptein lenses`
-discovers the set, `kaptein get --lens` renders one, and the **TUI navigates discovered
-lenses** (drop a lens file into `KAPTEIN_EXTENSIONS_DIR`, default `./extensions`, and its
-CRD becomes navigable with no recompile).
+evaluation** (`evaluate_health`, surfaced in the TUI with `h`), `render_row`, the
+`extension.yaml` manifest + `list/validate/enable/disable` lifecycle, a lens set for all
+eight targets under [`extensions/`](./extensions), and **lens-driven navigation** —
+`kaptein lenses` discovers the set, `kaptein get --lens` renders one, and the **TUI
+navigates discovered lenses** (drop a lens file into `KAPTEIN_EXTENSIONS_DIR`, default
+`./extensions`, and its CRD becomes navigable with no recompile).
 
 When a lens isn't enough, escalate to a **WASM plugin** (tier 2) or a **shell-out
 integration** (tier 3). Data first, code second: **this is the only way "and more"
