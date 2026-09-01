@@ -437,9 +437,14 @@ Milestones:
     adding `restart` (asserts the `restartedAt` annotation lands), `evict` (dry-run +
     real evict against a throwaway standalone pod), and `exec` (runs `echo` in a running
     pod and asserts the output). This closes the "exec/restart/evict not unit-tested
-    today" gap the milestone names. Cordon/uncordon are deliberately **not** exercised
-    here: they mutate a real node, which violates the tier's "never touch shared cluster
-    state" rule — they stay CLI-gated and documented.*
+    today" gap the milestone names.*
+  - *Extended (v0.31.0 →): `cordon`/`uncordon` are now live-tested too —
+    `cordon_marks_node_unschedulable_then_uncordon_restores_it` cordons the throwaway
+    kind node (dry-run + real, asserting `unschedulable`) and uncordons to restore it,
+    self-cleaning. The earlier "mutates a *real* node" exclusion no longer holds on a
+    throwaway kind cluster. This closes the last "every write path" clause — the live
+    tier now covers list/describe, delete, scale, apply-dry-run, blast_radius, restart,
+    evict, exec, cordon/uncordon, port-forward, and the missing-resources overview.*
   - *CI-wired (v0.30.1 →): a `live` job now runs the tier against a throwaway `kind`
     cluster on every push, so `KAPTEIN_LIVE_TESTS=1` is no longer a locally-only
     opt-in — the shipped-path test actually runs in CI. The job is a **latest-three-

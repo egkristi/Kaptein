@@ -26,7 +26,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     audit) against a live cluster, in CI. The **MCP protocol** clause is covered too:
     `governance_check_runs_real_preflight_against_a_live_server` drives the MCP governance
     gate (`preflight_target` → `governance_check` → `SelfSubjectRulesReview`) against a
-    live cluster, in CI. Finding AB is now fully closed.
+    live cluster, in CI. The last write path — **cordon/uncordon** — is now covered by
+    `cordon_marks_node_unschedulable_then_uncordon_restores_it` (cordons the throwaway
+    kind node and restores it). Finding AB is now fully closed, and the milestone's full
+    DoD is met.
 
 ## [0.31.0] - 2026-09-01
 

@@ -690,6 +690,65 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// The cordon/uncordon write path (M2.0b's "every write path" — the one node write left
+/// uncovered). On a throwaway `kind` cluster the single node is disposable and the test
+/// restores it, so cordoning is safe and self-cleaning. This exercises the real node
+/// mutation path: dry-run leaves the node schedulable, `confirm` marks it unschedulable,
+/// and `uncordon` restores it.
+#[tokio::test]
+async fn cordon_marks_node_unschedulable_then_uncordon_restores_it() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let _guard = Cleanup(&client, ns.clone());
+
+    // Find a node (kind has exactly one; any live cluster has at least one).
+    let nodes: Api<k8s_openapi::api::core::v1::Node> = Api::all(client.clone());
+    let node_list = nodes
+        .list(&kube::api::ListParams::default())
+        .await
+        .expect("list nodes");
+    let Some(node) = node_list.iter().next() else {
+        eprintln!("skipping cordon test: no nodes in cluster");
+        return;
+    };
+    let node_name = node.name_any();
+    let is_unschedulable = |n: &k8s_openapi::api::core::v1::Node| {
+        n.spec
+            .as_ref()
+            .and_then(|s| s.unschedulable)
+            .unwrap_or(false)
+    };
+
+    // 1. Dry-run: must not cordon (node stays schedulable).
+    let dry = kaptein_core::nodes::cordon(&client, &node_name, false)
+        .await
+        .expect("dry-run cordon");
+    assert!(dry.message.contains("would be cordoned"), "{}", dry.message);
+
+    // 2. Real cordon: the node is marked unschedulable.
+    let real = kaptein_core::nodes::cordon(&client, &node_name, true)
+        .await
+        .expect("cordon");
+    assert!(real.message.contains("cordoned"), "{}", real.message);
+    let after = nodes.get(&node_name).await.expect("get node");
+    assert!(
+        is_unschedulable(&after),
+        "node {node_name} must be unschedulable after cordon"
+    );
+
+    // 3. Uncordon: restore schedulability (self-cleaning — never leave a cordoned node).
+    let uncordon = kaptein_core::nodes::uncordon(&client, &node_name, true)
+        .await
+        .expect("uncordon");
+    assert!(uncordon.message.contains("uncordoned"), "{}", uncordon.message);
+    let restored = nodes.get(&node_name).await.expect("get node");
+    assert!(
+        !is_unschedulable(&restored),
+        "node {node_name} must be schedulable again after uncordon"
+    );
+}
+
 /// RAII cleanup: the throwaway namespace is deleted explicitly via `cleanup()` (awaited),
 /// and also on drop as a best-effort backstop if an assertion panics before cleanup.
 struct Cleanup<'a>(&'a Client, String);
