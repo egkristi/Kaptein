@@ -10,8 +10,8 @@ readme = "README.md"
 description = "Kaptein ratatui terminal frontend"
 
 [dependencies]
-kaptein-viewmodel = { version = "0.30.1", path = "../kaptein-viewmodel" }
-kaptein-integration = { version = "0.30.1", path = "../kaptein-integration" }
+kaptein-viewmodel = { version = "0.31.0", path = "../kaptein-viewmodel" }
+kaptein-integration = { version = "0.31.0", path = "../kaptein-integration" }
 kube = { workspace = true }
 k8s-openapi = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
