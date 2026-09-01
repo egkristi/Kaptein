@@ -7,6 +7,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Fixed
+- **Docs — lens capability overclaim (README).** The README advertised lenses as binding a
+  CRD to "panels" and "health checks" as though those ship today, but lens schema v1
+  (`ViewDefinition` + `VIEWDEF_SCHEMA`, `additionalProperties: false`) only declares
+  **columns, status inference (scalar + condition rules), and actions** — there is no
+  "panels" field and no "health checks" field anywhere in the data model, validator, or
+  schema. The README now states exactly what the schema supports, and defers per-lens
+  health surfaces to M2.4+ (matching the M2.2 status note).
 - **Re-audit findings (v0.31.0):**
   - **Z** — `InformerManager::touch` had no caller (finding N's second half), so the LRU
     evicted the *oldest-registered* view — the one on screen — once the session-scoped cap

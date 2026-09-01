@@ -811,21 +811,15 @@ Milestones:
 - **Immediate next steps** — *(Phase 0 is long done, and the entire v0.27.0 re-audit batch
   (#20–#31) is closed: bounded frontend seed, relist-on-reconnect, LRU admission, preflight
   pluralization, log redaction, all three distribution channels, and the query benchmark.
-  Findings P, Q, R, S, U, V, W, X, Y, M, O, and T are fixed, and **N is half-fixed**
-  (the governance batch — gated/audited `exec`, distinct `EphemeralAttach`, audited
-  `port-forward`, a derive-don't-restate coverage test, the dead `KubernetesPlane`
-  deleted, the `apply_patch_real` doc clarified; the informer-lifecycle batch — a
-  session-scoped `InformerManager` with `release` wired through a `WatchSlotGuard` but
-  **`touch` still uncalled**, and a full-object relist that adds as well as removes; real
-  visible-window querying with a unit-tested `clamp_viewport`; a kind-backed
-  latest-three-minors live matrix; the ADR-0015 `no_requests`/`no_limits` split wired into
-  the landing view; and the core-dump hygiene pass). The live next steps, in order:
-  **1.** the two small residuals — **M2.0c** `touch` on query so the LRU stops evicting the
-  hottest view (finding Z), and **M1.8** allocation-free fuzzy rerank plus a bench case
-  covering it (finding AA); **2. M2.0b**'s remaining DoD clauses — port-forward, the MCP
-  protocol, and the CLI binary end to end (finding AB); **3.** the **M1.8 kwok harness**
-  (the last aspirational number); **4. M2.1 browser UI**; **5. M2.2** per-lens action/health
-  surfaces; and the distribution tail (Homebrew tap, release-triggered site version bump).)*
+  Findings P, Q, R, S, U, V, W, X, Y, M, N, O, T, Z, AA, and AB are all fixed, and the
+  v0.31.0 re-audit batch is closed too: `LivePlane::query` now calls `touch` so the LRU
+  stops evicting the hottest view (Z), fuzzy rerank is allocation-free with a bench case
+  covering it (AA), and M2.0b's remaining DoD clauses — port-forward, the MCP protocol,
+  the CLI binary end to end, and cordon/uncordon — are all live-tested in CI (AB). The
+  live next steps, in order: **1.** the **M1.8 kwok synthetic-cluster harness** (the last
+  aspirational number); **2. M2.1 browser UI**; **3. M2.2** per-lens action/health
+  surfaces; and the distribution tail (Homebrew tap, release-triggered site version
+  bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson
   ("the shipped path must take it") worked: every v0.27.0 finding is genuinely closed, and
