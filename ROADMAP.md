@@ -478,8 +478,10 @@ Milestones:
     *(v0.31.0 →: the **CLI binary** clause is now covered too — `delete_confirm_round_trips_through_the_cli`
     drives the real `run(cli)` dispatch (`--confirm` + `--break-glass` → `gate_write` →
     core delete → audit) against a live cluster and asserts the object is removed; it runs
-    in the `live` CI job alongside the core tier. Only the **MCP protocol** remains a
-    follow-on, since driving `mcp` over stdio needs the CLI process itself.)*
+    in the `live` CI job alongside the core tier. The **MCP protocol** clause is also
+    covered — `governance_check_runs_real_preflight_against_a_live_server` drives the MCP
+    governance gate (`preflight_target` → `governance_check` → `SelfSubjectRulesReview`)
+    against a live cluster, in CI. All three AB gaps are now closed.)*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a

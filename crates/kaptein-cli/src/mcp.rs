@@ -750,6 +750,54 @@ impl KapteinMcp {
 mod tests {
     use super::{KapteinMcp, check_declared_version, parse_gvk_parts, resource_from_kind};
 
+    /// **M2.0b "the MCP protocol" clause (finding AB), made live.** The MCP governance
+    /// gate (`governance_check`: context classification + `SelfSubjectRulesReview`) has
+    /// never been exercised against a real API server — only `preflight_target`'s
+    /// argument→(verb, resource) mapping was unit-tested. This drives the *actual*
+    /// gate with a `KapteinMcp` bound to a live client: an allowed read is granted, and
+    /// the preflight target derivation is exercised with real pluralization. Gated on
+    /// `KAPTEIN_LIVE_TESTS`.
+    #[tokio::test]
+    async fn governance_check_runs_real_preflight_against_a_live_server() {
+        if std::env::var_os("KAPTEIN_LIVE_TESTS").is_none() {
+            eprintln!("skipping MCP live test: KAPTEIN_LIVE_TESTS not set");
+            return;
+        }
+        let mcp = match KapteinMcp::new().await {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("skipping MCP live test: cluster unreachable ({e})");
+                return;
+            }
+        };
+
+        // An allowed read: `list_resources(gvk=v1/Namespace)` preflights `list namespaces`
+        // (cluster-scoped → empty namespace). The current agent identity must be permitted
+        // to list namespaces against a real SelfSubjectRulesReview.
+        let args = {
+            let mut m = serde_json::Map::new();
+            m.insert("gvk".to_string(), serde_json::json!("v1/Namespace"));
+            m
+        };
+        let (verb, resource, group, namespace) =
+            KapteinMcp::preflight_target("list_resources", Some(&args)).unwrap();
+        assert_eq!(verb, "list");
+        assert_eq!(resource, "namespaces");
+        assert_eq!(group, "");
+        assert!(namespace.is_none(), "cluster-scoped has no namespace");
+
+        // The real gate: the agent's identity must actually be allowed (or the cluster
+        // genuinely denies it — either way it must not panic; the point is the
+        // SelfSubjectRulesReview runs end-to-end). A live admin kubeconfig grants this.
+        let result = mcp
+            .governance_check(&verb, &resource, &group, namespace.as_deref())
+            .await;
+        assert!(
+            result.is_ok(),
+            "list namespaces should be permitted for the test identity, got {result:?}"
+        );
+    }
+
     #[test]
     fn absent_version_is_accepted() {
         assert!(check_declared_version(None).is_ok());

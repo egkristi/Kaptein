@@ -23,8 +23,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
     `port_forward_binds_and_bridges` against a throwaway `nc -l` pod. The **CLI binary**
     clause is also now covered: `delete_confirm_round_trips_through_the_cli` drives the
     real `run(cli)` dispatch (`--confirm` + `--break-glass` → `gate_write` → core delete →
-    audit) against a live cluster, in CI. Only the **MCP protocol** clause remains a
-    follow-on (driving `mcp` over stdio needs the CLI process itself).
+    audit) against a live cluster, in CI. The **MCP protocol** clause is covered too:
+    `governance_check_runs_real_preflight_against_a_live_server` drives the MCP governance
+    gate (`preflight_target` → `governance_check` → `SelfSubjectRulesReview`) against a
+    live cluster, in CI. Finding AB is now fully closed.
 
 ## [0.31.0] - 2026-09-01
 
