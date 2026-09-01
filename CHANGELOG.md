@@ -6,6 +6,8 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-01
+
 ### Added
 - **M2.2 — per-lens health checks (data model + evaluation + schema).** The lens schema v1
   now declares a `health` array: each check is a predicate (`id`, `label_key`, `field`,
