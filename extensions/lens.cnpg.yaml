@@ -37,6 +37,14 @@ status:
     value: "ClusterIsReady"
     level: warning
 
+health:
+  - id: ready-instances
+    label_key: health.ready-instances
+    field: status.readyInstances
+    op: gte
+    value: 1
+    level: error
+
 actions:
   - id: describe
     label_key: action.describe

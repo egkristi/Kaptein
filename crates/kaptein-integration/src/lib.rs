@@ -1118,4 +1118,49 @@ mod tests {
         );
         assert!(!shared.touch(&b.watch_key()), "B (coldest) must be evicted");
     }
+
+    /// **M2.2 DoD (shipped lens set), made falsifiable.** Every lens that ships in the
+    /// `extensions/` directory must load *and validate* through the real `load_lens`
+    /// path — not an inline fixture. The other lens tests use inline documents because
+    /// `cargo publish` does not package `extensions/`; this test resolves the checked-in
+    /// directory from `CARGO_MANIFEST_DIR` (skipping gracefully when it is absent, e.g.
+    /// in a published-tarball build) so a shipped lens that drifts from the schema (a new
+    /// field, a wrong `api_version`, a bad column) fails CI rather than silently
+    /// skipping at TUI startup.
+    #[test]
+    fn every_shipped_lens_validates_through_load_lens() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("extensions");
+        if !root.is_dir() {
+            eprintln!("skipping: extensions/ not present (published-tarball build)");
+            return;
+        }
+        let (lenses, problems) = kaptein_core::extension::discover_lenses(&root);
+        assert!(
+            problems.is_empty(),
+            "shipped lens discovery reported problems: {problems:?}"
+        );
+        assert!(
+            !lenses.is_empty(),
+            "extensions/ must ship at least one lens"
+        );
+        for lens in &lenses {
+            let vd = load_lens(&lens.entrypoint)
+                .unwrap_or_else(|e| panic!("shipped lens {} failed to load: {e}", lens.id));
+            // The lens's declared target must agree with the manifest's discovered target.
+            let gvk = &vd.target;
+            assert_eq!(
+                (gvk.group.as_str(), gvk.version.as_str(), gvk.kind.as_str()),
+                (
+                    lens.target.group.as_str(),
+                    lens.target.version.as_str(),
+                    lens.target.kind.as_str()
+                ),
+                "lens {} target drifts from its discovered GVK",
+                lens.id
+            );
+        }
+    }
 }

@@ -18,6 +18,14 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `kaptein viewdef render` now also prints a lens's health findings against the fixture.
   This closes the earlier "health checks" doc-vs-code gap in the data model (the per-lens
   *surface* that renders findings remains M2.4+).
+- **M2.2 — shipped lens set is now regression-tested end to end.** The canonical CNPG lens
+  (`extensions/lens.cnpg.yaml`) now declares a real `health` check (`status.readyInstances
+  >= 1`), and a new `every_shipped_lens_validates_through_load_lens` test walks the
+  checked-in `extensions/` directory (via `CARGO_MANIFEST_DIR`, skipping in a
+  published-tarball build) and asserts every lens loads + validates through the real
+  `load_lens` path with a target GVK that agrees with its discovered manifest. This closes
+  the "no test exercises the shipped lens files" gap: a lens that drifts from the schema
+  now fails CI instead of silently skipping at TUI startup.
 
 ### Fixed
 - **Docs — lens capability overclaim (README).** The README advertised lenses as binding a
