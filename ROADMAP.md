@@ -216,6 +216,20 @@ Milestones:
       synthetic-cluster harness (thousands of fake nodes/pods) and the end-to-end
       frontend keystroke-to-frame number remain the frontend-level Phase 1 tail — this
       bench gates the three numbers the view-model owns in isolation.*
+  - **Open (re-audit v0.31.0) — the allocation pattern this milestone removed came back on
+    the search path** (finding AA). Windowing closed finding Q for the steady-state table,
+    but fuzzy-jump did not follow. Entering `/` correctly snapshots the full set (search
+    must span the store, not the window), and then **every keystroke and every backspace**
+    runs `fuzzy_rerank(jump_master.clone(), q)`. `TableRow` is `{ String, String,
+    Vec<String> }`, so on a 50 000-row view that clone alone is ~150 k `String`
+    allocations; `fuzzy_jump` then returns `FuzzyMatch { candidate: String }` per match —
+    and an empty query matches everything — for another ~50 k, plus a 50 k-entry `HashMap`
+    and a sort. A ten-character query costs roughly two million allocations.
+    **The bench does not see any of this:** it gates `MemPlane::query` only, so the guard
+    is blind exactly where interactive latency now lives. Take `&[TableRow]` and return
+    indices (or `Vec<&TableRow>`), and **add a fuzzy-rerank case to `benches/query.rs`** so
+    keystroke-to-frame is gated on the search path too — otherwise the same regression can
+    land again without the gate noticing, which is what just happened.
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
@@ -366,9 +380,17 @@ Milestones:
        a one-shot list and the TUI silently stops being live. **(1) and (2) are one change**:
        hoist the manager to session scope, release on rebuild (or hold a Drop guard), and
        touch on query.
-       *Fixed: `watch_loop` holds a `WatchSlotGuard` that releases the slot on exit (view
-       close or task abort), so a session-scoped manager no longer leaks a slot per view
-       switch — verified by the same DoD test.*
+       *Partly fixed: `watch_loop` holds a `WatchSlotGuard` that releases the slot on exit
+       (view close or task abort), so a session-scoped manager no longer leaks a slot per
+       view switch — verified by the DoD test.* **Still open — the `touch` half
+       (finding Z).** `grep -rn '\.touch('` outside `informer.rs` still returns nothing;
+       `last_touched` is only ever written by `register`. **This became live when (1)
+       landed:** while the cap was unreachable a missing recency signal was inert, but now
+       that eviction actually runs, `register`'s `min_by_key(last_touched)` selects the
+       **oldest-registered** view — which for an operator who opens one view and then
+       cycles through others is *the view on screen*. The LRU inverts and evicts the
+       hottest entry. Hook `informers.touch(&watch_key)` into `LivePlane::query` (the TUI
+       already re-queries per revision change, so the hook point costs nothing).
     3. **Reconcile removes but never adds.** `relist_and_reconcile` drops rows absent from
        the relist but never upserts rows present in the relist and missing from the plane,
        so objects **created during an outage stay invisible** until they next change — the
@@ -383,6 +405,14 @@ Milestones:
     most-recently-used view still holds a live watch; and a reconnect test asserts an
     object *created* during the outage appears after reconnect, not only that a deleted
     one disappears.
+  - **The second DoD clause is still not a test** (finding Z). The shipped
+    `shared_manager_cap_is_enforced_across_planes_and_released_on_close` asserts the cap is
+    reached and that `release` frees a slot — the *first* clause. It makes no recency
+    assertion, so *"the most-recently-used view still holds a live watch"* remains prose,
+    and the test passes with the LRU evicting the wrong entry. **This is the third
+    consecutive cycle in which a written DoD clause was only partially turned into a
+    test.** Close it by asserting the survivor: fill the cap, query view A, register a new
+    view, and assert **A** is still live and the coldest one was evicted.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -407,6 +437,24 @@ Milestones:
     minors conformance matrix** (v1.37 / v1.36 / v1.35, node images pinned by digest),
     closing the milestone's "conformance check against the latest three Kubernetes
     minors" clause.*
+  - **Open (re-audit v0.31.0) — three DoD clauses are still uncovered** (finding AB). The
+    tier is now genuinely good and covers the hard part; what remains is the tail the
+    milestone text explicitly names:
+    - **port-forward** — zero references in `live.rs`, though the DoD lists it among "every
+      write path" and it is the operation that most often outlives its session.
+    - **the MCP protocol** — zero references. `kaptein mcp` is the Phase 1b differentiator
+      and its governance gate (`preflight_target` → `governance_check`) has never been
+      exercised against a real API server; a stdio round-trip asserting one allowed call
+      and one RBAC-refused call would cover it.
+    - **the CLI** — every test drives the *library*. Nothing execs the `kaptein` binary, so
+      argument parsing, the `--confirm`/`--break-glass` wiring, and the audit-file write
+      are untested end to end — and those are exactly the layers finding U lived in.
+    - **cordon/uncordon** are excluded on the grounds that they "mutate a real node". That
+      was true when the tier ran against whatever cluster `KUBECONFIG` pointed at; it is no
+      longer true now the tier runs on a **throwaway kind cluster**, where cordoning the
+      single node is safe and disposable. Either cover them or update the rationale.
+    Either close these or narrow the DoD text — marking M2.0b done against a subset is the
+    failure mode this milestone exists to prevent.
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a
@@ -731,17 +779,21 @@ Milestones:
 - **Immediate next steps** — *(Phase 0 is long done, and the entire v0.27.0 re-audit batch
   (#20–#31) is closed: bounded frontend seed, relist-on-reconnect, LRU admission, preflight
   pluralization, log redaction, all three distribution channels, and the query benchmark.
-  Findings P, Q, R, S, U, V, W, X, Y, M, N, O, and T are fixed (the governance batch —
-  gated/audited `exec`, distinct `EphemeralAttach`, audited `port-forward`, a
-  derive-don't-restate coverage test, the dead `KubernetesPlane` deleted, the
-  `apply_patch_real` doc clarified; and the informer-lifecycle batch — a session-scoped
-  `InformerManager` with `release`/`touch` wired through a `WatchSlotGuard`, a
-  full-object relist that adds as well as removes, and the `InformerManager::live()`
-  boundedness DoD test; plus the core-dump hygiene pass). The live next steps, in order:
-  **1. M2.0b** (kind/envtest + latest-three-minors conformance), **2.** the **M1.8 kwok
-  harness** and visible-window query (finding Q's remaining half), **3. M2.1 browser UI**,
-  **4. M2.2** per-lens action/health surfaces, and the distribution tail (Homebrew tap,
-  release-triggered site/README version bump).)*
+  Findings P, Q, R, S, U, V, W, X, Y, M, O, and T are fixed, and **N is half-fixed**
+  (the governance batch — gated/audited `exec`, distinct `EphemeralAttach`, audited
+  `port-forward`, a derive-don't-restate coverage test, the dead `KubernetesPlane`
+  deleted, the `apply_patch_real` doc clarified; the informer-lifecycle batch — a
+  session-scoped `InformerManager` with `release` wired through a `WatchSlotGuard` but
+  **`touch` still uncalled**, and a full-object relist that adds as well as removes; real
+  visible-window querying with a unit-tested `clamp_viewport`; a kind-backed
+  latest-three-minors live matrix; the ADR-0015 `no_requests`/`no_limits` split wired into
+  the landing view; and the core-dump hygiene pass). The live next steps, in order:
+  **1.** the two small residuals — **M2.0c** `touch` on query so the LRU stops evicting the
+  hottest view (finding Z), and **M1.8** allocation-free fuzzy rerank plus a bench case
+  covering it (finding AA); **2. M2.0b**'s remaining DoD clauses — port-forward, the MCP
+  protocol, and the CLI binary end to end (finding AB); **3.** the **M1.8 kwok harness**
+  (the last aspirational number); **4. M2.1 browser UI**; **5. M2.2** per-lens action/health
+  surfaces; and the distribution tail (Homebrew tap, release-triggered site version bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson
   ("the shipped path must take it") worked: every v0.27.0 finding is genuinely closed, and
@@ -766,6 +818,28 @@ Milestones:
   and asserts every mutating variant carries `--confirm`, `--break-glass`, `gate_write`,
   and a distinct `Operation` would have failed the day `exec` was added — and will fail
   the day the next one is. Prefer that shape wherever a rule applies "to all X".
+
+- **What the v0.31.0 pass adds — partial fixes are the durable failure mode.** The
+  governance batch worked: the derive-don't-restate coverage test is exactly the right
+  shape and it will keep working. But two of this cycle's three findings are the *same*
+  shape as each other, and it is a shape worth naming.
+  - **Finding Z:** N covered `release` **and** `touch`; the fix landed `release`, the row
+    was marked *Fixed*, and `touch` was quietly dropped. Worse, the fix to M made the
+    missing half **live** — the LRU now runs, and without a recency signal it evicts the
+    hottest view.
+  - **Finding AA:** M1.8 removed a clone-per-frame from the table path; the identical
+    clone-per-keystroke on the search path was never in scope, and the benchmark that
+    guards the budget does not cover that path, so nothing noticed.
+
+  Both are cases where **a fix closed the instance it was written against and left the
+  class open**. The countermeasures are specific and cheap: when a finding names two
+  symptoms, the closing note must address both or explicitly defer one; and when a
+  performance fix lands, the *gate* must move with it — a budget guard that covers one
+  path while the hot path migrates elsewhere is worse than none, because it reports green.
+
+  Three cycles running, a written DoD clause has been only partially turned into a test
+  (`InformerManager::live()` boundedness twice, the fuzzy path now). The pattern is stable
+  enough to act on: **treat an unimplemented DoD clause as a failing test, not as prose.**
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the
