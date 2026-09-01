@@ -7,7 +7,8 @@ version.
 ## The three versioned contracts
 
 1. **WIT worlds** (WASM component-model plugin interface) — see ADR-0004.
-2. **Lens schema** (view-definition schema, YAML/CUE) — see ADR-0004, ADR-0012.
+2. **Lens schema** (view-definition schema, YAML — CUE authoring planned) — see
+   ADR-0004, ADR-0012.
 3. **MCP surface** (`kaptein mcp` tool schema) — see ADR-0010.
 
 Each carries its own `api_version`/schema version, bumped independently on a breaking

@@ -167,7 +167,7 @@ Key architectural decisions are recorded as **ADRs** in [`docs/adr/`](docs/adr/)
 declared, versioned way to add capability — and it always comes in one of three tiers,
 chosen data-first:
 
-1. ✅ **View definitions (lenses)** — declarative YAML/CUE binding a CRD to columns,
+1. ✅ **View definitions (lenses)** — declarative YAML binding a CRD to columns,
    status inference (scalar + Kubernetes-condition rules), and actions. No code,
    PR-reviewable, checked into Git. **Ships today** (the engine + a lens set + lens-driven
    TUI navigation). *(Per-lens health surfaces and panels are planned — M2.4+.)*
@@ -297,7 +297,7 @@ Two things nobody does properly, which Kaptein treats as first-class:
   instance types, hotplug
 
 ### 10. Workload lenses & extensions (data first, code second) — ✅ available
-Declarative **view definitions** (YAML or CUE) that bind a CRD to columns, status
+Declarative **view definitions** (YAML) that bind a CRD to columns, status
 inference, and actions — so Strimzi, KubeVirt, cert-manager, Keycloak,
 Tekton, Velero, Karpenter, and Knative are supported *without hardcoding anything*, and
 your teams can write their own for internal CRDs.
@@ -375,7 +375,7 @@ scales.** *(The WASM host + WIT worlds are 🛠️ planned, M2.6.)*
 | Headless / serve / agent | `axum` (HTTP/REST + gRPC-Web) + `tonic` (gRPC) |
 | Local persistence | `redb` or `sqlite` |
 | Extensibility | WASM component model (WIT) |
-| View definitions | YAML / CUE |
+| View definitions | YAML (CUE planned — ADR-0012) |
 | CLI | `clap` |
 
 ### Repository layout (planned)

@@ -147,7 +147,7 @@ watches with degradation to on-demand list (see ADR-0006).
 
 Three tiers, one `extension.yaml` manifest, data-first (see ADR-0004):
 
-1. View definitions (lenses) — declarative YAML/CUE, no code.
+1. View definitions (lenses) — declarative YAML, no code (CUE authoring planned).
 2. WASM component-model plugins (WIT) — sandboxed (fuel metering, memory cap,
    default-deny network/FS).
 3. Shell-out integrations — external binaries, graceful when absent.
