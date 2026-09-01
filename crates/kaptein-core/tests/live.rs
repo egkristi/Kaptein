@@ -741,7 +741,11 @@ async fn cordon_marks_node_unschedulable_then_uncordon_restores_it() {
     let uncordon = kaptein_core::nodes::uncordon(&client, &node_name, true)
         .await
         .expect("uncordon");
-    assert!(uncordon.message.contains("uncordoned"), "{}", uncordon.message);
+    assert!(
+        uncordon.message.contains("uncordoned"),
+        "{}",
+        uncordon.message
+    );
     let restored = nodes.get(&node_name).await.expect("get node");
     assert!(
         !is_unschedulable(&restored),
