@@ -26,7 +26,7 @@ pub mod versioned;
 pub use audit::{Actor, ActorKind, AuditEvent, Operation, Outcome, ResourceRef, Source};
 pub use diff::{DiffLine, UnifiedDiff, render_unified, unified_diff};
 pub use error::Error;
-pub use fuzzy::{FuzzyMatch, fuzzy_jump};
+pub use fuzzy::{FuzzyMatch, FuzzyRanked, fuzzy_jump, fuzzy_rank_indices};
 pub use lens::{
     ConditionRule, GroupVersionKind, LENS_SCHEMA_VERSION, LensAction, REDACTED_MARKER, RuleOp,
     StatusRule, ViewDefinition, evaluate_status, render_row, validate_viewdef,

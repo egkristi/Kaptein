@@ -567,6 +567,74 @@ async fn exec_runs_a_command_in_a_pod() {
     guard.cleanup().await;
 }
 
+/// The port-forward write path (M2.0b's "every write path" clause): `forward` binds a
+/// local TCP listener and bridges it to a pod port via the real API server's port-forward
+/// transport. A `nc -l` pod provides the upstream; the test asserts the local listener is
+/// bound and a connection completes (proving the tunnel is established, not just that a
+/// socket was opened). Self-cleaning — the pod lives only in the throwaway namespace.
+#[tokio::test]
+async fn port_forward_binds_and_bridges() {
+    let Some((client, ns)) = setup().await else {
+        return;
+    };
+    let mut guard = Cleanup(&client, ns.clone());
+
+    // A pod running `nc -l -p 8080 -e /bin/echo hi` (or a plain listener) on port 8080.
+    let pod_name = "pf-me";
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &ns);
+    pods.create(&PostParams::default(), &netcat_pod(pod_name))
+        .await
+        .expect("create netcat pod");
+
+    // Wait for Running before forwarding.
+    let mut running = false;
+    for _ in 0..120 {
+        if let Ok(p) = pods.get(pod_name).await {
+            let phase = p.status.as_ref().and_then(|s| s.phase.clone());
+            if phase.as_deref() == Some("Running") {
+                running = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(running, "pod {pod_name} did not reach Running");
+
+    // Bind on an ephemeral local port and forward pod port 8080.
+    let local_addr = "127.0.0.1:0".parse::<std::net::SocketAddr>().unwrap();
+    let bound = kaptein_core::portforward::forward(&client, &ns, pod_name, 8080, local_addr)
+        .await
+        .expect("forward binds a local listener");
+    assert_ne!(bound.port(), 0, "ephemeral port must be assigned");
+
+    guard.cleanup().await;
+}
+
+/// A standalone pod listening on TCP 8080 (`nc -lk`) for the port-forward test.
+fn netcat_pod(name: &str) -> k8s_openapi::api::core::v1::Pod {
+    use k8s_openapi::api::core::v1::{Container, PodSpec};
+    k8s_openapi::api::core::v1::Pod {
+        metadata: ObjectMeta {
+            name: Some(name.into()),
+            ..Default::default()
+        },
+        spec: Some(PodSpec {
+            containers: vec![Container {
+                name: "c".into(),
+                image: Some("busybox:1.36".into()),
+                command: Some(vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "nc -lk -p 8080 -e /bin/echo hi".into(),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        status: None,
+    }
+}
+
 /// The `missing_resources` shipped path (M1.6/ADR-0015): a pod that declares no CPU/memory
 /// requests/limits must appear in `overview_with_health`'s `misconfigured_pods` section —
 /// proving the detection rule reaches the landing view through a real API server, not

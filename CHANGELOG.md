@@ -4,6 +4,27 @@ All notable changes to Kaptein are documented in this file, kept in sync with re
 (see `docs/versioning.md`). The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Re-audit findings (v0.31.0):**
+  - **Z** — `InformerManager::touch` had no caller (finding N's second half), so the LRU
+    evicted the *oldest-registered* view — the one on screen — once the session-scoped cap
+    landed. `LivePlane::query` now touches the shared manager, and a new
+    `lru_evicts_the_coldest_not_the_hottest_view` DoD test asserts the hottest view
+    survives a full-cap eviction.
+  - **AA** — fuzzy-jump re-ranking deep-cloned the whole master list per keystroke (the
+    allocation pattern M1.8 just removed, reintroduced on the search path). `fuzzy_rerank`
+    now takes `&[TableRow]` and returns indices; jump mode renders from `jump_master` +
+    `jump_order`; `fuzzy_rank_indices` + an allocation-free `fuzzy_score` removed the
+    per-candidate allocations; and `benches/query.rs` now gates a fuzzy re-rank (4 ms vs
+    11 ms before).
+  - **AB** — M2.0b's live tier was missing port-forward; it now has
+    `port_forward_binds_and_bridges` against a throwaway `nc -l` pod. The MCP-protocol and
+    CLI-binary clauses are honestly narrowed out of the core live tier (they live in the
+    `kaptein-cli` binary crate, which core cannot depend on) and tracked as a CLI-level
+    integration tier rather than claimed.
+
 ## [0.31.0] - 2026-09-01
 
 ### Added

@@ -230,6 +230,10 @@ Milestones:
     indices (or `Vec<&TableRow>`), and **add a fuzzy-rerank case to `benches/query.rs`** so
     keystroke-to-frame is gated on the search path too — otherwise the same regression can
     land again without the gate noticing, which is what just happened.
+    *Fixed (v0.31.0 →): `fuzzy_rerank` takes `&[TableRow]` and returns `Vec<usize>`; jump
+    mode renders from `jump_master`+`jump_order` (no per-keystroke clone);
+    `fuzzy_rank_indices` + an allocation-free `fuzzy_score` removed the per-candidate
+    `String`/`Vec<char>`; and `benches/query.rs` gates a fuzzy re-rank (4 ms vs 11 ms).*
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
@@ -391,6 +395,8 @@ Milestones:
        cycles through others is *the view on screen*. The LRU inverts and evicts the
        hottest entry. Hook `informers.touch(&watch_key)` into `LivePlane::query` (the TUI
        already re-queries per revision change, so the hook point costs nothing).
+       *Fixed (v0.31.0 →): `LivePlane::query` now calls `informers.touch(&watch_key)`, and
+       `lru_evicts_the_coldest_not_the_hottest_view` asserts the hottest view survives.*
     3. **Reconcile removes but never adds.** `relist_and_reconcile` drops rows absent from
        the relist but never upserts rows present in the relist and missing from the plane,
        so objects **created during an outage stay invisible** until they next change — the
@@ -413,6 +419,9 @@ Milestones:
     consecutive cycle in which a written DoD clause was only partially turned into a
     test.** Close it by asserting the survivor: fill the cap, query view A, register a new
     view, and assert **A** is still live and the coldest one was evicted.
+    *Closed (v0.31.0 →): `lru_evicts_the_coldest_not_the_hottest_view` does exactly this —
+    it fills the cap, queries view A (touching it via `LivePlane::query`), registers a
+    third view, and asserts A survives and the coldest view is evicted.*
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -455,6 +464,17 @@ Milestones:
       single node is safe and disposable. Either cover them or update the rationale.
     Either close these or narrow the DoD text — marking M2.0b done against a subset is the
     failure mode this milestone exists to prevent.
+  - *Resolved (v0.31.0 →) — **port-forward covered; the DoD is narrowed for the other two.**
+    `port_forward_binds_and_bridges` now live-tests `core::portforward::forward` against a
+    throwaway `nc -l` pod (bound local listener on an ephemeral port). The **MCP protocol**
+    and the **CLI binary** are *deliberately* out of scope for `crates/kaptein-core/tests/
+    live.rs`: both live in the `kaptein-cli` binary crate (the MCP server is `mcp.rs`, the
+    audit-write and `--confirm`/`--break-glass` wiring are `main.rs`), which
+    `kaptein-core` cannot depend on without violating the one-directional layer rule. A
+    **CLI-level integration tier** (which can `assert_cmd` the built `kaptein` binary and
+    drive `mcp` over stdio) is the correct home for those two clauses and is tracked as a
+    follow-on, not claimed as done here. The M2.0b DoD text is amended to scope the
+    core live tier to the library write paths and name the CLI tier separately.*
 - **M2.1 Browser UI** — egui → wasm served by `serve`, same keymap; the native desktop
   packaging (code-signing, notarization, installers, auto-update) is deferred until
   after Phase 3a

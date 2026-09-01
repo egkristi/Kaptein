@@ -166,6 +166,31 @@ fn main() {
         eprintln!("REGRESSION: cold start {cold_ms} ms exceeds budget {COLD_START_BUDGET_MS} ms");
         std::process::exit(1);
     }
+
+    // Fuzzy re-rank (finding AA): the TUI's per-keystroke jump path ranks the whole store
+    // via `fuzzy_rank_indices` (no per-row allocation). This gates the *search* path's
+    // keystroke-to-frame latency, which the table-path query gate above did not see — the
+    // blind spot that let finding AA's clone-per-keystroke land unnoticed. Budget is the
+    // same 16 ms frame target: ranking 50k names must complete within one frame.
+    let names: Vec<String> = (0..ROWS).map(|i| format!("name-{i}")).collect();
+    let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    let rerank = Instant::now();
+    let ranked = kaptein_viewmodel::fuzzy_rank_indices(name_refs.iter().copied(), "ame-4");
+    let rerank_ms = rerank.elapsed().as_millis();
+    // Sanity: a subsequence query over "name-<n>" matches everything (all contain "ame-4"
+    // only if the digit matches — "ame-4" is a substring of "name-4", "name-40", "name-400"
+    // …), so assert a non-empty result to prove the path is exercised.
+    assert!(
+        !ranked.is_empty(),
+        "fuzzy re-rank over 50k names must match"
+    );
+    println!("fuzzy re-rank over {ROWS} names: {rerank_ms} ms");
+    if rerank_ms > P99_QUERY_BUDGET_MS {
+        eprintln!(
+            "REGRESSION: fuzzy re-rank {rerank_ms} ms exceeds budget {P99_QUERY_BUDGET_MS} ms"
+        );
+        std::process::exit(1);
+    }
 }
 
 /// Minimal block-on for a `MemPlane` query (the view-model is wasm-pure — no tokio here;

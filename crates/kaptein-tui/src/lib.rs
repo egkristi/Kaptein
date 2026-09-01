@@ -266,11 +266,13 @@ async fn run_event_loop(
     // grey-out"): computed once per (kind, namespace), so an action the operator is not
     // permitted to take is greyed out *before* they try it, not after a 403.
     let mut actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
-    // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query. The
-    // unfiltered list is preserved in `jump_master` so backspace can restore rows; its
-    // total is preserved separately so the status line stays correct while jumping.
+    // Fuzzy-jump mode: Some(query) means the user is typing a fuzzy query. The full
+    // snapshot is preserved in `jump_master` (a `Vec<TableRow>`), and `jump_order` is
+    // the ranked list of *indices* into it (best-first) — so a per-keystroke re-rank
+    // reorders indices rather than deep-cloning the whole master (finding AA).
     let mut jump_query: Option<String> = None;
     let mut jump_master: Vec<TableRow> = Vec::new();
+    let mut jump_order: Vec<usize> = Vec::new();
     // Command-palette mode: Some(query) means the palette is open (vim-style ':').
     let mut palette_query: Option<String> = None;
     // The last-observed MemPlane revision: the table is only re-queried (a full
@@ -342,18 +344,32 @@ async fn run_event_loop(
             let header = Block::default().title(status_line).borders(Borders::ALL);
             frame.render_widget(header, chunks[0]);
 
-            // `rows` is already the visible window (`query_plane` materializes only
-            // `[scroll, scroll+page_height)`, M1.8), so no sub-slicing is needed here —
-            // the table renders exactly the rows that were queried. In normal mode the
-            // selected row sits at `selected - scroll`; in jump mode `scroll == 0` and
-            // `selected` indexes `rows` directly (the fuzzy-ranked list).
+            // In **normal** mode `rows` is the visible window (`query_plane` materializes
+            // only `[scroll, scroll+page_height)`, M1.8) and the selected row sits at
+            // `selected - scroll`. In **jump** mode the ranked result is `jump_master`
+            // indexed by `jump_order` (indices, best-first — no per-keystroke clone), and
+            // `selected` indexes `jump_order` directly (`scroll == 0`).
             let in_jump = jump_query.is_some();
-            let selected_offset = if in_jump { selected } else { selected.saturating_sub(scroll) };
-            let table_rows: Vec<Row> = rows
+            let view_rows: Vec<&TableRow> = if in_jump {
+                // Borrow only the visible window of the ranked jump list (indices into
+                // `jump_master`, best-first) — no per-keystroke clone of the full set.
+                let start = scroll.min(jump_order.len());
+                let end = (scroll + page_height).min(jump_order.len()).max(start);
+                jump_order[start..end]
+                    .iter()
+                    .map(|&i| &jump_master[i])
+                    .collect()
+            } else {
+                // `rows` is already the visible window (`query_plane` materializes only
+                // `[scroll, scroll+page_height)`); borrow it directly.
+                rows.iter().collect()
+            };
+            let view_selected = selected.saturating_sub(scroll);
+            let table_rows: Vec<Row> = view_rows
                 .iter()
                 .enumerate()
                 .map(|(offset, r)| {
-                    let base = if offset == selected_offset {
+                    let base = if offset == view_selected {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
                         Style::default()
@@ -518,7 +534,14 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Char('j') | KeyCode::Down if palette_query.is_none() => {
-                    selected = (selected + 1).min(total.saturating_sub(1));
+                    // In jump mode the list is `jump_order` (ranked indices); otherwise
+                    // `total` rows of the windowed store.
+                    let list_len = if jump_query.is_some() {
+                        jump_order.len()
+                    } else {
+                        total
+                    };
+                    selected = (selected + 1).min(list_len.saturating_sub(1));
                     if selected >= scroll + page_height {
                         scroll = selected.saturating_add(1).saturating_sub(page_height);
                     }
@@ -576,7 +599,12 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Char('G') if palette_query.is_none() => {
-                    selected = total.saturating_sub(1);
+                    let list_len = if jump_query.is_some() {
+                        jump_order.len()
+                    } else {
+                        total
+                    };
+                    selected = list_len.saturating_sub(1);
                     scroll = selected.saturating_sub(page_height);
                     if jump_query.is_none() {
                         requery_and_assign(
@@ -683,19 +711,26 @@ async fn run_event_loop(
                 KeyCode::Char('d') if palette_query.is_none() => {
                     if action_is_forbidden(&actions, "describe") {
                         detail = Some("describe is forbidden by RBAC preflight.".into());
-                    } else if let Some(r) =
-                        selected_row(&rows, selected, scroll, jump_query.is_some())
-                    {
+                    } else if jump_query.is_some() {
+                        if let Some(r) = jump_selected_row(&jump_master, &jump_order, selected) {
+                            detail = describe(client, &kind, r).await.ok();
+                        }
+                    } else if let Some(r) = selected_row(&rows, selected, scroll, false) {
                         detail = describe(client, &kind, r).await.ok();
                     }
                 }
                 KeyCode::Char('i') if palette_query.is_none() => {
                     if action_is_forbidden(&actions, "diagnose") {
                         detail = Some("diagnose is forbidden by RBAC preflight.".into());
-                    } else if kind.is_pods()
-                        && let Some(r) = selected_row(&rows, selected, scroll, jump_query.is_some())
-                    {
-                        detail = diagnose(client, r).await.ok();
+                    } else if kind.is_pods() {
+                        let selected: Option<&TableRow> = if jump_query.is_some() {
+                            jump_selected_row(&jump_master, &jump_order, selected)
+                        } else {
+                            selected_row(&rows, selected, scroll, false)
+                        };
+                        if let Some(r) = selected {
+                            detail = diagnose(client, r).await.ok();
+                        }
                     } else {
                         detail = Some("Diagnostics are available for pods only.".into());
                     }
@@ -707,20 +742,21 @@ async fn run_event_loop(
                     let (master, master_total) =
                         query_plane(&plane, &kind, sort_key, sort_descending, 0, 50_000).await?;
                     jump_master = master;
-                    rows = jump_master.clone();
+                    // Empty query ranks everything in input order (indices 0..n).
+                    jump_order = (0..jump_master.len()).collect();
                     total = master_total;
                     selected = 0;
                     scroll = 0;
                     jump_query = Some(String::new());
                 }
                 KeyCode::Char(c) if jump_query.is_some() && c != '/' => {
-                    // In jump mode: append typed chars to the query and re-rank rows from
-                    // the *master* list (not the already-filtered one), so backspace works.
+                    // In jump mode: append typed chars to the query and re-rank *indices*
+                    // into the master list (not a deep-clone of it), so backspace works.
                     if let Some(q) = jump_query.as_mut() {
                         q.push(c);
                     }
                     if let Some(q) = jump_query.as_deref() {
-                        rows = fuzzy_rerank(jump_master.clone(), q);
+                        jump_order = fuzzy_rerank(&jump_master, q);
                         selected = 0;
                         scroll = 0;
                     }
@@ -730,7 +766,7 @@ async fn run_event_loop(
                         q.pop();
                     }
                     if let Some(q) = jump_query.as_deref() {
-                        rows = fuzzy_rerank(jump_master.clone(), q);
+                        jump_order = fuzzy_rerank(&jump_master, q);
                         selected = 0;
                         scroll = 0;
                     }
@@ -739,8 +775,8 @@ async fn run_event_loop(
                     // Exit jump mode, keeping the current (fuzzy-ranked) selection. Find
                     // the selected row's *absolute* index in the sorted store (one full
                     // query), then re-window to it.
-                    let chosen_name =
-                        selected_row(&rows, selected, 0, true).map(|r| r.name.clone());
+                    let chosen_name = jump_selected_row(&jump_master, &jump_order, selected)
+                        .map(|r| r.name.clone());
                     jump_query = None;
                     if let Some(name) = chosen_name {
                         let (full, full_total) =
@@ -818,20 +854,17 @@ fn sort_label(column_ids: &[String], key: SortColumn, descending: bool) -> Strin
 
 /// Re-rank rows by fuzzy-jump score against `query`, dropping non-matches. Uses the
 /// shared view-model matcher (renderer-agnostic semantic, ADR-0005).
-fn fuzzy_rerank(rows: Vec<TableRow>, query: &str) -> Vec<TableRow> {
+///
+/// **Allocation-free on the hot path (finding AA):** it takes `&[TableRow]` and returns
+/// `Vec<usize>` — indices into the input, ordered best-first — so a per-keystroke re-rank
+/// no longer deep-clones the whole master list (`{ String, String, Vec<String> }` per
+/// row). The caller holds the master list and materializes only what it renders.
+fn fuzzy_rerank(rows: &[TableRow], query: &str) -> Vec<usize> {
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-    let ranked = kaptein_viewmodel::fuzzy_jump(names, query);
-    let order: std::collections::HashMap<&str, usize> = ranked
-        .iter()
-        .enumerate()
-        .map(|(i, m)| (m.candidate.as_str(), i))
-        .collect();
-    let mut out: Vec<TableRow> = rows
+    kaptein_viewmodel::fuzzy_rank_indices(names, query)
         .into_iter()
-        .filter(|r| order.contains_key(r.name.as_str()))
-        .collect();
-    out.sort_by_key(|r| order.get(r.name.as_str()).copied().unwrap_or(usize::MAX));
-    out
+        .map(|m| m.index)
+        .collect()
 }
 
 /// Advance the sort column through the plane's schema (wrapping).
@@ -1141,6 +1174,17 @@ fn selected_row(
     }
 }
 
+/// The selected row in **jump mode**: `jump_order` maps a rank position to an index into
+/// `jump_master`, and `selected` is the rank position. Pure geometry (no cloning), so the
+/// per-keystroke re-rank path carries no per-row allocation.
+fn jump_selected_row<'a>(
+    master: &'a [TableRow],
+    order: &[usize],
+    selected: usize,
+) -> Option<&'a TableRow> {
+    order.get(selected).and_then(|&i| master.get(i))
+}
+
 /// Re-query the visible window after a revision change, clamping the viewport so the
 /// selection stays valid against the new `total`. Returns `(rows, total, selected, scroll)`.
 async fn requery_window(
@@ -1349,5 +1393,31 @@ mod tests {
             Some("y")
         );
         assert_eq!(selected_row(&rows, 9, 0, true), None);
+    }
+
+    #[test]
+    fn jump_selected_row_resolves_order_indices_into_master() {
+        let master = vec![trow("a"), trow("b"), trow("c")];
+        // order [2, 0, 1] → rank 0 is "c", rank 1 is "a", rank 2 is "b".
+        let order = vec![2usize, 0, 1];
+        assert_eq!(
+            jump_selected_row(&master, &order, 0).map(|r| r.name.as_str()),
+            Some("c")
+        );
+        assert_eq!(
+            jump_selected_row(&master, &order, 1).map(|r| r.name.as_str()),
+            Some("a")
+        );
+        assert_eq!(jump_selected_row(&master, &order, 9), None);
+    }
+
+    #[test]
+    fn fuzzy_rerank_returns_indices_best_first() {
+        let master = vec![trow("nginx-ingress"), trow("nagios"), trow("zzz")];
+        let order = fuzzy_rerank(&master, "nginx");
+        assert_eq!(order, vec![0usize]); // only "nginx-ingress" matches
+        // An empty query matches everything in input order.
+        let all = fuzzy_rerank(&master, "");
+        assert_eq!(all, vec![0usize, 1, 2]);
     }
 }

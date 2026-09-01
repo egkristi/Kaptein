@@ -707,6 +707,12 @@ impl kaptein_viewmodel::DataPlane for LivePlane {
         &self,
         query: &kaptein_viewmodel::Query,
     ) -> Result<kaptein_viewmodel::Page, kaptein_viewmodel::Error> {
+        // Refresh the informer's recency signal (finding Z): a live view that is
+        // queried is "hot", so its watch slot must not be the one the LRU evicts. The
+        // TUI already re-queries on every revision change, so this hook costs nothing
+        // and fixes the LRU inversion where `min_by_key(last_touched)` otherwise picked
+        // the oldest-*registered* — i.e. the view on screen — as the coldest.
+        self.informers.touch(&self.watch_key());
         self.mem.query(query).await
     }
 
@@ -1061,5 +1067,55 @@ mod tests {
         let c = make("ns-c");
         assert_eq!(shared.register(c.watch_key()), Registration::Granted);
         assert_eq!(shared.live(), 2);
+    }
+
+    /// **M2.0c DoD (finding Z), made falsifiable.** The LRU's recency signal must come
+    /// from *use*, not registration order. `LivePlane::query` touches the shared manager,
+    /// so when the cap is full and a new view is registered, the **most-recently-queried**
+    /// view survives eviction and the coldest (never-queried) one is evicted — the
+    /// inverse of the pre-Z behaviour, where `min_by_key(last_touched)` picked the
+    /// oldest-*registered* view (the one on screen).
+    #[tokio::test]
+    async fn lru_evicts_the_coldest_not_the_hottest_view() {
+        use kaptein_viewmodel::DataPlane as _;
+        let policy = kaptein_core::informer::InformerPolicy {
+            max_watches: 2,
+            idle_ttl: std::time::Duration::from_secs(60),
+        };
+        let shared = std::sync::Arc::new(kaptein_core::informer::InformerManager::new(policy));
+
+        let make = |ns: &str| {
+            LivePlane::with_shared_informers(
+                dummy_client(),
+                pod_gvk_namespaced(),
+                Some(ns.to_string()),
+                None,
+                shared.clone(),
+            )
+        };
+
+        use kaptein_core::informer::Registration;
+        let a = make("ns-a");
+        let b = make("ns-b");
+        assert_eq!(shared.register(a.watch_key()), Registration::Granted);
+        assert_eq!(shared.register(b.watch_key()), Registration::Granted);
+        assert_eq!(shared.live(), 2);
+
+        // Touch A (it is the view on screen): its recency now beats B's.
+        a.query(&kaptein_viewmodel::Query::default())
+            .await
+            .expect("query touches the informer");
+
+        // A third view is admitted; the LRU must evict B (the coldest — never queried),
+        // not A (the hottest).
+        let c = make("ns-c");
+        assert_eq!(shared.register(c.watch_key()), Registration::Granted);
+        assert_eq!(shared.live(), 2, "cap must stay at 2");
+        // A is still live (its recency protected it); B is gone.
+        assert!(
+            shared.touch(&a.watch_key()),
+            "A (hottest) must survive eviction"
+        );
+        assert!(!shared.touch(&b.watch_key()), "B (coldest) must be evicted");
     }
 }
