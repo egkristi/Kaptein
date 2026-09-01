@@ -6,6 +6,19 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+- **M2.2 — per-lens health checks (data model + evaluation + schema).** The lens schema v1
+  now declares a `health` array: each check is a predicate (`id`, `label_key`, `field`,
+  `op`, `value`, `level`) that must hold for the resource to be healthy. `evaluate_health`
+  returns a `HealthFinding` per failing check (many at once, unlike the single-status
+  `evaluate_status`), and an absent field counts as failing (a resource that cannot be
+  verified is not healthy). `validate_viewdef` enforces unique ids, dotted label keys,
+  valid field paths, and operator/value type coherence. Both JSON Schemas (the embedded
+  `VIEWDEF_SCHEMA` and `extensions/viewdef.schema.json`) gained the `health` property, and
+  `kaptein viewdef render` now also prints a lens's health findings against the fixture.
+  This closes the earlier "health checks" doc-vs-code gap in the data model (the per-lens
+  *surface* that renders findings remains M2.4+).
+
 ### Fixed
 - **Docs — lens capability overclaim (README).** The README advertised lenses as binding a
   CRD to "panels" and "health checks" as though those ship today, but lens schema v1

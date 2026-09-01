@@ -869,6 +869,17 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             let json = serde_json::to_string_pretty(&row)
                 .map_err(|e| kaptein_core::Error::Internal(format!("cannot serialize row: {e}")))?;
             println!("{json}");
+
+            // Health checks (M2.2): evaluate every declared check and print a finding per
+            // failure, so lens authors can verify their health predicates against a fixture
+            // without a live cluster — the same `evaluate_health` a frontend uses.
+            if !vd.health.is_empty() {
+                let findings = kaptein_viewmodel::evaluate_health(&vd, &resource_value);
+                let health_json = serde_json::to_string_pretty(&findings).map_err(|e| {
+                    kaptein_core::Error::Internal(format!("cannot serialize health: {e}"))
+                })?;
+                println!("{health_json}");
+            }
             Ok(())
         }
         Command::Extension { command } => match command {
@@ -1993,6 +2004,19 @@ mod tests {
         );
     }
 
+    /// The bundled JSON Schema must declare the `health` property (per-lens health checks)
+    /// — if the Rust `HealthCheck` type is added but the schema omits it, a JSON-Schema
+    /// validation would reject a lens the Rust validator accepts.
+    #[test]
+    fn bundled_schema_declares_health() {
+        let schema = crate::schema::VIEWDEF_SCHEMA;
+        let value: serde_json::Value = serde_json::from_str(schema).expect("schema is valid JSON");
+        assert!(
+            value.pointer("/properties/health").is_some(),
+            "viewdef.schema.json must declare a health property"
+        );
+    }
+
     /// A condition-based lens must validate and deserialize (Kubernetes-condition
     /// status inference is how the hardest lenses — Strimzi, KubeVirt, cert-manager —
     /// signal readiness; ADR-0012).
@@ -2012,6 +2036,33 @@ mod tests {
             kaptein_viewmodel::evaluate_status(&vd, &ready),
             Some(kaptein_viewmodel::StatusLevel::Ok)
         );
+    }
+
+    /// A lens with health checks must validate, deserialize, and evaluate — a resource
+    /// that fails two checks yields two findings, a healthy one yields none.
+    #[test]
+    fn health_lens_validates_and_evaluates() {
+        let yaml = "id: com.kaptein.cnpg-lens\napi_version: 1\ntarget: {group: postgresql.cnpg.io, version: v1, kind: Cluster}\ncolumns: [{id: name, header_key: col.name, kind: text, sortable: true, field: metadata.name}]\nhealth: [{id: ready-instances, label_key: health.ready-instances, field: status.readyInstances, op: gte, value: 3, level: error}, {id: replication-lag, label_key: health.replication-lag, field: status.replicationLag, op: lt, value: 10, level: warning}]\n";
+        let value: serde_json::Value = serde_yaml::from_str(yaml).expect("lens is valid YAML");
+        let vd: kaptein_viewmodel::ViewDefinition =
+            serde_json::from_value(value).expect("lens deserializes");
+        assert!(
+            kaptein_viewmodel::validate_viewdef(&vd).is_empty(),
+            "health lens must be valid"
+        );
+        // readyInstances=2 fails; replicationLag=4 passes.
+        let failing = serde_json::json!({
+            "status": {"readyInstances": 2, "replicationLag": 4}
+        });
+        let findings = kaptein_viewmodel::evaluate_health(&vd, &failing);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id, "ready-instances");
+        assert_eq!(findings[0].level, kaptein_viewmodel::StatusLevel::Error);
+        // Both pass.
+        let healthy = serde_json::json!({
+            "status": {"readyInstances": 3, "replicationLag": 4}
+        });
+        assert!(kaptein_viewmodel::evaluate_health(&vd, &healthy).is_empty());
     }
 
     /// The example lens must validate cleanly against the real validator (it is the

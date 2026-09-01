@@ -103,6 +103,45 @@ pub struct ConditionRule {
     pub level: crate::render::StatusLevel,
 }
 
+/// A health check a lens declares: a predicate (`field` `op` `value`) that must hold for
+/// the resource to be considered healthy, plus the severity to surface when it does
+/// **not** hold. Unlike [`StatusRule`] (which picks a *single* status level per resource,
+/// first match wins), a lens can declare **many** health checks, each evaluated
+/// independently — so a CNPG Cluster can be simultaneously "not enough ready instances"
+/// (error) *and* "replication lag over threshold" (warning), and both surface.
+///
+/// The predicate is the *healthy* condition: when it holds, the check emits nothing;
+/// when it fails (or the field is absent — a resource that cannot be verified is not
+/// healthy), the check emits a [`HealthFinding`] at [`Self::level`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HealthCheck {
+    /// Stable check id, e.g. `"ready-instances"`.
+    pub id: String,
+    /// Message key resolved by the frontend for i18n, e.g. `"health.ready-instances"`.
+    pub label_key: String,
+    /// Dotted JSON path the check asserts on, e.g. `"status.readyInstances"`.
+    pub field: String,
+    /// The comparison that must hold for the resource to be healthy.
+    pub op: RuleOp,
+    /// The value the field is compared against (the healthy threshold).
+    pub value: serde_json::Value,
+    /// The severity surfaced when the check fails.
+    pub level: crate::render::StatusLevel,
+}
+
+/// A failing health check: the check's id, its i18n label key, and the severity it
+/// declares. Emitted by [`evaluate_health`] for each check whose predicate does not hold.
+/// Passing checks emit nothing, so a healthy resource yields an empty list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HealthFinding {
+    /// The check's stable id (e.g. `"ready-instances"`).
+    pub id: String,
+    /// The check's i18n label key.
+    pub label_key: String,
+    /// The severity the check declares for a failure.
+    pub level: crate::render::StatusLevel,
+}
+
 /// An action a lens declares. This is the lens-native form (snake_case `state`) — it
 /// maps to the render contract's `semantic::Action` at evaluation time. It is a separate
 /// type so the lens schema stays its own clean, user-authored contract.
@@ -142,6 +181,10 @@ pub struct ViewDefinition {
     /// `status` (first match wins within the whole sequence).
     #[serde(default)]
     pub conditions: Vec<ConditionRule>,
+    /// Optional health checks, each evaluated independently (a resource can fail many at
+    /// once — see [`HealthCheck`]).
+    #[serde(default)]
+    pub health: Vec<HealthCheck>,
     /// Actions this lens makes available, with their RBAC-preflight state.
     #[serde(default)]
     pub actions: Vec<LensAction>,
@@ -290,6 +333,49 @@ pub fn validate_viewdef(vd: &ViewDefinition) -> Vec<String> {
                 "conditions[{i}].status {:?}: must be one of \"True\", \"False\", \"Unknown\"",
                 rule.status
             ));
+        }
+    }
+
+    // Health checks: ids must be unique and non-empty; label keys must be dotted i18n
+    // keys; the field must be a dotted path; numeric ops need a numeric value and
+    // `contains` needs a string (the same predicate rules as `status`).
+    let mut seen_health = std::collections::HashSet::new();
+    for (i, check) in vd.health.iter().enumerate() {
+        if check.id.trim().is_empty() || !seen_health.insert(check.id.as_str()) {
+            problems.push(format!(
+                "health[{i}]: duplicate or empty check id {:?}",
+                check.id
+            ));
+        }
+        if !valid_header_key(&check.label_key) {
+            problems.push(format!(
+                "health[{i}].label_key {:?}: must be a dotted i18n key (e.g. \"health.ready\")",
+                check.label_key
+            ));
+        }
+        if !valid_field_path(&check.field) {
+            problems.push(format!(
+                "health[{i}].field {:?}: not a dotted JSON path",
+                check.field
+            ));
+        }
+        match check.op {
+            RuleOp::Gt | RuleOp::Gte | RuleOp::Lt | RuleOp::Lte => {
+                if !check.value.is_number() {
+                    problems.push(format!(
+                        "health[{i}].value: a numeric operator ({:?}) needs a numeric value",
+                        check.op
+                    ));
+                }
+            }
+            RuleOp::Contains => {
+                if !check.value.is_string() {
+                    problems.push(format!(
+                        "health[{i}].value: `contains` needs a string value"
+                    ));
+                }
+            }
+            RuleOp::Eq | RuleOp::Ne => {}
         }
     }
 
@@ -509,18 +595,46 @@ fn condition_matches(rule: &ConditionRule, resource: &serde_json::Value) -> bool
 }
 
 fn rule_matches(rule: &StatusRule, resource: &serde_json::Value) -> bool {
-    let Some(actual) = resolve_field(resource, &rule.field) else {
+    predicate_holds(&rule.field, rule.op, &rule.value, resource)
+}
+
+/// Evaluate a lens's health checks against a resource, returning a finding for every
+/// check whose predicate does **not** hold (a failed check is a finding; an absent field
+/// is also a failure — a resource that cannot be verified is not healthy). Passing checks
+/// emit nothing, so a healthy resource yields an empty list.
+pub fn evaluate_health(vd: &ViewDefinition, resource: &serde_json::Value) -> Vec<HealthFinding> {
+    vd.health
+        .iter()
+        .filter(|check| !predicate_holds(&check.field, check.op, &check.value, resource))
+        .map(|check| HealthFinding {
+            id: check.id.clone(),
+            label_key: check.label_key.clone(),
+            level: check.level,
+        })
+        .collect()
+}
+
+/// The shared predicate shared by [`StatusRule`] and [`HealthCheck`]: does `field` `op`
+/// `value` hold against `resource`? An absent field never holds. Numeric comparisons use
+/// `i64` (non-numeric operands never match); `contains` is substring on strings.
+fn predicate_holds(
+    field: &str,
+    op: RuleOp,
+    value: &serde_json::Value,
+    resource: &serde_json::Value,
+) -> bool {
+    let Some(actual) = resolve_field(resource, field) else {
         return false;
     };
-    match rule.op {
-        RuleOp::Eq => actual == &rule.value,
-        RuleOp::Ne => actual != &rule.value,
+    match op {
+        RuleOp::Eq => actual == value,
+        RuleOp::Ne => actual != value,
         RuleOp::Gt | RuleOp::Gte | RuleOp::Lt | RuleOp::Lte => {
             // Numeric comparison; non-numeric operands never match.
-            let (Some(a), Some(b)) = (actual.as_i64(), rule.value.as_i64()) else {
+            let (Some(a), Some(b)) = (actual.as_i64(), value.as_i64()) else {
                 return false;
             };
-            match rule.op {
+            match op {
                 RuleOp::Gt => a > b,
                 RuleOp::Gte => a >= b,
                 RuleOp::Lt => a < b,
@@ -528,7 +642,7 @@ fn rule_matches(rule: &StatusRule, resource: &serde_json::Value) -> bool {
                 _ => unreachable!(),
             }
         }
-        RuleOp::Contains => match (actual.as_str(), rule.value.as_str()) {
+        RuleOp::Contains => match (actual.as_str(), value.as_str()) {
             (Some(a), Some(b)) => a.contains(b),
             _ => false,
         },
@@ -648,6 +762,7 @@ mod tests {
             columns: vec![col("name"), status_col("status")],
             status: vec![example_status_rule()],
             conditions: vec![],
+            health: vec![],
             actions: vec![action("describe")],
         }
     }
@@ -886,6 +1001,139 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_health_emits_a_finding_per_failing_check() {
+        let mut vd = valid();
+        vd.health = vec![
+            HealthCheck {
+                id: "ready-instances".into(),
+                label_key: "health.ready-instances".into(),
+                field: "status.readyInstances".into(),
+                op: RuleOp::Gte,
+                value: serde_json::json!(3),
+                level: crate::render::StatusLevel::Error,
+            },
+            HealthCheck {
+                id: "replication-lag".into(),
+                label_key: "health.replication-lag".into(),
+                field: "status.replicationLag".into(),
+                op: RuleOp::Lt,
+                value: serde_json::json!(10),
+                level: crate::render::StatusLevel::Warning,
+            },
+        ];
+        // readyInstances=2 (<3 → fails), replicationLag=4 (<10 → passes).
+        let resource = serde_json::json!({
+            "status": {"readyInstances": 2, "replicationLag": 4}
+        });
+        let findings = evaluate_health(&vd, &resource);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id, "ready-instances");
+        assert_eq!(findings[0].label_key, "health.ready-instances");
+        assert_eq!(findings[0].level, crate::render::StatusLevel::Error);
+    }
+
+    #[test]
+    fn evaluate_health_treats_absent_field_as_failing() {
+        let mut vd = valid();
+        vd.health = vec![HealthCheck {
+            id: "ready-instances".into(),
+            label_key: "health.ready-instances".into(),
+            field: "status.readyInstances".into(),
+            op: RuleOp::Gte,
+            value: serde_json::json!(3),
+            level: crate::render::StatusLevel::Error,
+        }];
+        // No `status.readyInstances` → the check cannot be verified → not healthy.
+        let findings = evaluate_health(&vd, &serde_json::json!({"status": {}}));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id, "ready-instances");
+    }
+
+    #[test]
+    fn evaluate_health_returns_empty_when_all_checks_pass() {
+        let mut vd = valid();
+        vd.health = vec![HealthCheck {
+            id: "ready".into(),
+            label_key: "health.ready".into(),
+            field: "status.phase".into(),
+            op: RuleOp::Eq,
+            value: serde_json::json!("ClusterIsReady"),
+            level: crate::render::StatusLevel::Error,
+        }];
+        let findings = evaluate_health(
+            &vd,
+            &serde_json::json!({"status": {"phase": "ClusterIsReady"}}),
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn health_check_validation_flags_bad_shape() {
+        let mut vd = valid();
+        vd.health = vec![
+            HealthCheck {
+                id: "dup".into(),
+                label_key: "health.dup".into(),
+                field: "status.x".into(),
+                op: RuleOp::Eq,
+                value: serde_json::json!(1),
+                level: crate::render::StatusLevel::Error,
+            },
+            HealthCheck {
+                id: "dup".into(),
+                label_key: "health.dup".into(),
+                field: "status.x".into(),
+                op: RuleOp::Eq,
+                value: serde_json::json!(1),
+                level: crate::render::StatusLevel::Error,
+            },
+        ];
+        let problems = validate_viewdef(&vd);
+        assert!(problems.iter().any(|p| p.contains("health[1]")));
+
+        let mut vd2 = valid();
+        vd2.health = vec![HealthCheck {
+            id: "ready".into(),
+            label_key: "no-dot".into(),
+            field: "status.x".into(),
+            op: RuleOp::Eq,
+            value: serde_json::json!(1),
+            level: crate::render::StatusLevel::Error,
+        }];
+        assert!(
+            validate_viewdef(&vd2)
+                .iter()
+                .any(|p| p.contains("label_key"))
+        );
+
+        let mut vd3 = valid();
+        vd3.health = vec![HealthCheck {
+            id: "ready".into(),
+            label_key: "health.ready".into(),
+            field: ".bad.path".into(),
+            op: RuleOp::Eq,
+            value: serde_json::json!(1),
+            level: crate::render::StatusLevel::Error,
+        }];
+        assert!(
+            validate_viewdef(&vd3)
+                .iter()
+                .any(|p| p.contains("not a dotted JSON path"))
+        );
+
+        let mut vd4 = valid();
+        vd4.health = vec![HealthCheck {
+            id: "ready".into(),
+            label_key: "health.ready".into(),
+            field: "status.x".into(),
+            op: RuleOp::Gt,
+            value: serde_json::json!("many"),
+            level: crate::render::StatusLevel::Error,
+        }];
+        assert!(validate_viewdef(&vd4).iter().any(|p| p.contains("numeric")));
+    }
+
+    #[test]
     fn invalid_condition_status_is_flagged() {
         let mut vd = valid();
         vd.conditions = vec![ConditionRule {
@@ -987,6 +1235,7 @@ mod tests {
                 level: crate::render::StatusLevel::Ok,
             }],
             conditions: vec![],
+            health: vec![],
             actions: vec![],
         };
 
@@ -1033,6 +1282,7 @@ mod tests {
             }],
             status: vec![],
             conditions: vec![],
+            health: vec![],
             actions: vec![],
         };
         // No uid → ns/name identity; no matching rule → Info "unknown" chip.
@@ -1073,6 +1323,7 @@ mod tests {
             }],
             status: vec![],
             conditions: vec![],
+            health: vec![],
             actions: vec![],
         };
         // A Secret whose `data.password` was already masked by kaptein-core::redact.
@@ -1105,6 +1356,7 @@ mod tests {
             }],
             status: vec![],
             conditions: vec![],
+            health: vec![],
             actions: vec![],
         };
         let resource = serde_json::json!({

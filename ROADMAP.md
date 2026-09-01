@@ -497,18 +497,24 @@ Milestones:
     `kaptein viewdef validate` command so lenses are reviewable in PRs
   - **Status: schema + validation + lifecycle landed, lens set shipped, rendering done.**
     `kaptein-viewmodel::lens` defines the versioned lens data model (`ViewDefinition`,
-    `GroupVersionKind`, `StatusRule`/`RuleOp`, `ConditionRule`, `LensAction`),
-    `validate_viewdef`, `evaluate_status` (field-path resolution + scalar **and
-    Kubernetes-condition** rule evaluation), and `render_row` (maps a lens + a resource
-    into the render contract's `Row` — the status-rule *rendering* half, with a
-    data-bound `Column.field` so a column's value source is explicit, not implicit, per
-    ADR-0012); `kaptein viewdef validate -f` parses a lens and reports problems;
-    `kaptein viewdef schema` emits the JSON Schema; `kaptein viewdef render` renders a
-    lens against a live/fixture resource; the `extension.yaml` manifest +
-    `kaptein extension {list,validate,enable,disable}` lifecycle (ADR-0004) are
-    implemented; the example lens set ships under `extensions/` — CNPG, Strimzi Kafka,
-    KubeVirt, cert-manager, Keycloak, Tekton, Velero, Karpenter, Knative (all
-    MIT/Apache-2.0).
+    `GroupVersionKind`, `StatusRule`/`RuleOp`, `ConditionRule`, `HealthCheck`/`HealthFinding`,
+    `LensAction`), `validate_viewdef`, `evaluate_status` (field-path resolution + scalar
+    **and Kubernetes-condition** rule evaluation), `evaluate_health` (per-check findings,
+    many-at-once — a resource can fail several checks and all surface), and `render_row`
+    (maps a lens + a resource into the render contract's `Row` — the status-rule
+    *rendering* half, with a data-bound `Column.field` so a column's value source is
+    explicit, not implicit, per ADR-0012); `kaptein viewdef validate -f` parses a lens and
+    reports problems; `kaptein viewdef schema` emits the JSON Schema; `kaptein viewdef
+    render` renders a lens against a live/fixture resource *and* prints its health
+    findings; the `extension.yaml` manifest + `kaptein extension
+    {list,validate,enable,disable}` lifecycle (ADR-0004) are implemented; the example lens
+    set ships under `extensions/` — CNPG, Strimzi Kafka, KubeVirt, cert-manager, Keycloak,
+    Tekton, Velero, Karpenter, Knative (all MIT/Apache-2.0). *(v0.31.0 →: per-lens
+    **health checks** landed in the data model + both JSON Schemas — the `health` array
+    declares predicates (`field`/`op`/`value`) that must hold, each with its own severity,
+    and `evaluate_health` returns a `HealthFinding` per failing check; the schema's
+    `additionalProperties: false` now also covers `health`, closing the earlier
+    "health-checks" doc-vs-code gap.)*
   - **Resolved (v0.27.0 re-audit → lens navigation):** the CLI consumes a lens —
     `kaptein get --gvk <gvk> --lens <file>` lists full objects
     (`core::discovery::list_objects`) and renders each through `render_row` (lens columns +
@@ -533,7 +539,8 @@ Milestones:
     `SelfSubjectRulesReview` for the target GVK (pluralized with kube's own pluralizer) and
     downgrades in place — the **shipped path** — and the TUI renders the forbidden marker
     and refuses the `d`/`i` bindings for a greyed-out action. **Still open (Phase 2+):**
-    per-lens action/health surfaces (M2.4+), and the browser UI's lens navigation (M2.1).
+    per-lens health *surfaces* (rendering findings in a frontend panel, M2.4+ — the
+    data-model + evaluation half landed here), and the browser UI's lens navigation (M2.1).
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only

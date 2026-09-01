@@ -69,6 +69,22 @@
         }
       }
     },
+    "health": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label_key", "field", "op", "value", "level"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Stable health-check id, e.g. \"ready-instances\"." },
+          "label_key": { "type": "string", "description": "Dotted i18n key, e.g. \"health.ready-instances\"." },
+          "field": { "type": "string", "description": "Dotted JSON path the check asserts on, e.g. \"status.readyInstances\"." },
+          "op": { "type": "string", "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains"] },
+          "value": { "description": "The healthy threshold to compare against (string/number/bool)." },
+          "level": { "type": "string", "enum": ["ok", "info", "warning", "error", "pending"], "description": "Severity surfaced when the check fails." }
+        }
+      }
+    },
     "actions": {
       "type": "array",
       "items": {
