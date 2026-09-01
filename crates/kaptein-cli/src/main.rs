@@ -591,6 +591,13 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 )
                 .await?;
                 for obj in objs {
+                    // Redact *before* rendering (M1.7): a lens column bound to a
+                    // secret-shaped field must read the mask, never plaintext. The TUI's
+                    // `map_object_with` redacts a copy of the object first; this CLI path
+                    // serializes `obj` directly, so it must apply the same choke point —
+                    // otherwise `kaptein get --lens` on a Secret lens leaks `data`/`stringData`.
+                    let mut obj = obj;
+                    kaptein_core::redact::redact_object(&mut obj);
                     let value = serde_json::to_value(&obj).map_err(|e| {
                         kaptein_core::Error::Internal(format!("serialize object: {e}"))
                     })?;
@@ -2078,6 +2085,55 @@ mod tests {
         assert!(
             kaptein_viewmodel::validate_viewdef(&vd).is_empty(),
             "example lens must be valid"
+        );
+    }
+
+    /// M1.7 DoD, the CLI `get --lens` path: a lens bound to a secret-shaped field must
+    /// not leak plaintext. The CLI path serializes the fetched `DynamicObject` directly
+    /// to JSON and feeds it to `render_row`, so it must apply `redact_object` first — the
+    /// same choke point the TUI's `map_object_with` uses. This asserts a Secret's `data`
+    /// reaches the row as the typed `Cell::Redacted`, never plaintext.
+    #[test]
+    fn get_lens_path_redacts_secrets_before_render() {
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+        use kube::core::{DynamicObject, TypeMeta};
+
+        let lens: kaptein_viewmodel::ViewDefinition = serde_json::from_value(serde_json::json!({
+            "id": "com.example.secret-lens",
+            "api_version": 1,
+            "target": { "group": "", "version": "v1", "kind": "Secret" },
+            "columns": [
+                { "id": "name", "header_key": "col.name", "kind": "text", "sortable": true, "field": "metadata.name" },
+                { "id": "password", "header_key": "col.password", "kind": "text", "sortable": true, "field": "data.password" }
+            ]
+        }))
+        .expect("valid lens");
+
+        // A Secret object as `list_objects_with_selector` returns it (plaintext data).
+        let mut obj = DynamicObject {
+            types: Some(TypeMeta {
+                api_version: "v1".into(),
+                kind: "Secret".into(),
+            }),
+            metadata: ObjectMeta {
+                name: Some("db".into()),
+                namespace: Some("ns".into()),
+                ..Default::default()
+            },
+            data: serde_json::json!({
+                "data": { "password": "aHVudGVyMg==" }
+            }),
+        };
+
+        // The CLI path: redact, then render. Without the redact call, render_row would
+        // emit `Cell::Text { value: "aHVudGVyMg==" }` — the plaintext secret.
+        kaptein_core::redact::redact_object(&mut obj);
+        let value = serde_json::to_value(&obj).expect("serialize");
+        let row = kaptein_viewmodel::render_row(&lens, &value);
+        assert_eq!(
+            row.cells[1],
+            kaptein_viewmodel::Cell::Redacted,
+            "the CLI get --lens path must redact before render_row"
         );
     }
 

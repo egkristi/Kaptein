@@ -35,6 +35,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   now fails CI instead of silently skipping at TUI startup.
 
 ### Fixed
+- **Security — `kaptein get --lens` leaked plaintext Secret values.** The CLI lens path
+  serialized the fetched `DynamicObject` straight to JSON and fed it to `render_row`
+  **without** running the `redact_object` choke point — so a lens bound to a secret-shaped
+  field (e.g. `data.password`) printed the plaintext value, the same bug issue #35 closed
+  in the TUI's `map_object_with` path but which never reached this second surface. The CLI
+  path now redacts before rendering, with a regression test asserting the row is the
+  typed `Cell::Redacted`, never `Text` carrying the secret.
 - **Docs — lens capability overclaim (README).** The README advertised lenses as binding a
   CRD to "panels" and "health checks" as though those ship today, but lens schema v1
   (`ViewDefinition` + `VIEWDEF_SCHEMA`, `additionalProperties: false`) only declares
