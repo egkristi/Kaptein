@@ -34,6 +34,14 @@ conditions:
     status: "True"
     level: info
 
+health:
+  - id: printable-status
+    label_key: health.printable-status
+    field: status.printableStatus
+    op: contains
+    value: "Running"
+    level: error
+
 actions:
   - id: describe
     label_key: action.describe

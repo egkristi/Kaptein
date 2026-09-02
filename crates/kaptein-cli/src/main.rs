@@ -601,7 +601,10 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                     let value = serde_json::to_value(&obj).map_err(|e| {
                         kaptein_core::Error::Internal(format!("serialize object: {e}"))
                     })?;
-                    let row = kaptein_viewmodel::render_row(&vd, &value);
+                    let row = kaptein_viewmodel::render_row(
+                        &vd,
+                        &kaptein_viewmodel::Redacted::from_redacted(value),
+                    );
                     let cells: Vec<String> =
                         row.cells.iter().map(kaptein_viewmodel::cell_text).collect();
                     println!("{}", cells.join("\t"));
@@ -872,7 +875,16 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
                 })?
             };
 
-            let row = kaptein_viewmodel::render_row(&vd, &resource_value);
+            // Lens authoring: the resource is a user-supplied file (no cluster secret to
+            // leak), so the visibly-named `from_unredacted_for_lens_authoring` constructor
+            // is the deliberate opt-out (finding AC). Cloned so both render + health can
+            // evaluate the same fixture.
+            let row = kaptein_viewmodel::render_row(
+                &vd,
+                &kaptein_viewmodel::Redacted::from_unredacted_for_lens_authoring(
+                    resource_value.clone(),
+                ),
+            );
             let json = serde_json::to_string_pretty(&row)
                 .map_err(|e| kaptein_core::Error::Internal(format!("cannot serialize row: {e}")))?;
             println!("{json}");
@@ -881,7 +893,12 @@ async fn run(cli: Cli) -> Result<(), kaptein_core::Error> {
             // failure, so lens authors can verify their health predicates against a fixture
             // without a live cluster — the same `evaluate_health` a frontend uses.
             if !vd.health.is_empty() {
-                let findings = kaptein_viewmodel::evaluate_health(&vd, &resource_value);
+                let findings = kaptein_viewmodel::evaluate_health(
+                    &vd,
+                    &kaptein_viewmodel::Redacted::from_unredacted_for_lens_authoring(
+                        resource_value,
+                    ),
+                );
                 let health_json = serde_json::to_string_pretty(&findings).map_err(|e| {
                     kaptein_core::Error::Internal(format!("cannot serialize health: {e}"))
                 })?;
@@ -2040,7 +2057,10 @@ mod tests {
         let ready =
             serde_json::json!({"status": {"conditions": [{"type": "Ready", "status": "True"}]}});
         assert_eq!(
-            kaptein_viewmodel::evaluate_status(&vd, &ready),
+            kaptein_viewmodel::evaluate_status(
+                &vd,
+                &kaptein_viewmodel::Redacted::from_redacted(ready),
+            ),
             Some(kaptein_viewmodel::StatusLevel::Ok)
         );
     }
@@ -2061,7 +2081,10 @@ mod tests {
         let failing = serde_json::json!({
             "status": {"readyInstances": 2, "replicationLag": 4}
         });
-        let findings = kaptein_viewmodel::evaluate_health(&vd, &failing);
+        let findings = kaptein_viewmodel::evaluate_health(
+            &vd,
+            &kaptein_viewmodel::Redacted::from_redacted(failing),
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].id, "ready-instances");
         assert_eq!(findings[0].level, kaptein_viewmodel::StatusLevel::Error);
@@ -2069,7 +2092,13 @@ mod tests {
         let healthy = serde_json::json!({
             "status": {"readyInstances": 3, "replicationLag": 4}
         });
-        assert!(kaptein_viewmodel::evaluate_health(&vd, &healthy).is_empty());
+        assert!(
+            kaptein_viewmodel::evaluate_health(
+                &vd,
+                &kaptein_viewmodel::Redacted::from_redacted(healthy),
+            )
+            .is_empty()
+        );
     }
 
     /// The example lens must validate cleanly against the real validator (it is the
@@ -2129,7 +2158,10 @@ mod tests {
         // emit `Cell::Text { value: "aHVudGVyMg==" }` — the plaintext secret.
         kaptein_core::redact::redact_object(&mut obj);
         let value = serde_json::to_value(&obj).expect("serialize");
-        let row = kaptein_viewmodel::render_row(&lens, &value);
+        let row = kaptein_viewmodel::render_row(
+            &lens,
+            &kaptein_viewmodel::Redacted::from_redacted(value),
+        );
         assert_eq!(
             row.cells[1],
             kaptein_viewmodel::Cell::Redacted,
@@ -2149,7 +2181,10 @@ mod tests {
             "spec": {"instances": 3},
             "status": {"phase": "ClusterIsReady"}
         });
-        let row = kaptein_viewmodel::render_row(&vd, &resource);
+        let row = kaptein_viewmodel::render_row(
+            &vd,
+            &kaptein_viewmodel::Redacted::from_unredacted_for_lens_authoring(resource),
+        );
         assert_eq!(row.id, kaptein_viewmodel::RowId("u1".into()));
         assert_eq!(
             row.cells[0],

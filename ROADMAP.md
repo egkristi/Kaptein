@@ -194,6 +194,15 @@ Milestones:
     - This is the "derive, don't restate" lesson that fixed the exec guardrail coverage
       test, applied to types instead of tests — the guarantee should come from the
       signature, not from every future caller remembering.
+    - *Fixed (v0.32.0 →): `render_row`/`evaluate_status`/`evaluate_health` now take
+      `&Redacted` — a newtype wrapping `serde_json::Value`, constructible only via
+      `Redacted::from_redacted` (the cluster paths, after `redact_object`) or the
+      deliberately-greppable `Redacted::from_unredacted_for_lens_authoring` (used only by
+      `viewdef render`). A bare `Value` no longer compiles, so the DoD — "it is a compile
+      error to render against an unredacted object" — holds by construction. The three
+      cluster-facing paths now each *produce* a `Redacted` and are indistinguishable in
+      the type system; the opt-out is a single greppable constructor, not three chances to
+      forget.*
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
@@ -589,6 +598,10 @@ Milestones:
        exercise. Adding health to two or three more of the shipped set is the cheapest
        available test of whether the health schema is expressive enough **before** it is
        versioned as stable.
+    *Fixed (v0.32.0 →): `docs/USAGE.md` now documents `h` in the keymap, the `health:`
+    block in §5.2, health findings in `viewdef-render` (§5.4), and the health step in §7.4
+    (AD); and Strimzi Kafka, cert-manager Certificate, and KubeVirt VirtualMachine now
+    declare `health:` blocks — four of the nine shipped lenses (AE).*
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
@@ -871,14 +884,11 @@ Milestones:
   stops evicting the hottest view (Z), fuzzy rerank is allocation-free with a bench case
   covering it (AA), and M2.0b's remaining DoD clauses — port-forward, the MCP protocol,
   the CLI binary end to end, and cordon/uncordon — are all live-tested in CI (AB). The
-  live next steps, in order: **1. M1.7 finding AC — make the lens redaction a type, not a
-  convention.** This goes first: it is the only *security* item open, it is the second
-  leak of the same class, and a third pointwise fix would leave the class open again.
-  **2.** the two cheap M2.2 gaps — document health checks in `docs/USAGE.md` (AD) and
-  declare `health:` on two or three more shipped lenses to stress the schema before it
-  stabilizes (AE). **3.** the **M1.8 kwok synthetic-cluster harness** (the last
-  aspirational number). **4. M2.1 browser UI.** **5. M2.2** per-lens action/health panel;
-  and the distribution tail (Homebrew tap, release-triggered site version bump).)*
+  v0.32.0 batch — AC (redaction as a type), AD (health in the manual), AE (health on more
+  lenses) — is also closed. The live next steps, in order: **1.** the **M1.8 kwok
+  synthetic-cluster harness** (the last aspirational number); **2. M2.1 browser UI**;
+  **3. M2.2** per-lens action/health *panel*; and the distribution tail (Homebrew tap,
+  release-triggered site version bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson
   ("the shipped path must take it") worked: every v0.27.0 finding is genuinely closed, and

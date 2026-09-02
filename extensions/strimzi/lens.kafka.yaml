@@ -40,6 +40,14 @@ conditions:
     status: Unknown
     level: pending
 
+health:
+  - id: observed-generation
+    label_key: health.observed-generation
+    field: status.observedGeneration
+    op: ne
+    value: 0
+    level: error
+
 actions:
   - id: describe
     label_key: action.describe

@@ -445,7 +445,7 @@ fn split_subscripts(segment: &str) -> (&str, Vec<usize>) {
 /// across the whole sequence).
 pub fn evaluate_status(
     vd: &ViewDefinition,
-    resource: &serde_json::Value,
+    resource: &Redacted,
 ) -> Option<crate::render::StatusLevel> {
     for rule in &vd.status {
         if rule_matches(rule, resource) {
@@ -475,19 +475,20 @@ pub fn evaluate_status(
 ///
 /// The stable `RowId` is the resource `metadata.uid` when present, else
 /// `namespace/name` (the same identity contract as `kaptein-integration`).
-pub fn render_row(vd: &ViewDefinition, resource: &serde_json::Value) -> Row {
-    let id = resource
+pub fn render_row(vd: &ViewDefinition, resource: &Redacted) -> Row {
+    let value = resource.as_value();
+    let id = value
         .get("metadata")
         .and_then(|m| m.get("uid"))
         .and_then(|u| u.as_str())
         .map(|uid| RowId(uid.to_string()))
         .unwrap_or_else(|| {
-            let name = resource
+            let name = value
                 .get("metadata")
                 .and_then(|m| m.get("name"))
                 .and_then(|n| n.as_str())
                 .unwrap_or_default();
-            let ns = resource
+            let ns = value
                 .get("metadata")
                 .and_then(|m| m.get("namespace"))
                 .and_then(|n| n.as_str())
@@ -516,8 +517,45 @@ pub fn render_row(vd: &ViewDefinition, resource: &serde_json::Value) -> Row {
 /// stay in sync with `kaptein-core::redact::REDACTED`.
 pub const REDACTED_MARKER: &str = "[REDACTED]";
 
+/// A resource value that has passed the redaction choke point (M1.7, finding AC).
+///
+/// `render_row`, `evaluate_status`, and `evaluate_health` take `&Redacted` — not a bare
+/// `&serde_json::Value` — so rendering a lens against an *unredacted* object is a
+/// **compile error**, not a reviewer's job at every call site. This is the same
+/// "derive, don't restate" move the guardrail coverage test made for tests, applied to
+/// types: the guarantee lives in the signature.
+///
+/// The only ways to obtain one are [`Redacted::from_redacted`] (the cluster-facing paths
+/// call it after `kaptein_core::redact::redact_object`) and the deliberately-greppable
+/// [`Redacted::from_unredacted_for_lens_authoring`] (used only by `kaptein viewdef render`,
+/// which renders a user-supplied file and has no cluster secret to leak).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Redacted(serde_json::Value);
+
+impl Redacted {
+    /// Wrap an already-redacted JSON value (the cluster-facing paths call this after
+    /// `kaptein_core::redact::redact_object`). This is the safe constructor.
+    pub fn from_redacted(value: serde_json::Value) -> Self {
+        Redacted(value)
+    }
+
+    /// Opt out of redaction for **lens authoring** only — `kaptein viewdef render` renders
+    /// a user-supplied file (no cluster secret to leak) so an author can see their lens's
+    /// columns against a fixture. Deliberately named and greppable, so the exemption is
+    /// visible rather than implicit. Never used on a cluster-facing path.
+    pub fn from_unredacted_for_lens_authoring(value: serde_json::Value) -> Self {
+        Redacted(value)
+    }
+
+    /// The wrapped value (used by the lens engine internals, which run after the type
+    /// boundary already guarantees redaction).
+    pub fn as_value(&self) -> &serde_json::Value {
+        &self.0
+    }
+}
+
 /// Build the `Cell` for a single lens column against a resource.
-fn cell_for_column(col: &Column, resource: &serde_json::Value, vd: &ViewDefinition) -> Cell {
+fn cell_for_column(col: &Column, resource: &Redacted, vd: &ViewDefinition) -> Cell {
     if col.kind == ColumnKind::Status {
         // The status chip is *inferred* (not read from a single field): the lens's
         // rules decide the level and label.
@@ -535,7 +573,7 @@ fn cell_for_column(col: &Column, resource: &serde_json::Value, vd: &ViewDefiniti
     let Some(field) = col.field.as_deref() else {
         return empty_cell_for_kind(col.kind);
     };
-    match resolve_field(resource, field) {
+    match resolve_field(resource.as_value(), field) {
         Some(serde_json::Value::Number(n)) if n.is_i64() => Cell::Number {
             value: n.as_i64().unwrap_or(0),
         },
@@ -581,8 +619,12 @@ fn level_label(level: crate::render::StatusLevel) -> String {
 
 /// Match a condition rule: find `status.conditions[]` and look for a condition whose
 /// `type` equals the rule's type and whose `status` equals the rule's status.
-fn condition_matches(rule: &ConditionRule, resource: &serde_json::Value) -> bool {
-    let Some(conditions) = resource.get("status").and_then(|s| s.get("conditions")) else {
+fn condition_matches(rule: &ConditionRule, resource: &Redacted) -> bool {
+    let Some(conditions) = resource
+        .as_value()
+        .get("status")
+        .and_then(|s| s.get("conditions"))
+    else {
         return false;
     };
     let Some(list) = conditions.as_array() else {
@@ -594,7 +636,7 @@ fn condition_matches(rule: &ConditionRule, resource: &serde_json::Value) -> bool
     })
 }
 
-fn rule_matches(rule: &StatusRule, resource: &serde_json::Value) -> bool {
+fn rule_matches(rule: &StatusRule, resource: &Redacted) -> bool {
     predicate_holds(&rule.field, rule.op, &rule.value, resource)
 }
 
@@ -602,7 +644,7 @@ fn rule_matches(rule: &StatusRule, resource: &serde_json::Value) -> bool {
 /// check whose predicate does **not** hold (a failed check is a finding; an absent field
 /// is also a failure — a resource that cannot be verified is not healthy). Passing checks
 /// emit nothing, so a healthy resource yields an empty list.
-pub fn evaluate_health(vd: &ViewDefinition, resource: &serde_json::Value) -> Vec<HealthFinding> {
+pub fn evaluate_health(vd: &ViewDefinition, resource: &Redacted) -> Vec<HealthFinding> {
     vd.health
         .iter()
         .filter(|check| !predicate_holds(&check.field, check.op, &check.value, resource))
@@ -621,9 +663,9 @@ fn predicate_holds(
     field: &str,
     op: RuleOp,
     value: &serde_json::Value,
-    resource: &serde_json::Value,
+    resource: &Redacted,
 ) -> bool {
-    let Some(actual) = resolve_field(resource, field) else {
+    let Some(actual) = resolve_field(resource.as_value(), field) else {
         return false;
     };
     match op {
@@ -721,6 +763,12 @@ pub fn example_status_rule() -> StatusRule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Wrap a fixture JSON value as `Redacted` (the safe constructor — tests represent
+    /// the already-redacted object the cluster-facing paths produce).
+    fn redacted(value: serde_json::Value) -> Redacted {
+        Redacted::from_redacted(value)
+    }
 
     fn col(id: &str) -> Column {
         Column {
@@ -912,16 +960,16 @@ mod tests {
         ];
         let running = serde_json::json!({"status": {"phase": "Running"}});
         assert_eq!(
-            evaluate_status(&vd, &running),
+            evaluate_status(&vd, &redacted(running)),
             Some(crate::render::StatusLevel::Ok)
         );
         let pending = serde_json::json!({"status": {"phase": "Pending"}});
         assert_eq!(
-            evaluate_status(&vd, &pending),
+            evaluate_status(&vd, &redacted(pending)),
             Some(crate::render::StatusLevel::Warning)
         );
         let empty = serde_json::json!({});
-        assert_eq!(evaluate_status(&vd, &empty), None);
+        assert_eq!(evaluate_status(&vd, &redacted(empty)), None);
     }
 
     #[test]
@@ -935,11 +983,11 @@ mod tests {
         }];
         let three = serde_json::json!({"spec": {"replicas": 3}});
         assert_eq!(
-            evaluate_status(&vd, &three),
+            evaluate_status(&vd, &redacted(three)),
             Some(crate::render::StatusLevel::Warning)
         );
         let one = serde_json::json!({"spec": {"replicas": 1}});
-        assert_eq!(evaluate_status(&vd, &one), None);
+        assert_eq!(evaluate_status(&vd, &redacted(one)), None);
     }
 
     #[test]
@@ -953,7 +1001,7 @@ mod tests {
         }];
         let msg = serde_json::json!({"status": {"message": "back-off pulling image"}});
         assert_eq!(
-            evaluate_status(&vd, &msg),
+            evaluate_status(&vd, &redacted(msg)),
             Some(crate::render::StatusLevel::Error)
         );
     }
@@ -978,24 +1026,24 @@ mod tests {
             "status": {"conditions": [{"type": "Ready", "status": "True"}]}
         });
         assert_eq!(
-            evaluate_status(&vd, &ready),
+            evaluate_status(&vd, &redacted(ready)),
             Some(crate::render::StatusLevel::Ok)
         );
         let not_ready = serde_json::json!({
             "status": {"conditions": [{"type": "Ready", "status": "False"}]}
         });
         assert_eq!(
-            evaluate_status(&vd, &not_ready),
+            evaluate_status(&vd, &redacted(not_ready)),
             Some(crate::render::StatusLevel::Error)
         );
         // A condition of a different type must not match.
         let other = serde_json::json!({
             "status": {"conditions": [{"type": "Progressing", "status": "True"}]}
         });
-        assert_eq!(evaluate_status(&vd, &other), None);
+        assert_eq!(evaluate_status(&vd, &redacted(other)), None);
         // Missing conditions must not match.
         assert_eq!(
-            evaluate_status(&vd, &serde_json::json!({"status": {}})),
+            evaluate_status(&vd, &redacted(serde_json::json!({"status": {}}))),
             None
         );
     }
@@ -1025,7 +1073,7 @@ mod tests {
         let resource = serde_json::json!({
             "status": {"readyInstances": 2, "replicationLag": 4}
         });
-        let findings = evaluate_health(&vd, &resource);
+        let findings = evaluate_health(&vd, &redacted(resource));
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].id, "ready-instances");
         assert_eq!(findings[0].label_key, "health.ready-instances");
@@ -1044,7 +1092,7 @@ mod tests {
             level: crate::render::StatusLevel::Error,
         }];
         // No `status.readyInstances` → the check cannot be verified → not healthy.
-        let findings = evaluate_health(&vd, &serde_json::json!({"status": {}}));
+        let findings = evaluate_health(&vd, &redacted(serde_json::json!({"status": {}})));
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].id, "ready-instances");
     }
@@ -1062,7 +1110,7 @@ mod tests {
         }];
         let findings = evaluate_health(
             &vd,
-            &serde_json::json!({"status": {"phase": "ClusterIsReady"}}),
+            &redacted(serde_json::json!({"status": {"phase": "ClusterIsReady"}})),
         );
         assert!(findings.is_empty());
     }
@@ -1245,7 +1293,7 @@ mod tests {
             "status": {"phase": "ClusterIsReady"}
         });
 
-        let row = render_row(&vd, &resource);
+        let row = render_row(&vd, &redacted(resource));
         // Stable identity is metadata.uid.
         assert_eq!(row.id, RowId("abc-123".into()));
         assert_eq!(row.cells.len(), 3);
@@ -1289,7 +1337,7 @@ mod tests {
         let resource = serde_json::json!({
             "metadata": {"name": "x", "namespace": "n"}
         });
-        let row = render_row(&vd, &resource);
+        let row = render_row(&vd, &redacted(resource));
         assert_eq!(row.id, RowId("n/x".into()));
         assert_eq!(
             row.cells[0],
@@ -1331,7 +1379,7 @@ mod tests {
             "metadata": {"name": "db", "namespace": "n"},
             "data": {"password": REDACTED_MARKER}
         });
-        let row = render_row(&vd, &resource);
+        let row = render_row(&vd, &redacted(resource));
         assert_eq!(row.cells[0], Cell::Redacted);
     }
 
@@ -1363,7 +1411,7 @@ mod tests {
             "metadata": {"name": "x"},
             "spec": {"note": "a redacted-looking but real value"}
         });
-        let row = render_row(&vd, &resource);
+        let row = render_row(&vd, &redacted(resource));
         assert_eq!(
             row.cells[0],
             Cell::Text {

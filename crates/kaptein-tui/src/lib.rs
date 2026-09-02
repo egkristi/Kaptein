@@ -1322,7 +1322,10 @@ async fn lens_health(client: &Client, kind: &Kind, row: &TableRow) -> io::Result
     let value = kaptein_core::describe::get_dynamic_redacted(client, &kind.gvk, ns, &row.name)
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
-    let findings = kaptein_integration::kaptein_viewmodel::evaluate_health(vd, &value);
+    let findings = kaptein_integration::kaptein_viewmodel::evaluate_health(
+        vd,
+        &kaptein_integration::kaptein_viewmodel::Redacted::from_redacted(value),
+    );
     Ok(format_health_findings(&row.name, &findings))
 }
 

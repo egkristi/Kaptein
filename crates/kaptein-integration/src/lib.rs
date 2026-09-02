@@ -260,11 +260,13 @@ pub(crate) fn map_object_with(
     match lens {
         Some(vd) => {
             // Redact a *copy* of the object (redact_object is in-place) before rendering,
-            // so lens columns read masked values — never plaintext secrets.
+            // so lens columns read masked values — never plaintext secrets. The type
+            // boundary enforces it: render_row takes a `Redacted`, so this is the only
+            // path that compiles (finding AC).
             let mut redacted = obj.clone();
             kaptein_core::redact::redact_object(&mut redacted);
             let value = serde_json::to_value(&redacted).unwrap_or(serde_json::Value::Null);
-            kaptein_viewmodel::render_row(vd, &value)
+            kaptein_viewmodel::render_row(vd, &kaptein_viewmodel::Redacted::from_redacted(value))
         }
         None => resource_row(kaptein_core::discovery::summary_of(obj, gvk)),
     }

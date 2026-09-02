@@ -265,6 +265,7 @@ KAPTEIN_EXTENSIONS_DIR=./extensions kaptein tui   # control where lenses are dis
 | `:` | Command palette (fuzzy-match commands, `Enter` to run, `Esc` to cancel) |
 | `d` | Describe the selected resource |
 | `i` | Diagnose the selected pod |
+| `h` | Show health-check findings for the selected resource (lens-driven kinds) |
 | `:q` / `:q!` / `:x` / `:wq` | Quit (vim-style; `Esc` / `Ctrl-C` also quit) |
 
 ### 3.2 Lens-driven navigation (M2.2)
@@ -274,7 +275,9 @@ The TUI discovers **lens kinds** at startup. A lens is a declarative view defini
 actions. Dropping a new lens file into the extension path (`KAPTEIN_EXTENSIONS_DIR`,
 defaulting to `./extensions`) makes its CRD navigable **with no recompile** — press
 `Tab` to cycle to it. The lens's declared columns become the table columns; its status
-rules drive the status chip.
+rules drive the status chip; its **health checks** surface as one finding per failing
+check in the detail pane (press `h` on a lens-driven resource — "healthy" when every
+check holds).
 
 See §5 for how lenses work and how to author them.
 
@@ -385,6 +388,14 @@ conditions:
     status: "True"
     level: ok
 
+health:
+  - id: ready-instances
+    label_key: health.ready-instances
+    field: status.readyInstances
+    op: gte
+    value: 1
+    level: error
+
 actions:
   - id: describe
     label_key: action.describe
@@ -398,6 +409,11 @@ actions:
   `lt`, `lte`, `contains`).
 - **`conditions`** rules match Kubernetes `status.conditions[]` by `type` + `status`
   (`True`/`False`/`Unknown`) — the shape most CRDs use to signal readiness.
+- **`health`** checks declare a *predicate that must hold* (`field`/`op`/`value`, the same
+  operators as `status`) plus a `level` surfaced when it fails. Unlike `status` (one level
+  per resource, first match wins), every failing health check emits its own finding — a
+  resource can fail several at once. An absent field counts as failing (a resource that
+  cannot be verified is not healthy).
 - **`actions`** declare what a lens makes available, with their RBAC-preflight state.
 
 Shipped lenses (under `extensions/`): CNPG, Strimzi Kafka, KubeVirt, cert-manager,
@@ -427,7 +443,8 @@ kaptein viewdef-validate -f extensions/lens.cnpg.yaml
 # Emit the versioned JSON Schema (for CI / PR review)
 kaptein viewdef-schema
 
-# Render a lens against a fixture or live resource (proves status inference)
+# Render a lens against a fixture or live resource (proves status inference and
+# health-check findings — the row and, when the lens declares health:, its findings)
 kaptein viewdef-render -f extensions/lens.cnpg.yaml -r fixture.json
 ```
 
@@ -522,6 +539,8 @@ kaptein delete --gvk apps/v1/Deployment --name web -n prod --confirm --break-gla
 2. Validate: `kaptein viewdef-validate -f extensions/my-crd/lens.yaml`
 3. Check discovery: `kaptein lenses -d extensions`
 4. Run `kaptein tui` and press `Tab` until your CRD appears — no recompile.
+5. Declare `health:` checks (§5.2) and press `h` on a resource to see a finding per
+   failing check.
 
 ### 7.5 "Let an agent read the cluster, safely"
 

@@ -34,6 +34,14 @@ conditions:
     status: "True"
     level: info
 
+health:
+  - id: not-after
+    label_key: health.not-after
+    field: status.notAfter
+    op: ne
+    value: ""
+    level: error
+
 actions:
   - id: describe
     label_key: action.describe

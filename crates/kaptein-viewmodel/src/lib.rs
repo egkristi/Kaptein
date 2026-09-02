@@ -29,8 +29,8 @@ pub use error::Error;
 pub use fuzzy::{FuzzyMatch, FuzzyRanked, fuzzy_jump, fuzzy_rank_indices};
 pub use lens::{
     ConditionRule, GroupVersionKind, HealthCheck, HealthFinding, LENS_SCHEMA_VERSION, LensAction,
-    REDACTED_MARKER, RuleOp, StatusRule, ViewDefinition, evaluate_health, evaluate_status,
-    render_row, validate_viewdef,
+    REDACTED_MARKER, Redacted, RuleOp, StatusRule, ViewDefinition, evaluate_health,
+    evaluate_status, render_row, validate_viewdef,
 };
 pub use logparse::{LogCell, ParsedLogLine, infer_columns, parse_json_line, parse_log_stream};
 pub use mem_plane::{MemPlane, Schema};

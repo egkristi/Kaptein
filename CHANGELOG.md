@@ -6,6 +6,23 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Security
+- **M1.7 finding AC — lens redaction is now a type, not a convention.** `render_row`,
+  `evaluate_status`, and `evaluate_health` previously took a bare `&serde_json::Value` and
+  trusted the caller to have redacted it — the pattern behind two plaintext-Secret leaks
+  (#35 and commit 6692b10). They now take `&Redacted`, a newtype constructible only via
+  `Redacted::from_redacted` (the cluster-facing paths, after `redact_object`) or the
+  deliberately-greppable `Redacted::from_unredacted_for_lens_authoring` (used only by
+  `kaptein viewdef render`, which renders a user-supplied file with no cluster secret to
+  leak). A bare `Value` no longer compiles, so the guarantee lives in the signature — the
+  "derive, don't restate" lesson applied to types.
+
+### Fixed
+- **v0.32.0 re-audit — findings AD and AE.** `docs/USAGE.md` now documents the `h` key,
+  the `health:` block, and `viewdef-render` health output (AD); Strimzi Kafka, cert-manager
+  Certificate, and KubeVirt VirtualMachine now declare `health:` blocks, joining CNPG — four
+  of the nine shipped lenses (AE).
+
 ## [0.32.0] - 2026-09-01
 
 ### Added
