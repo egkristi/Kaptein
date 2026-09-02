@@ -136,16 +136,20 @@ fn main() {
     // Steady-state memory: report the RSS while the 50k-row plane is held. Gated on
     // Linux only (the RSS budget is the frontend-level target; this guards the plane's
     // own footprint, which must stay well under it).
-    match resident_mb() {
+    let rss_mb: Option<u64> = match resident_mb() {
         Some(rss) => {
             println!("steady-state RSS with {ROWS} rows held: {rss} MB");
             if rss > RSS_BUDGET_MB {
                 eprintln!("REGRESSION: RSS {rss} MB exceeds budget {RSS_BUDGET_MB} MB");
                 std::process::exit(1);
             }
+            Some(rss)
         }
-        None => println!("steady-state RSS: not measured on this platform"),
-    }
+        None => {
+            println!("steady-state RSS: not measured on this platform");
+            None
+        }
+    };
 
     // Cold start: build a *fresh* plane, seed all 50k rows, and answer the first query.
     // This measures the view-model-ownable half of "cold start to first usable frame"
@@ -190,6 +194,33 @@ fn main() {
             "REGRESSION: fuzzy re-rank {rerank_ms} ms exceeds budget {P99_QUERY_BUDGET_MS} ms"
         );
         std::process::exit(1);
+    }
+
+    // Emit machine-readable JSON for storage / comparison (scripts/bench-record.sh merges
+    // this with the core bench's output into one per-commit result file).
+    let out = serde_json::json!({
+        "schema": "kaptein-benchmark/v1",
+        "suite": "kaptein-viewmodel",
+        "git_sha": option_env!("KAPTEIN_BENCH_GIT_SHA").unwrap_or("unknown"),
+        "metrics": {
+            "query_p50_ms": p50,
+            "query_p99_ms": p99,
+            "query_max_ms": max,
+            "rss_mb": rss_mb,
+            "cold_start_ms": cold_ms,
+            "fuzzy_rerank_ms": rerank_ms,
+        },
+    });
+    if let Ok(dir) = std::env::var("KAPTEIN_BENCH_OUT") {
+        let path = std::path::Path::new(&dir);
+        if let Err(e) = std::fs::create_dir_all(path) {
+            eprintln!("warning: cannot create bench out dir {dir}: {e}");
+        } else {
+            let file = path.join("viewmodel.json");
+            if let Err(e) = std::fs::write(&file, serde_json::to_string_pretty(&out).unwrap()) {
+                eprintln!("warning: cannot write {}: {e}", file.display());
+            }
+        }
     }
 }
 

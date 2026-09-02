@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+- **M1.8 — the benchmark is now a recorded, comparable suite.** A second, dependency-free
+  benchmark `crates/kaptein-core/benches/core_paths.rs` gates the Kubernetes-side hot paths
+  (informer-store watch-delta apply, watchring reduce+push, `redact_object`) over 10 000
+  synthetic events, with its own p99 budgets. Both benches now emit machine-readable JSON
+  (`schema: kaptein-benchmark/v1`) to `$KAPTEIN_BENCH_OUT`; a `benchmarks/` directory
+  (README + `schema.json`) documents the result contract; and `scripts/bench-record.sh`
+  runs both suites, stores the merged result under `benchmarks/results/<sha>-<ts>.json`
+  (git-ignored), and prints a line-by-line diff against the previous run — so performance
+  is **comparable across commits and releases**, not just gated. The CI `bench` job now
+  runs both suites.
+
 ### Security
 - **M1.7 finding AC — lens redaction is now a type, not a convention.** `render_row`,
   `evaluate_status`, and `evaluate_health` previously took a bare `&serde_json::Value` and

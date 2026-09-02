@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kaptein.io/schemas/benchmark-result/v1.json",
+  "title": "Kaptein benchmark result",
+  "description": "A single recorded benchmark run (one file per commit/release, written by scripts/bench-record.sh). Metric names are stable across releases so results stay comparable.",
+  "type": "object",
+  "required": ["schema", "suite", "git_sha", "metrics"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "kaptein-benchmark/v1"
+    },
+    "suite": {
+      "type": "string",
+      "enum": ["kaptein-viewmodel", "kaptein-core"]
+    },
+    "git_sha": {
+      "type": "string",
+      "description": "The commit the run was recorded against."
+    },
+    "host": {
+      "type": "string",
+      "description": "Optional host/runner identifier for cross-machine comparison."
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Flat map of stable metric name to number (units encoded in the name).",
+      "additionalProperties": { "type": "number" }
+    }
+  }
+}

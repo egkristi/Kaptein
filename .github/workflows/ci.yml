@@ -97,16 +97,18 @@ jobs:
           cargo test --locked -p kaptein -- governance_check_runs_real_preflight_against_a_live_server
 
   bench:
-    name: Perf budget (M1.8 query p99)
+    name: Perf budget (M1.8)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # The M1.8 budget is *measured*, not aspirational: this runs the release-mode
-      # benchmark over a 50 000-row synthetic plane and the bench exits non-zero on a
-      # p99 regression, failing the job (the budget lives in the bench, not in CI).
+      # The M1.8 budget is *measured*, not aspirational: the benches run in release
+      # mode and exit non-zero on a regression (the budget lives in the bench, not in
+      # CI). Two suites: the view-model render hot spots (50 000-row plane) and the
+      # core Kubernetes-side hot paths (store apply / watchring / redaction).
       - run: cargo bench -p kaptein-viewmodel --bench query --locked
+      - run: cargo bench -p kaptein-core --bench core_paths --locked
 
   msrv:
     name: MSRV (pinned toolchain)

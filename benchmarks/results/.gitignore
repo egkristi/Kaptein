@@ -1,0 +1,3 @@
+# Per-run result files are ephemeral and noisy — the comparable artifact is the trend.
+# scripts/bench-record.sh writes the latest run and diffs against the previous one.
+results/

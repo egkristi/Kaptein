@@ -252,6 +252,18 @@ Milestones:
       synthetic-cluster harness (thousands of fake nodes/pods) and the end-to-end
       frontend keystroke-to-frame number remain the frontend-level Phase 1 tail — this
       bench gates the three numbers the view-model owns in isolation.*
+    - *Landed (v0.32.0 →): the benchmark is now a **recorded, comparable** suite, not a
+      one-shot gate. A second, dependency-free `crates/kaptein-core/benches/core_paths.rs`
+      gates the **Kubernetes-side hot paths** (informer-store watch-delta apply, watchring
+      reduce+push, and `redact_object`) over 10 000 synthetic events with their own budgets
+      (p99 ns/µs); both benches emit machine-readable JSON (`schema: kaptein-benchmark/v1`)
+      to `$KAPTEIN_BENCH_OUT`; a `benchmarks/` directory (README + `schema.json`) documents
+      the result contract; and `scripts/bench-record.sh` runs both suites, stores the merged
+      result under `benchmarks/results/<sha>-<ts>.json` (git-ignored), and prints a
+      line-by-line diff against the previous run — so performance is comparable across
+      commits/releases, not just gated. The CI `bench` job now runs both suites and fails
+      on regression. The kwok harness + end-to-end keystroke-to-frame number remain the
+      frontend-level tail.*
   - **Open (re-audit v0.31.0) — the allocation pattern this milestone removed came back on
     the search path** (finding AA). Windowing closed finding Q for the steady-state table,
     but fuzzy-jump did not follow. Entering `/` correctly snapshots the full set (search

@@ -21,3 +21,10 @@ regex = "1"
 serde_yaml = "0.9"
 serde_json = "1"
 secrecy = "0.10"
+
+# Kubernetes-side hot-path benchmark (store apply, watchring, redaction) — the core
+# companion to the view-model `query` bench. Dependency-free (`harness = false`, no
+# criterion) and budget-gated by exit code, so CI fails on regression.
+[[bench]]
+name = "core_paths"
+harness = false
