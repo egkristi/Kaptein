@@ -167,6 +167,33 @@ Milestones:
     `multi_pod_logs`, and `follow_logs` — the streaming path. Both patterns are now
     hoisted into `static … : LazyLock<Regex>` (MSRV 1.97), so a follow stream no longer
     spends its time compiling (`ISSUES.md` finding P).
+  - **Open (re-audit v0.32.0) — *blocking*: on the lens path the "single choke point" is a
+    convention, and it has now leaked twice** (`ISSUES.md` finding AC). `render_row`,
+    `evaluate_status`, and `evaluate_health` each take a bare `&serde_json::Value` and
+    **trust the caller** to have redacted it. Nothing in the type system and no test
+    enforces that. Two plaintext-Secret leaks have shipped on exactly this pattern —
+    **#35** (the TUI's `map_object_with`) and **commit 6692b10** (the CLI `get --lens`
+    path, independently, months later) — both found by audit rather than by tests or
+    types, and both fixed **pointwise**. The three cluster-facing paths now each redact by
+    a *different* mechanism (`map_object_with`, an inline `redact_object` call, and
+    `get_dynamic_redacted`), which is three chances to forget rather than one place that
+    cannot be forgotten.
+    - `kaptein-core::describe` is the counter-example that proves this is solvable:
+      `describe_dynamic` redacts by default and the opt-out is a separate, explicitly-named
+      `describe_dynamic_policy` used only by the audited `edit` path. Nothing outside
+      `describe.rs` reaches the unredacted variant. That shape works; the lens path never
+      got it.
+    - **Fix: make the guarantee unrepresentable to violate.** Introduce a `Redacted`
+      newtype constructible only by the redactor and take it in `render_row` /
+      `evaluate_status` / `evaluate_health`; a bare `Value` then does not compile. The
+      lens-*authoring* path (`viewdef render`, which renders a user-supplied file and has
+      no cluster secret to leak) opts out through a visibly-named constructor, so the
+      exemption is greppable rather than implicit.
+    - **DoD (falsifiable):** it is a **compile error** to render a lens against an
+      unredacted object. That is the assertion; a third pointwise fix is not.
+    - This is the "derive, don't restate" lesson that fixed the exec guardrail coverage
+      test, applied to types instead of tests — the guarantee should come from the
+      signature, not from every future caller remembering.
 - **M1.8 kwok performance harness** *(elevated per review — the numbers must be measured,
   not aspirational)*
   - A kwok-based synthetic cluster (thousands of fake nodes/pods) drives the
@@ -542,6 +569,26 @@ Milestones:
     a dedicated per-lens health *panel* (the TUI now surfaces findings via the `h` key,
     M2.2 data model + evaluation; a richer panel is M2.4+), and the browser UI's lens
     navigation (M2.1).
+  - **Open (re-audit v0.32.0) — health checks shipped ahead of their documentation and
+    ahead of their proof.** Two small gaps, both cheap:
+    1. **The user manual never mentions them** (`ISSUES.md` finding AD). `README.md`
+       documents health checks and `ROADMAP.md` tracks them, but `docs/USAGE.md` — the
+       actual manual — has **zero** references: its TUI keymap table lists `n`, `/`, `:`,
+       `d`, `i` and not **`h`**, and §5 (lenses) and §7.4 (*Make this CRD navigable*) are
+       silent. A user reading the manual cannot discover the feature. Note the CI
+       `version-sync` gate catches *version* drift between docs but cannot catch a
+       *feature* landing undocumented — worth considering whether the keymap table should
+       be generated from the TUI's own key match, the same derive-don't-restate shape used
+       for the guardrail coverage test.
+    2. **Only 1 of the 9 shipped lenses declares `health:`** (`lens.cnpg.yaml`) —
+       deliberate as a demonstration, but ADR-0012's argument is that the schema is proven
+       by the *hardest* lenses, and health predicates are exactly where a schema gets
+       stressed (`ISSUES.md` finding AE). Strimzi Kafka readiness across broker/zookeeper
+       conditions, cert-manager `Certificate` expiry windows, and KubeVirt
+       `VirtualMachine` run/migration state each want shapes CNPG's checks do not
+       exercise. Adding health to two or three more of the shipped set is the cheapest
+       available test of whether the health schema is expressive enough **before** it is
+       versioned as stable.
   - **DoD (falsifiable):** dropping a new lens file into an extension path makes its CRD
     navigable in the TUI with its declared columns and status, **with no recompile** — and
     a test asserts a lens-declared column reaches a `Row` through the data plane, not only
@@ -824,10 +871,14 @@ Milestones:
   stops evicting the hottest view (Z), fuzzy rerank is allocation-free with a bench case
   covering it (AA), and M2.0b's remaining DoD clauses — port-forward, the MCP protocol,
   the CLI binary end to end, and cordon/uncordon — are all live-tested in CI (AB). The
-  live next steps, in order: **1.** the **M1.8 kwok synthetic-cluster harness** (the last
-  aspirational number); **2. M2.1 browser UI**; **3. M2.2** per-lens action/health
-  surfaces; and the distribution tail (Homebrew tap, release-triggered site version
-  bump).)*
+  live next steps, in order: **1. M1.7 finding AC — make the lens redaction a type, not a
+  convention.** This goes first: it is the only *security* item open, it is the second
+  leak of the same class, and a third pointwise fix would leave the class open again.
+  **2.** the two cheap M2.2 gaps — document health checks in `docs/USAGE.md` (AD) and
+  declare `health:` on two or three more shipped lenses to stress the schema before it
+  stabilizes (AE). **3.** the **M1.8 kwok synthetic-cluster harness** (the last
+  aspirational number). **4. M2.1 browser UI.** **5. M2.2** per-lens action/health panel;
+  and the distribution tail (Homebrew tap, release-triggered site version bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson
   ("the shipped path must take it") worked: every v0.27.0 finding is genuinely closed, and
@@ -874,6 +925,33 @@ Milestones:
   Three cycles running, a written DoD clause has been only partially turned into a test
   (`InformerManager::live()` boundedness twice, the fuzzy path now). The pattern is stable
   enough to act on: **treat an unimplemented DoD clause as a failing test, not as prose.**
+
+- **What the v0.32.0 pass adds — the previous lessons worked; the remaining one is about
+  *types*, not tests.** Z, AA, and AB were closed properly, and closed the *class* rather
+  than the instance: the LRU test now asserts recency (not just the cap), the bench moved
+  with the hot path, and M2.0b's DoD is fully covered. That is the "partial fixes" lesson
+  landing. What is left is a different axis.
+
+  Finding AC is the **second** plaintext-Secret leak on the lens render path (#35, then
+  6692b10 months later, in a different crate, found the same way — by audit). Both fixes
+  were correct and both were pointwise, because `render_row(&ViewDefinition, &Value)`
+  *cannot* enforce anything: the guarantee lives in reviewer memory, re-verified at every
+  new call site forever. The v0.32.0 health feature added a fourth such call site and got
+  it right — but nothing would have caught it if it hadn't.
+
+  The three countermeasures this project has adopted have all been the same move at
+  different levels, and they have all worked:
+  - **the shipped path must take it** (behaviour) — killed the "code exists but nothing
+    calls it" class;
+  - **derive the set, don't restate it** (tests) — the guardrail coverage test killed the
+    "we enumerated the dangerous commands by hand and missed one" class;
+  - **make it a type** (compilation) — not yet applied, and it is what AC needs.
+
+  The rule generalises: **when a guarantee must hold at every call site, encode it in the
+  signature.** A convention that has been violated twice is not a convention, it is a
+  latent defect with a review step in front of it. `kaptein-core::describe` already
+  demonstrates the shape in this codebase — safe by default, opt-out explicitly named and
+  greppable. The lens path should look like that.
 
 1. ~~Scaffold the Cargo workspace under `crates/`~~ — done (ADR-0014, five crates).
 2. ~~Define the three-layer render contract and `AuditEvent`~~ — defined (ADR-0005); the

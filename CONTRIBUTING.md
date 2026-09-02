@@ -44,7 +44,12 @@ create and clean up their own throwaway namespace:
 KAPTEIN_LIVE_TESTS=1 KUBECONFIG=~/.kube/config cargo test -p kaptein-core --test live
 ```
 
-They never touch existing namespaces and are self-cleaning.
+They never touch existing namespaces and are self-cleaning. Even so, point them at a
+disposable cluster.
+
+See [`TESTING.md`](./TESTING.md) for a catalogue of clusters to test against — local
+distros (kind, k3s, Talos, OpenShift Local, kwok), free managed clusters (the only way to
+exercise exec-credential auth), and what to install to exercise each Kaptein feature.
 
 ## Before you submit
 
