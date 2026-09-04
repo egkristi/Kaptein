@@ -30,7 +30,7 @@ differently**:
 
 | What existing tools do well | What Kaptein adds |
 |-----------------------------|-------------------|
-| k9s — fast terminal nav, vim keymap | ✅ The same speed *plus* diagnostics and a governed MCP surface — today; 🛠️ GitOps and fleet on the roadmap |
+| k9s — fast terminal nav, vim keymap | ✅ Fast terminal nav + vim keymap, *plus* diagnostics and a governed MCP surface — today; 🛠️ GitOps and fleet on the roadmap. *(Query latency, RSS, and cold-start are measured by the CI benchmark suite — see `benchmarks/`; a head-to-head k9s comparison on the kwok harness is tracked in M1.8, not yet claimed.)* |
 | Lens / Headlamp — polished GUI, RBAC, multi-cluster | The *same* logic layer as the TUI — the GUI/browser UI is 🛠️ planned, the TUI ships ✅ |
 | K8Studio / OpenShift Console — topology views | Keyboard-navigable topology, not mouse-first (🛠️ planned) |
 | Popeye / kubescape / SRExpert — scans and reports | Integrated into a daily-driver with a remediation loop, not a one-off report (🛠️ planned) |

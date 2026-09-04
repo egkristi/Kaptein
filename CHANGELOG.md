@@ -23,6 +23,13 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - **AI (Low)** — `docs/versioning.md` stated the MSRV "lags" as fact; the 1.97.1 pin is
     effectively latest. The policy now states the lag as *intent* (aspirational) rather
     than achieved.
+- **Docs — the "same speed as k9s" claim is now honest.** The README comparison table
+  previously asserted "✅ The same speed [as k9s] *plus* diagnostics" as a shipped fact, but
+  the benchmark suite measures Kaptein-against-itself only — no head-to-head k9s comparison
+  exists (that is the kwok-harness task tracked in M1.8). The row now claims what is
+  measured (fast terminal nav + vim keymap, diagnostics, governed MCP — all shipped) and
+  points at `benchmarks/` for the measured numbers, while deferring the k9s comparison to
+  M1.8 instead of asserting it.
 
 ### Added
 - **M1.8 — the benchmark is now a recorded, comparable suite.** A second, dependency-free
