@@ -399,6 +399,11 @@ Milestones:
   agent tool surface — so a new action becomes discoverable, greppable, and agent-callable
   in one edit. That is the "domain layer is the product" thesis finally cashing out in the
   UI, and it is the reason to do this properly rather than hardcode a longer string.
+  *(Landed v0.34.0 →: the status line and detail pane now render `action_hint_line(&actions)`
+  — a pure helper over the preflighted action graph, marking `Forbidden` as `×` and `Gated`
+  as `!` — instead of the hardcoded `d:describe i:diagnose` string. The *contextual*
+  (per-selection, greying) form and the per-rung variants remain open; the per-kind
+  action-graph rendering is done.)*
 
   ### Startup: a context picker, not a stack trace
 

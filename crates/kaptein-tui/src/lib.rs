@@ -326,11 +326,12 @@ async fn run_event_loop(
             )
         } else {
             format!(
-                " {:<12} ns:{} sort:{} ({} rows) — Tab:kind  n:ns  s:sort  /:jump  ::palette  d:describe  i:diagnose  :q:quit ",
+                " {:<12} ns:{} sort:{} ({} rows) — {}  /:jump  ::palette  ?:help  :q:quit ",
                 kind.label,
                 namespace.as_deref().unwrap_or("all"),
                 sort_label(&kind.headers, sort_key, sort_descending),
-                total
+                total,
+                action_hint_line(&actions)
             )
         };
 
@@ -427,24 +428,9 @@ async fn run_event_loop(
                 // (kind, namespace), not per keystroke. The label_key is the render
                 // contract's i18n key; the TUI shows the action *id* plus a forbidden
                 // marker for the ones it will refuse.
-                let actions_line = if actions.is_empty() {
-                    "describe, diagnose".to_string()
-                } else {
-                    actions
-                        .iter()
-                        .map(|a| {
-                            let marker = if matches!(a.state, ActionState::Forbidden { .. }) {
-                                " (forbidden)"
-                            } else {
-                                ""
-                            };
-                            format!("{}{marker}", a.id)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
+                let actions_line = action_hint_line(&actions);
                 format!(
-                    "Actions: {actions_line}\nPress d to describe, y for YAML, l for logs, i to diagnose, h for health checks."
+                    "Actions: {actions_line}  (\u{d7}=forbidden, !=gated)\nPress d to describe, y for YAML, l for logs, i to diagnose, h for health checks."
                 )
             });
             let detail_para = Paragraph::new(detail_text)
@@ -1591,6 +1577,31 @@ fn action_is_forbidden(actions: &[Action], id: &str) -> bool {
         .any(|a| a.id == id && matches!(a.state, ActionState::Forbidden { .. }))
 }
 
+/// Render the RBAC-preflighted action graph as a compact hint (M1.9 dynamic hint bar).
+/// This is the *derived* form of the old hardcoded `d:describe i:diagnose` string: it
+/// lists every action the semantic layer exposes for the current kind/selection, marking
+/// `Forbidden` (`×`) and `Gated` (`!`) so the guardrail is visible *before* the keystroke,
+/// not as a 403 after. Pure (no I/O) so it is unit-testable — and it is one of the three
+/// consumers of the same action graph (`finding AF`'s `semantic::Action`), alongside the
+/// command palette and the agent tool surface.
+fn action_hint_line(actions: &[Action]) -> String {
+    if actions.is_empty() {
+        return "describe, diagnose".to_string();
+    }
+    actions
+        .iter()
+        .map(|a| {
+            let marker = match a.state {
+                ActionState::Forbidden { .. } => "×",
+                ActionState::Gated { .. } => "!",
+                ActionState::Allowed => "",
+            };
+            format!("{}{}", a.id, marker)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1744,6 +1755,36 @@ mod tests {
         let out = format_what_changed(&wc);
         assert!(out.contains("what changed in ns (last 15 min): 1 events"));
         assert!(out.contains("Warning BackOff Pod/p: restarting"));
+    }
+
+    #[test]
+    fn action_hint_line_marks_forbidden_and_gated() {
+        use kaptein_integration::kaptein_viewmodel::ActionState;
+        let actions = vec![
+            Action {
+                id: "describe".into(),
+                label_key: "action.describe".into(),
+                state: ActionState::Allowed,
+            },
+            Action {
+                id: "restart".into(),
+                label_key: "action.restart".into(),
+                state: ActionState::Forbidden {
+                    verb: "update".into(),
+                    resource: "deployments".into(),
+                    namespace: None,
+                },
+            },
+            Action {
+                id: "delete".into(),
+                label_key: "action.delete".into(),
+                state: ActionState::Gated {
+                    reason_key: "guardrail.break-glass".into(),
+                },
+            },
+        ];
+        assert_eq!(action_hint_line(&actions), "describe restart\u{d7} delete!");
+        assert_eq!(action_hint_line(&[]), "describe, diagnose");
     }
 
     #[test]

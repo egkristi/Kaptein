@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Changed
+- **TUI (M1.9) — the hint bar is now derived from the action graph, not hardcoded.** The
+  status line and detail pane previously rendered a literal `d:describe i:diagnose` string;
+  they now render `action_hint_line(&actions)`, a pure helper over the RBAC-preflighted
+  `semantic::Action` graph, marking `Forbidden` as `×` and `Gated` as `!` so the guardrail
+  is visible *before* the keystroke. This is one of the "one graph, three consumers" (TUI
+  hint bar, palette, agent tools) the milestone names, unit-tested.
+
 ## [0.34.0] - 2026-09-04
 
 ### Changed
