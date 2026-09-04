@@ -12,7 +12,8 @@
 //!   l  logs (pods)             i  diagnose
 //!   Shift-B  blast radius      Shift-W  what changed
 //!   h  health checks           ?  help overlay
-//!   :q / Ctrl-C  quit          Esc  back/dismiss (never quits)
+//!   Ctrl-R  refresh            Esc  back/dismiss (never quits)
+//!   :q / Ctrl-C  quit
 
 #![forbid(unsafe_code)]
 
@@ -506,6 +507,34 @@ async fn run_event_loop(
                 {
                     break;
                 }
+                KeyCode::Char('r')
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && palette_query.is_none()
+                        && jump_query.is_none() =>
+                {
+                    // Force refresh (M1.9 Ctrl-R): tear down and reseed the live plane. The
+                    // informer keeps the view live on its own; this is the explicit
+                    // "re-list now" the milestone names, useful after an out-of-band change.
+                    rebuild_plane(
+                        client,
+                        &mut plane,
+                        &mut watch,
+                        &kind,
+                        namespace.clone(),
+                        &informers,
+                    )
+                    .await?;
+                    selected = 0;
+                    scroll = 0;
+                    let (new_rows, new_total) =
+                        query_plane(&plane, &kind, sort_key, sort_descending, 0, page_height)
+                            .await?;
+                    rows = new_rows;
+                    total = new_total;
+                    last_revision = plane.mem().revision();
+                    detail = None;
+                    actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
+                }
                 _ if help => {
                     help = false;
                 }
@@ -942,6 +971,9 @@ fn help_text() -> String {
         "Sorting",
         "  s                cycle sort column",
         "  S                toggle sort direction",
+        "",
+        "Other",
+        "  Ctrl-R           force refresh (re-list)",
         "",
         "Quit",
         "  :q / :q! / :x / :wq   quit (vim-style)",
@@ -1804,6 +1836,7 @@ mod tests {
             "blast radius",
             "what changed",
             "sort",
+            "Ctrl-R",
         ] {
             assert!(h.contains(needle), "help text must mention {needle:?}");
         }

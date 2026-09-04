@@ -7,6 +7,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Changed
+- **TUI (M1.9) — `Ctrl-R` force refresh.** Tears down and reseeds the live plane (re-list +
+  re-preflight), the explicit "re-list now" the milestone names for use after an out-of-band
+  change; the informer already keeps the view live on its own. Documented in the `?` help
+  overlay and unit-tested to appear there.
 - **TUI (M1.9) — the hint bar is now derived from the action graph, not hardcoded.** The
   status line and detail pane previously rendered a literal `d:describe i:diagnose` string;
   they now render `action_hint_line(&actions)`, a pure helper over the RBAC-preflighted

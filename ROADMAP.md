@@ -369,7 +369,7 @@ Milestones:
   | `n` / `c` | Copy namespace / copy name | **add**; frees `n` from namespace-cycling (the ladder does that now) |
   | `space` `Ctrl-Space` `Ctrl-\` | Mark / range-mark / clear marks | **add** — the prerequisite for bulk actions |
   | `Ctrl-W` `Ctrl-E` `Ctrl-G` `Ctrl-Z` | Toggle wide / header / breadcrumbs / faults-only | **add** |
-  | `Ctrl-R` | Refresh | **add** (force relist; the informer already keeps it live) |
+  | `Ctrl-R` | Refresh | **add** (force relist; the informer already keeps it live). *(Landed v0.34.0 →: `Ctrl-R` tears down and reseeds the live plane, re-queries, and re-preflights.)* |
   | `/`, `/!`, `/-l`, `/-f` | Filter, inverse, label-selector, fuzzy | **extend** — today `/` is fuzzy-only |
 
   Kaptein-unique keys, checked against the k9s table for collisions:
