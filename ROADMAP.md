@@ -264,6 +264,17 @@ Milestones:
       commits/releases, not just gated. The CI `bench` job now runs both suites and fails
       on regression. The kwok harness + end-to-end keystroke-to-frame number remain the
       frontend-level tail.*
+    - **Open (external strategy review, 2026-09) — the benchmark is absolute; the *claim*
+      is comparative.** `README.md`'s comparison table promises "the same speed [as k9s]
+      *plus* deep diagnostics", and that is the load-bearing claim for terminal users —
+      but every number the suite records is Kaptein-against-itself. The reviewer is right
+      that this is the one place a skeptic can dismiss the project wholesale, and the fix
+      is cheap now that the kwok harness is the remaining piece anyway: run **k9s and
+      Kaptein against the same kwok cluster** at 1 k / 10 k / 50 k pods and record startup,
+      keystroke-to-render, RSS, and API request count for both, in-repo and reproducible.
+      Either it substantiates the table's first row, or it tells us to change the row —
+      both outcomes are worth more than the current silence. Fold this into the kwok
+      harness rather than tracking it separately.
   - **Open (re-audit v0.31.0) — the allocation pattern this milestone removed came back on
     the search path** (finding AA). Windowing closed finding Q for the steady-state table,
     but fuzzy-jump did not follow. Entering `/` correctly snapshots the full set (search
@@ -315,6 +326,26 @@ GitOps write path, time machine, or fleet.
   `kaptein why-job-pending` expose two of the four moat tools as first-class CLI
   commands, reusing `kaptein-core::moat` (the same engine the MCP tools call), so the
   moat is one implementation surfaced two ways.*
+  - **Open (external strategy review, 2026-09) — *the tool list is hand-maintained, so the
+    agent surface can drift from the human one*** (`ISSUES.md` finding AF).
+    `mcp.rs::tools()` is a literal `vec![Tool::new(…), …]` with nine hand-written entries
+    and **zero** references to `actions_as_semantic`, `semantic::Action`, or any action
+    graph — while `surface.rs`'s own doc comment states the contract: *"Headless and MCP
+    are consumers of the **semantic layer** (they read the data plane and action graph…)"*.
+    Today, adding a view-model action does not expose it to agents and removing one does
+    not retract it; the two surfaces are kept in sync by memory.
+    - This is the **third** hand-maintained set this project has kept in prose: the
+      guarded-command set (finding U — drifted, `exec` was missing), lens redaction
+      (finding AC — drifted twice), and now the agent tool surface. The first two both
+      drifted before anyone noticed. There is no reason to expect the third to behave
+      differently.
+    - **Fix:** derive the tool list from the action graph, or assert equivalence in a test
+      that fails when a view-model action has no corresponding tool (and vice versa).
+    - The payoff is a feature, not just hygiene: **a new view-model action becomes
+      agent-callable for free** — which is the "domain layer is the product" thesis
+      actually cashing out, and a better demo of the architecture than any prose.
+    - **DoD (falsifiable):** adding an action to the view-model's action graph makes it
+      appear in `tools()` with no edit to `mcp.rs`, or a test fails.
 - **M1b.4 Governance conformance — *blocking*** *(elevated per review)*
   - Every tool call actually runs **RBAC preflight + context classification + read-only
     guardrail** *before* reaching the API server — not merely documented
@@ -345,6 +376,35 @@ GitOps write path, time machine, or fleet.
 **Goal:** the same view-model drives the **browser UI** (via `serve` + wasm), and the
 GitOps write path becomes the differentiator. The native desktop GUI is **not** on the
 critical path — it is the same egui code packaged later, after 3a validates the product.
+
+> **Sequencing note (external strategy review, 2026-09): ship M2.3 before M2.1 and M2.6.**
+> The phase is titled "Browser UI + … + GitOps", and the ordering has so far implied the
+> UI comes first. Three arguments say otherwise, and they are independent:
+>
+> 1. **M2.3 completes the product's own sentence.** The tagline is *"the console that knows
+>    what changed — and lets you fix it in Git"*; the second half **is** M2.3. Until it
+>    ships, the headline claim is unshipped, and `apply_patch_real` remains a
+>    pre-positioned function with no caller (finding Y).
+> 2. **M2.3 is what makes the agent surface writable safely.** ADR-0010's whole position is
+>    that an agent never writes to the API server — it opens a PR. Without M2.3 the governed
+>    MCP surface is permanently read-only, which caps the differentiator's value at
+>    "diagnosis" when the demand is for "safe remediation".
+> 3. **Both differentiators now have live competition.** The reviewer identified
+>    GitOps-diagnosis tooling (`skyhook-io/radar`) and governed-agent tooling (Kubernetes
+>    MCP Guard, with human-in-the-loop plan approval and JSONL audit) already shipping.
+>    Neither has the shared-guardrail architecture, but shipping order decides who is seen
+>    to have solved it. Spending the next phase on a GUI cedes that.
+>
+> The GUI argument compounds it: the Kubernetes Dashboard is archived and **Headlamp** is
+> the SIG-UI successor — CNCF Sandbox, Microsoft-backed, Apache-2.0, with an established
+> plugin system. Entering that category late and solo is the worst-odds bet on this
+> roadmap, and there is a cheaper play: publishing `kaptein-viewmodel` as a stable,
+> semver'd boundary (already published to crates.io) and letting a Headlamp **plugin** be
+> the browser surface, rather than building `serve` + wasm from scratch. Worth deciding
+> explicitly before M2.1 starts, not during it.
+>
+> This note does not renumber the milestones — M2.1/M2.6 keep their identifiers. It records
+> the recommended execution order and why.
 
 Milestones:
 
@@ -470,6 +530,23 @@ Milestones:
     *Closed (v0.31.0 →): `lru_evicts_the_coldest_not_the_hottest_view` does exactly this —
     it fills the cap, queries view A (touching it via `LivePlane::query`), registers a
     third view, and asserts A survives and the coldest view is evicted.*
+  - **Open (external strategy review, 2026-09) — property-test this subsystem**
+    (`ISSUES.md` finding AG). The reviewer flagged the ADR-0006 lifecycle as "a subtle
+    correctness surface worth fuzzing", and the audit record makes that unusually
+    concrete: findings **C** (LRU missing), **M** (cap unreachable), **N**/**Z**
+    (`release`/`touch` uncalled) were **all** in this one module, and **every one was found
+    by reading code, not by a failing test**. Four bugs, one subsystem, zero caught by the
+    nine example-based unit tests that cover it. That is the strongest empirical argument
+    for randomised testing anywhere in this codebase.
+    - The shape is ideal for it: a small state machine (`register`/`touch`/`release`/
+      `evict_idle` over a bounded map) with crisp invariants — `live() <= max_watches`;
+      a `release` frees exactly one slot; the most-recently-touched key is never the
+      eviction victim; no operation sequence leaks a slot; `register` is idempotent.
+    - No new dependency is strictly required (a deterministic seeded sequence generator in
+      a `#[test]` would do), though `proptest` as a dev-dependency is the conventional
+      choice. `cargo deny` already gates the licence check.
+    - **DoD (falsifiable):** a randomised sequence test over ≥10 000 operation sequences
+      asserts the invariants above and is wired into `cargo test`.
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none
@@ -795,6 +872,64 @@ Milestones:
 - Definition of Done: the complete capability set from `README.md`, with the five
   differentiators (governed MCP, GitOps write path, time machine, fleet query + drift)
   fully functional and cross-frontend.
+
+---
+
+## Open strategic decisions (not engineering — the maintainer's call)
+
+*Raised by an external strategy review (2026-09). Recorded here because each has concrete
+engineering consequences already tracked in this file, but **none is decided**, and none
+should be settled by an audit. Each needs an explicit answer; several of the others resolve
+once the first two are answered.*
+
+1. **Licence: keep BUSL-1.1 wholesale, or split open-core?** The review argues for
+   Apache-2.0 on core/viewmodel/TUI/CLI/MCP with BUSL retained on hub, fleet query,
+   multi-cluster `serve`, and SSO — Grafana's model. The evidence for a cost is already in
+   this repo rather than hypothetical: the *central* Krew index is closed to us (#34,
+   worked around with a custom index that most casual installs will not add), Homebrew
+   core / nixpkgs / distro packaging are effectively closed, and the CNCF landscape is a
+   primary discovery surface for platform engineers. The sharpest form of the argument:
+   the differentiated GTM niche this roadmap keeps pointing at — European regulated and
+   public-sector on-prem (airgap, no telemetry, NSM *Grunnprinsipper*, CRA/NIS2/DORA in
+   M3b.2) — is exactly the buyer whose procurement checks the OSI-approved list. If that
+   is the target, the licence currently works against it.
+   - Counter-considerations the review does not weigh: the extension surface is *already*
+     MIT/Apache-2.0 (ADR-0004), which is the part third parties actually build on; and a
+     licence change is effectively one-way once outside contributors exist.
+   - If the answer is "split", it is an **ADR**, not a roadmap bullet — it changes the CLA,
+     the commercial thresholds, and the crate metadata.
+   - If the answer is "keep", the review's fallback is worth taking: drop the 25-employee
+     test (it excludes tiny consultancies while a 20-person, well-funded startup passes)
+     and publish a one-page plain-English FAQ, since ambiguity — not the terms — is what
+     damaged BUSL adoption elsewhere.
+2. **Is this a product/company or an open project?** The repo currently signals both: BUSL
+   + CLA + commercial thresholds say company; "no telemetry, no account, no hosted service,
+   no marketplace" says open project. They imply different licences, different roadmaps,
+   and a different README. Answering this resolves (1), the scope question in (3), and the
+   contribution-friction question below.
+3. **Scope: is Phase 3b advertised as "planned" or as "integration targets"?** The review
+   reads the 14 README feature areas as a five-year roadmap for one person. That
+   overstates the position — Phase 3b is already explicitly *conditional* ("gated on Phase
+   3a finding users — an explicit stopping point, not a failure") and M3b.2 says "Image
+   scan (Trivy/Grype)", i.e. shell-out, consistent with the "no reimplemented scanners"
+   non-goal. The legitimate residue is **presentational**: a README reader cannot tell
+   integrate-from-implement. Making that distinction explicit in the feature list is a
+   docs fix, not a scope cut. *(Recorded so this specific critique does not recur.)*
+4. **Bus factor.** 247 commits, one contributor, CLA + DCO + BUSL. Nothing here survives
+   the maintainer losing interest. If it is meant to, contribution friction is the first
+   thing (1) and (2) should optimise for.
+
+**Presentation gaps** with engineering-adjacent cost, tracked as `ISSUES.md` findings AH
+and AI: no screenshot/GIF/asciinema anywhere in the README (for a *terminal* UI, the demo
+is the product), two install options both labelled "Recommended", and an MSRV policy
+(`docs/versioning.md`: "lags to accommodate airgapped and distro toolchains") that the
+actual `1.97.1` pin does not deliver.
+
+**Signals worth watching** (proposed by the review, adopted here because each is
+falsifiable and none is a vanity metric): time-to-first-useful-command for someone who has
+never seen Kaptein; whether anyone *outside* the repo writes a lens — the single best
+evidence the ADR-0005 architecture bet paid off; and the first user who lets an agent touch
+a non-toy cluster, whose objection list is a better Phase 2 backlog than this document.
 
 ---
 
