@@ -6,6 +6,8 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-04
+
 ### Changed
 - **TUI (M1.9) — `Esc` no longer quits; add a `?` help overlay.** The most disqualifying
   usability defect for k9s migrants: `Esc` meant *back* in every TUI with a view stack, but

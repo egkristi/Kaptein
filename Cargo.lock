@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "kaptein"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "kaptein-core"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "futures-util",
  "k8s-openapi",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "kaptein-integration"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -1233,7 +1233,7 @@ dependencies = [
 
 [[package]]
 name = "kaptein-tui"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "crossterm",
  "k8s-openapi",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "kaptein-viewmodel"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "async-trait",
  "futures-channel",

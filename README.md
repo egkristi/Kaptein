@@ -455,7 +455,7 @@ Actions OIDC identity, then installs to `~/.local/bin`:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | bash
 # pick a version / install dir:
-KAPTEIN_VERSION=v0.33.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
+KAPTEIN_VERSION=v0.34.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
 This is the **one** path to lead with — it needs no Rust toolchain and gives the verified
