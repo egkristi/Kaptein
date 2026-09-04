@@ -14,6 +14,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `Ctrl-C`). A full-screen `?` keymap overlay (`help_text`, dismissable by any key) is the
   discoverability backstop, unit-tested to document every core binding and to state that
   `Esc` never quits.
+- **TUI (M1.9) — `y` (YAML) and `l` (logs) keys.** Two k9s-parity read actions that were
+  CLI-only: `y` shows the redacted raw manifest of the selected resource (via
+  `describe_dynamic`, the M1.7 choke point), and `l` tails the selected pod's logs (via
+  `pod_logs`, redacted). Both render in the detail pane; `l` reports explicitly on non-pod
+  kinds.
 
 ## [0.33.0] - 2026-09-04
 

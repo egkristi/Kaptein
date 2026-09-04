@@ -8,9 +8,10 @@
 //! Keys:
 //!   j/k  move selection        g/G  top/bottom
 //!   <Tab>  cycle resource kind  n  cycle namespace
-//!   d  describe selected        i  diagnose selected
-//!   h  health checks            ?  help overlay
-//!   :q / Ctrl-C  quit           Esc  back/dismiss (never quits)
+//!   d  describe                y  YAML
+//!   l  logs (pods)             i  diagnose
+//!   h  health checks           ?  help overlay
+//!   :q / Ctrl-C  quit          Esc  back/dismiss (never quits)
 
 #![forbid(unsafe_code)]
 
@@ -442,7 +443,7 @@ async fn run_event_loop(
                         .join(", ")
                 };
                 format!(
-                    "Actions: {actions_line}\nPress d to describe, i to diagnose, h for health checks."
+                    "Actions: {actions_line}\nPress d to describe, y for YAML, l for logs, i to diagnose, h for health checks."
                 )
             });
             let detail_para = Paragraph::new(detail_text)
@@ -792,6 +793,35 @@ async fn run_event_loop(
                         }
                     }
                 }
+                KeyCode::Char('y') if palette_query.is_none() => {
+                    // YAML view (M1.9, k9s `y`): the redacted raw manifest. `d` is the
+                    // human describe; `y` is the verbatim YAML — both go through the M1.7
+                    // redaction choke point, so a Secret never renders plaintext.
+                    let selected: Option<&TableRow> = if jump_query.is_some() {
+                        jump_selected_row(&jump_master, &jump_order, selected)
+                    } else {
+                        selected_row(&rows, selected, scroll, false)
+                    };
+                    if let Some(r) = selected {
+                        detail = describe(client, &kind, r).await.ok();
+                    }
+                }
+                KeyCode::Char('l') if palette_query.is_none() => {
+                    // Logs (M1.9, k9s `l`): tail the selected pod's logs (redacted per
+                    // M1.7). Pods only — other kinds report so explicitly.
+                    if !kind.is_pods() {
+                        detail = Some("Logs are available for pods only.".into());
+                    } else {
+                        let selected: Option<&TableRow> = if jump_query.is_some() {
+                            jump_selected_row(&jump_master, &jump_order, selected)
+                        } else {
+                            selected_row(&rows, selected, scroll, false)
+                        };
+                        if let Some(r) = selected {
+                            detail = logs(client, r).await.ok();
+                        }
+                    }
+                }
                 KeyCode::Char('/') if palette_query.is_none() => {
                     // Enter fuzzy-jump mode (empty query = show all). Snapshot the full
                     // set (one query) so backspace can re-rank against it — the fuzzy
@@ -891,6 +921,8 @@ fn help_text() -> String {
         "",
         "Actions (on the selected resource)",
         "  d                describe",
+        "  y                YAML (redacted raw manifest)",
+        "  l                logs (pods)",
         "  i                diagnose (pods)",
         "  h                lens health checks",
         "",
@@ -1374,6 +1406,24 @@ async fn diagnose(client: &Client, row: &TableRow) -> io::Result<String> {
     }
 }
 
+/// Tail the selected pod's logs (M1.9 `l`), redacted per M1.7 by the core `pod_logs`
+/// path (which routes through `redact_line`). Returns a `[container] line`-joined block,
+/// or an empty string for a pod with no containers.
+async fn logs(client: &Client, row: &TableRow) -> io::Result<String> {
+    let lines = kaptein_core::describe::pod_logs(client, &row.namespace, &row.name, Some(200))
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    if lines.is_empty() {
+        Ok(format!("{}: no log lines", row.name))
+    } else {
+        Ok(lines
+            .iter()
+            .map(|(c, l)| format!("[{c}] {l}"))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
 /// Evaluate a lens-driven kind's declared health checks against the selected resource
 /// (M2.2 per-lens health). Fetches the **redacted** object once, runs the view-model's
 /// `evaluate_health` (the same engine `viewdef-render` uses), and formats a finding per
@@ -1585,6 +1635,8 @@ mod tests {
             "fuzzy-jump",
             "command palette",
             "describe",
+            "YAML",
+            "logs",
             "diagnose",
             "health",
             "sort",

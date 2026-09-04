@@ -354,10 +354,10 @@ Milestones:
 
   | k9s key | Action | Status in Kaptein |
   |---------|--------|-------------------|
-  | `y` | View YAML | **add** (redacted — M1.7 choke point applies) |
+  | `y` | View YAML | **add** (redacted — M1.7 choke point applies). *(Landed v0.33.0 →: `y` shows the redacted raw manifest via `describe_dynamic`.)* |
   | `d` | Describe | already `d` ✔ |
   | `e` | Edit (`$EDITOR`) | **add** — `edit.rs` exists (unredacted + `SecretViewed` audit) |
-  | `l` / `p` | Logs / previous logs | **add** — `follow_logs` exists, redacted per M1.7 |
+  | `l` / `p` | Logs / previous logs | **add** — `follow_logs` exists, redacted per M1.7. *(Landed v0.33.0 →: `l` tails the selected pod's logs via `pod_logs`, redacted.)* |
   | `s` | **Shell into container** | **conflict — Kaptein's sort-cycle must move** |
   | `a` | Attach | **add** — `exec_tty` exists |
   | `f` / `Shift-F` | Port-forward list / new forward | **add** — `portforward.rs` exists |
