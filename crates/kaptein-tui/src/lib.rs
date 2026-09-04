@@ -9,7 +9,8 @@
 //!   j/k  move selection        g/G  top/bottom
 //!   <Tab>  cycle resource kind  n  cycle namespace
 //!   d  describe selected        i  diagnose selected
-//!   :q / Esc / Ctrl-C  quit
+//!   h  health checks            ?  help overlay
+//!   :q / Ctrl-C  quit           Esc  back/dismiss (never quits)
 
 #![forbid(unsafe_code)]
 
@@ -257,6 +258,10 @@ async fn run_event_loop(
     let mut scroll: usize = 0;
     let mut selected: usize = 0;
     let mut detail: Option<String> = None;
+    // Help overlay: `?` toggles a full-screen keymap reference (the discoverability
+    // backstop from M1.9). When `true`, the table is dimmed under the overlay and any
+    // key dismisses it.
+    let mut help: bool = false;
     // Number of table rows visible in the current terminal (set each frame; drives the
     // scroll window instead of a hardcoded constant).
     let mut page_height: usize = 10;
@@ -443,6 +448,25 @@ async fn run_event_loop(
             let detail_para = Paragraph::new(detail_text)
                 .block(Block::default().title(" Detail ").borders(Borders::ALL));
             frame.render_widget(detail_para, chunks[2]);
+
+            // Help overlay (M1.9): a full-screen keymap reference, rendered *over* the
+            // table so the operator can look up any binding without leaving the view.
+            // Any key dismisses it; `?` toggles; `Esc` also dismisses (and, at the root,
+            // never quits).
+            if help {
+                let help_text = help_text();
+                let overlay = ratatui::widgets::Paragraph::new(help_text)
+                    .block(Block::default().title(" Help — press any key to close ").borders(Borders::ALL))
+                    .style(Style::default().fg(Color::White));
+                let overlay_area = ratatui::layout::Rect {
+                    x: area.x + 2,
+                    y: area.y + 1,
+                    width: area.width.saturating_sub(4),
+                    height: area.height.saturating_sub(2),
+                };
+                frame.render_widget(ratatui::widgets::Clear, overlay_area);
+                frame.render_widget(overlay, overlay_area);
+            }
         })?;
 
         if event::poll(std::time::Duration::from_millis(100))?
@@ -474,13 +498,28 @@ async fn run_event_loop(
                     total = new_total;
                     selected = selected.min(total.saturating_sub(1));
                 }
-                KeyCode::Esc => break,
+                KeyCode::Esc if help => {
+                    // Esc dismisses the help overlay — and, at the root of the navigation
+                    // ladder (M1.9), it is a *no-op*, never a quit. In k9s — and lazygit,
+                    // and every TUI with a view stack — Esc means "back"; a k9s user's
+                    // first reflex must not close Kaptein. Quit is now explicit only:
+                    // `:q`/`:q!`/`:x`/`:wq`, or `Ctrl-C`.
+                    help = false;
+                }
+                KeyCode::Char('?') if palette_query.is_none() && jump_query.is_none() => {
+                    help = !help;
+                }
+                // While the help overlay is up, any other key dismisses it (the overlay is
+                // a reference, not a modal prompt). Ctrl-C still quits.
                 KeyCode::Char('c')
                     if key.modifiers.contains(KeyModifiers::CONTROL)
                         && palette_query.is_none()
                         && jump_query.is_none() =>
                 {
                     break;
+                }
+                _ if help => {
+                    help = false;
                 }
                 KeyCode::Char(':') if palette_query.is_none() && jump_query.is_none() => {
                     // Open the command palette.
@@ -834,6 +873,37 @@ fn status_style(status: &str) -> Style {
         "Pending" | "ContainerCreating" => Style::default().fg(Color::Yellow),
         _ => Style::default().fg(Color::Red),
     }
+}
+
+/// The `?` help overlay text — a single reference of the current keymap (M1.9). This is
+/// intentionally *not* derived from the action graph yet (that is the dynamic hint bar the
+/// milestone tracks); it is the discoverability backstop that makes every existing binding
+/// visible without reading the source or the status line.
+fn help_text() -> String {
+    [
+        "Navigation",
+        "  j / k or ↓ / ↑   move selection",
+        "  g / G            jump to top / bottom",
+        "  Tab              cycle resource kind",
+        "  n                cycle namespace",
+        "  /                fuzzy-jump filter (Enter accept, Esc cancel)",
+        "  :                command palette (e.g. :q to quit)",
+        "",
+        "Actions (on the selected resource)",
+        "  d                describe",
+        "  i                diagnose (pods)",
+        "  h                lens health checks",
+        "",
+        "Sorting",
+        "  s                cycle sort column",
+        "  S                toggle sort direction",
+        "",
+        "Quit",
+        "  :q / :q! / :x / :wq   quit (vim-style)",
+        "  Ctrl-C            quit",
+        "  Esc               back / dismiss (never quits)",
+    ]
+    .join("\n")
 }
 
 /// Equal-width column constraints (geometry) for the table, one per header.
@@ -1502,6 +1572,36 @@ mod tests {
         assert_eq!(
             out,
             "ready-instances: health.ready-instances (Error)\nreplication-lag: health.replication-lag (Warning)"
+        );
+    }
+
+    #[test]
+    fn help_text_documents_the_keymap_and_quit_is_explicit() {
+        let h = help_text();
+        // The discoverability backstop: every core binding is present.
+        for needle in [
+            "j / k",
+            "Tab",
+            "fuzzy-jump",
+            "command palette",
+            "describe",
+            "diagnose",
+            "health",
+            "sort",
+        ] {
+            assert!(h.contains(needle), "help text must mention {needle:?}");
+        }
+        // Esc is documented as *never* quitting (M1.9 — a k9s user's first reflex).
+        assert!(
+            h.contains("never quits"),
+            "help text must state Esc never quits"
+        );
+        // Quit is explicit: :q variants and Ctrl-C.
+        assert!(h.contains(":q"), "help text must list :q quit");
+        assert!(h.contains("Ctrl-C"), "help text must list Ctrl-C quit");
+        assert!(
+            !h.contains("Esc               quit"),
+            "Esc must not be documented as quit"
         );
     }
 }

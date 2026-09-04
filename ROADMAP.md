@@ -293,16 +293,172 @@ Milestones:
     mode renders from `jump_master`+`jump_order` (no per-keystroke clone);
     `fuzzy_rank_indices` + an allocation-free `fuzzy_score` removed the per-candidate
     `String`/`Vec<char>`; and `benches/query.rs` gates a fuzzy re-rank (4 ms vs 11 ms).*
+- **M1.9 TUI navigation, keymap & context picker — *TOP PRIORITY, blocking Phase 1 DoD***
+  *(added 2026-09 on operator feedback: "not very efficient or intuitive to work in")*
+
+  **The problem, stated precisely.** The TUI is *flat*: one `kind` cycled by `Tab`, one
+  `namespace` cycled by `n`, no drill-down, no `Enter` action on a row, and a detail pane
+  that only does describe/diagnose/health. Three specific defects make it hostile to a k9s
+  migrant, and one makes it hostile to everyone:
+  - **`Esc` quits the application.** In k9s — and lazygit, and every TUI with a view stack
+    — `Esc` means *back*. A k9s user's first reflex closes Kaptein. This alone is
+    disqualifying for daily-driver use.
+    *Fixed (v0.33.0 →): `Esc` no longer quits — it cancels jump/palette mode, dismisses
+    the `?` help overlay, and is otherwise a **no-op**. Quit is now explicit only
+    (`:q`/`:q!`/`:x`/`:wq`, or `Ctrl-C`).*
+  - **`s` and `n` are bound against k9s.** `s` is sort-cycle here, **shell-into-container**
+    in k9s; `n` is namespace-cycle here, **copy-namespace** in k9s. Muscle memory misfires
+    into the wrong action.
+  - **The hint bar is a hardcoded `format!` string** (`"Tab:kind n:ns s:sort …"`) — the
+    same seven keys regardless of what is selected or what RBAC permits, even though a
+    fully RBAC-preflighted action graph already exists and drives grey-out elsewhere.
+  - **The TUI cannot do most of what Kaptein can do.** No YAML view, no logs, no exec, no
+    port-forward, no delete, no edit. Those all exist in `kaptein-core` and are exposed by
+    the **CLI** — so the Phase 1 "k9s-parity checklist" below is satisfied by the CLI while
+    the DoD sentence says *"a daily-driver **TUI**… with k9s parity"*. The checklist and
+    the DoD disagree; this milestone is what makes them agree.
+
+  ### The navigation model: a hierarchical ladder **plus** a jump escape-hatch
+
+  k9s is *flat with a history stack* — you are always in one resource view, you change view
+  by typing `:pods`, and `Esc`/`[`/`]` walk history. That is fast for experts and opaque for
+  newcomers. A pure hierarchy is discoverable but slow for experts. **Ship both, over one
+  stack** — that is the actual "best of all worlds", and it is the organising decision here:
+
+  ```
+  Contexts ─► Fleet ─► Cluster ─► Namespace ─► Resource kind ─► Object ─► Detail
+                                                                          (yaml│logs│
+                                                                           diagnose│
+                                                                           health│events)
+  ```
+
+  | Key | Meaning | Notes |
+  |-----|---------|-------|
+  | `Enter` | **Descend** one rung into the selection | namespace → its kinds → its objects → detail |
+  | `Esc` | **Ascend** one rung | at the root (Contexts) it is a no-op, *never* a quit |
+  | `Tab` / `Shift-Tab` | Cycle **siblings at the current rung** | next/prev kind in a kind list, next/prev namespace at namespace level — the behaviour requested, and it does not collide with k9s because k9s only uses `Tab` for completion *inside* `:` mode, which this preserves |
+  | `:` | **Jump anywhere directly** (`:po`, `:ns`, `:ctx`, `:svc`) with aliases + `Tab` completion | the k9s escape hatch, so no power user is forced to walk the ladder |
+  | `[` / `]` | Back / forward through **history** | k9s semantics; history is *where you have been*, the ladder is *where you are* — they are different axes and both are useful |
+  | `?` | Contextual help for the current rung + selection | k9s; also the discoverability backstop. *(Landed v0.33.0 →: a full-screen `?` keymap overlay, `help_text()`, dismissable by any key — the static reference; the *contextual* (per-rung/action-graph) form is the dynamic hint bar, still open.)* |
+  | `Ctrl-A` | All resource aliases | k9s |
+
+  A **breadcrumb** in the header renders the ladder — `ctx:prod-eu › ns:payments › Pods ›
+  checkout-7f9` — so position is always visible (k9s `Ctrl-G` toggles it; make it on by
+  default). The **Fleet rung is designed in now and inert until M3a.2** so that adding it
+  later is a data change, not a re-architecture; until then `Esc` from Cluster goes
+  straight to Contexts.
+
+  ### Keymap: adopt k9s verbatim where the key is free; **k9s wins every conflict**
+
+  Migration cost is the whole point, so where Kaptein and k9s disagree, Kaptein moves.
+
+  | k9s key | Action | Status in Kaptein |
+  |---------|--------|-------------------|
+  | `y` | View YAML | **add** (redacted — M1.7 choke point applies) |
+  | `d` | Describe | already `d` ✔ |
+  | `e` | Edit (`$EDITOR`) | **add** — `edit.rs` exists (unredacted + `SecretViewed` audit) |
+  | `l` / `p` | Logs / previous logs | **add** — `follow_logs` exists, redacted per M1.7 |
+  | `s` | **Shell into container** | **conflict — Kaptein's sort-cycle must move** |
+  | `a` | Attach | **add** — `exec_tty` exists |
+  | `f` / `Shift-F` | Port-forward list / new forward | **add** — `portforward.rs` exists |
+  | `Ctrl-D` / `Ctrl-K` | Delete (confirm) / kill | **add** — must route through `gate_write` + break-glass + audit |
+  | `r` | Restart (workload) / drain (node) | **add** — `workloads.rs`, `nodes.rs` |
+  | `u` | Cordon/uncordon (node) | **add** — `nodes.rs` |
+  | `Shift-J` | Jump to owner | **add** — `moat::blast_radius` already walks the ownership chain |
+  | `Shift-O` `Shift-N` `Shift-A` `Shift-P` `Shift-S` | Sort by column / name / age / namespace / status | **replaces** today's `s`/`S` |
+  | `n` / `c` | Copy namespace / copy name | **add**; frees `n` from namespace-cycling (the ladder does that now) |
+  | `space` `Ctrl-Space` `Ctrl-\` | Mark / range-mark / clear marks | **add** — the prerequisite for bulk actions |
+  | `Ctrl-W` `Ctrl-E` `Ctrl-G` `Ctrl-Z` | Toggle wide / header / breadcrumbs / faults-only | **add** |
+  | `Ctrl-R` | Refresh | **add** (force relist; the informer already keeps it live) |
+  | `/`, `/!`, `/-l`, `/-f` | Filter, inverse, label-selector, fuzzy | **extend** — today `/` is fuzzy-only |
+
+  Kaptein-unique keys, checked against the k9s table for collisions:
+
+  | Key | Action | Collision check |
+  |-----|--------|-----------------|
+  | `i` | **Diagnose** (M1.6 rule engine) | free in k9s ✔ |
+  | `h` | **Lens health** (M2.2) | free in k9s ✔ (vim `h`=left is meaningless in a table) |
+  | `Shift-B` | **Blast radius** | plain `b` is k9s *benchmark* — take `Shift-B` |
+  | `Shift-W` | **What changed** (M1.4 ring) | plain `w` is k9s *warp/wrap* — take `Shift-W` |
+  | `g` / `G` | Top / bottom | vim-standard, free ✔ |
+
+  ### The dynamic hint bar — generated, never written
+
+  The operator asked for per-resource shortcuts shown dynamically. The correct
+  implementation is not a bigger `format!`: **render the hint bar from the semantic action
+  graph** (`semantic::Action { id, label_key, state }`), which is already produced per-GVK
+  and already RBAC-preflighted by `kaptein-integration::preflight_actions`. Then:
+  - only actions valid for *this* rung and *this* selection appear;
+  - `ActionState::Forbidden` renders greyed with the missing verb as the reason, instead of
+    a 403 after the fact;
+  - `ActionState::Gated` renders with a break-glass marker, so the guardrail is visible
+    before the keystroke.
+
+  **This is the same action graph finding AF says the MCP tool list must derive from.**
+  Doing both makes it *one graph, three consumers* — TUI hint bar, command palette, and
+  agent tool surface — so a new action becomes discoverable, greppable, and agent-callable
+  in one edit. That is the "domain layer is the product" thesis finally cashing out in the
+  UI, and it is the reason to do this properly rather than hardcode a longer string.
+
+  ### Startup: a context picker, not a stack trace
+
+  `run()` currently does `discovery::client().await?` and propagates the error, so an
+  unreachable cluster is a crash. Required behaviour:
+  - **Never fail to start.** Failure to reach a cluster opens the **Contexts rung** — the
+    root of the ladder — not an error exit.
+  - Enter the Contexts rung when: no current context; the current context is unreachable;
+    `--context` names something absent; or explicitly via `kaptein tui --contexts` / `:ctx`.
+  - `discovery::list_contexts()` **already reads the kubeconfig offline** (no cluster
+    contact), so the picker works with the network down — this is cheap.
+  - Probe reachability per context **asynchronously with a short timeout** (reuse the
+    300 ms `tokio::time::timeout` pattern from `completion.rs`, finding R) and render
+    reachable/unreachable/unknown per row. Never block the UI on a dead endpoint.
+  - Show the **guardrail classification** in the picker (prod contexts red) so the risk is
+    visible *before* connecting, not after.
+  - Note this is a place where Kaptein can be **better than k9s**, not merely equal: k9s
+    exits with "Boom!! K9s can't connect to cluster" and starting in the context view is a
+    long-standing open request (derailed/k9s#693).
+
+  ### Staging (the event loop is 1 500 lines and works — do not rewrite it in one pass)
+
+  1. **Unblock the migrants (smallest, highest value):** `Esc` = back (introduce the view
+     stack with two rungs), context picker on startup, free `s`/`n` and move sort to the
+     `Shift-*` keys. Nothing new is computed; this is rebinding plus a stack.
+  2. **The ladder:** namespace → kind → object → detail rungs, breadcrumb, `Tab` siblings,
+     `[`/`]` history, `:` jump with aliases.
+  3. **The action graph hint bar** + `?` contextual help, and *simultaneously* derive the
+     MCP tool list from the same graph (finding AF) so the two cannot drift.
+  4. **The missing verbs:** `y`, `l`/`p`, `s`, `a`, `e`, `f`/`Shift-F`, `Ctrl-D`, `r`, `u`,
+     `Shift-J` — each routed through the existing `gate_write` + audit path, not around it.
+  5. **Bulk + polish:** marks, filter modes, toggles, `Ctrl-R`.
+
+  ### DoD (falsifiable)
+  - A k9s user's reflexes do not misfire: `Esc` goes back, `s` opens a shell, `y` shows
+    YAML, `d` describes, `l` tails logs — asserted by a **keymap conformance test** that
+    pins every binding in the table above, so a future rebinding cannot silently regress it.
+  - Starting with an unreachable cluster (or none) lands on the Contexts rung — asserted by
+    a test that points `KUBECONFIG` at an unroutable endpoint and expects a picker, **not**
+    an `Err`.
+  - The hint bar is **derived**: a test adds an action to the graph and asserts it appears
+    in the hint bar with no edit to the TUI, and that a `Forbidden` action renders greyed.
+  - Every mutating key routes through `gate_write` + emits an `AuditEvent` — reuse the
+    *derived* coverage test from finding U rather than restating the set by hand.
+  - The Phase 1 k9s-parity checklist below is satisfied **by the TUI**, not by the CLI.
+
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
 
-  **k9s-parity checklist (all must be true):**
-  - list pods / deployments / services / nodes; column sort and filter
-  - context switching and namespace switching
-  - logs with follow + regex filter; describe
-  - exec into a pod; scale a deployment; delete with cascade selection
-  - port-forward; YAML view of any resource
-  - RBAC-preflight-greyed actions and prod-context "break glass" gate
+  **k9s-parity checklist — *each item must be true in the TUI, not merely in the CLI*.**
+  M1.9 exists because that qualifier was implicit and unmet: the items marked ⚠ ship in
+  `kaptein-core` and are reachable from the CLI, but the TUI cannot do them today.
+  - ✔ list pods / deployments / services / nodes; column sort and filter
+  - ⚠ context switching and namespace switching *(no context switcher in the TUI at all —
+    M1.9 context picker; namespace switching is a blind `n`-cycle with no picker)*
+  - ⚠ logs with follow + regex filter; ✔ describe
+  - ⚠ exec into a pod; ⚠ scale a deployment; ⚠ delete with cascade selection
+  - ⚠ port-forward; ⚠ YAML view of any resource
+  - ✔ RBAC-preflight-greyed actions and prod-context "break glass" gate *(the action graph
+    is preflighted and greys out; M1.9 makes it drive the hint bar as well)*
 
 ## Phase 1b — Governed MCP surface (read-only)
 
@@ -1041,9 +1197,19 @@ a non-toy cluster, whose objection list is a better Phase 2 backlog than this do
   covering it (AA), and M2.0b's remaining DoD clauses — port-forward, the MCP protocol,
   the CLI binary end to end, and cordon/uncordon — are all live-tested in CI (AB). The
   v0.32.0 batch — AC (redaction as a type), AD (health in the manual), AE (health on more
-  lenses) — is also closed. The live next steps, in order: **1.** the **M1.8 kwok
-  synthetic-cluster harness** (the last aspirational number); **2. M2.1 browser UI**;
-  **3. M2.2** per-lens action/health *panel*; and the distribution tail (Homebrew tap,
+  lenses) — is also closed. The live next steps, in order:
+  **1. M1.9 — TUI navigation, keymap & context picker.** Promoted to the top on direct
+  operator feedback ("not very efficient or intuitive to work in"). It outranks everything
+  below because the TUI is the daily-driver surface and the Phase 1 DoD is *not currently
+  met by it*: `Esc` quits instead of going back, `s`/`n` are bound against k9s muscle
+  memory, the hint bar is a hardcoded string, an unreachable cluster is a crash rather than
+  a context picker, and the TUI cannot view YAML, tail logs, exec, port-forward, edit, or
+  delete — all of which `kaptein-core` already does. Stage 1 alone (Esc = back, context
+  picker, free `s`/`n`) removes the three reflexes that make a k9s migrant bounce, and
+  stage 3 pays a second dividend by sharing the action graph with finding AF.
+  **2.** the **M1.8 kwok synthetic-cluster harness** (the last aspirational number, now
+  also carrying the head-to-head k9s comparison); **3. M2.1 browser UI**; **4. M2.2**
+  per-lens action/health *panel*; and the distribution tail (Homebrew tap,
   release-triggered site version bump).)*
 
 - **What the v0.30.0 re-audit says about the process** — the previous cycle's lesson

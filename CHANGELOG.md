@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Changed
+- **TUI (M1.9) — `Esc` no longer quits; add a `?` help overlay.** The most disqualifying
+  usability defect for k9s migrants: `Esc` meant *back* in every TUI with a view stack, but
+  in Kaptein it quit the application. It now cancels jump/palette mode, dismisses the `?`
+  help overlay, and is otherwise a no-op — quit is explicit only (`:q`/`:q!`/`:x`/`:wq`, or
+  `Ctrl-C`). A full-screen `?` keymap overlay (`help_text`, dismissable by any key) is the
+  discoverability backstop, unit-tested to document every core binding and to state that
+  `Esc` never quits.
+
 ## [0.33.0] - 2026-09-04
 
 ### Security
