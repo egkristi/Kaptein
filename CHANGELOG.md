@@ -6,6 +6,31 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-04
+
+### Security
+- **M1.7 finding AC — lens redaction is now a type, not a convention.** `render_row`,
+  `evaluate_status`, and `evaluate_health` previously took a bare `&serde_json::Value` and
+  trusted the caller to have redacted it — the pattern behind two plaintext-Secret leaks
+  (#35 and commit 6692b10). They now take `&Redacted`, a newtype constructible only via
+  `Redacted::from_redacted` (the cluster-facing paths, after `redact_object`) or the
+  deliberately-greppable `Redacted::from_unredacted_for_lens_authoring` (used only by
+  `kaptein viewdef render`, which renders a user-supplied file with no cluster secret to
+  leak). A bare `Value` no longer compiles, so the guarantee lives in the signature — the
+  "derive, don't restate" lesson applied to types.
+
+### Added
+- **M1.8 — the benchmark is now a recorded, comparable suite.** A second, dependency-free
+  benchmark `crates/kaptein-core/benches/core_paths.rs` gates the Kubernetes-side hot paths
+  (informer-store watch-delta apply, watchring reduce+push, `redact_object`) over 10 000
+  synthetic events, with its own p99 budgets. Both benches now emit machine-readable JSON
+  (`schema: kaptein-benchmark/v1`) to `$KAPTEIN_BENCH_OUT`; a `benchmarks/` directory
+  (README + `schema.json`) documents the result contract; and `scripts/bench-record.sh`
+  runs both suites, stores the merged result under `benchmarks/results/<sha>-<ts>.json`
+  (git-ignored), and prints a line-by-line diff against the previous run — so performance
+  is **comparable across commits and releases**, not just gated. The CI `bench` job now
+  runs both suites.
+
 ### Fixed
 - **External strategy review (2026-09) — findings AF, AG, AH, AI.**
   - **AF (High)** — the MCP tool list was hand-maintained and could drift from the semantic
@@ -23,6 +48,10 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - **AI (Low)** — `docs/versioning.md` stated the MSRV "lags" as fact; the 1.97.1 pin is
     effectively latest. The policy now states the lag as *intent* (aspirational) rather
     than achieved.
+- **v0.32.0 re-audit — findings AD and AE.** `docs/USAGE.md` now documents the `h` key,
+  the `health:` block, and `viewdef-render` health output (AD); Strimzi Kafka, cert-manager
+  Certificate, and KubeVirt VirtualMachine now declare `health:` blocks, joining CNPG — four
+  of the nine shipped lenses (AE).
 - **Docs — the "same speed as k9s" claim is now honest.** The README comparison table
   previously asserted "✅ The same speed [as k9s] *plus* diagnostics" as a shipped fact, but
   the benchmark suite measures Kaptein-against-itself only — no head-to-head k9s comparison
@@ -30,35 +59,6 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   measured (fast terminal nav + vim keymap, diagnostics, governed MCP — all shipped) and
   points at `benchmarks/` for the measured numbers, while deferring the k9s comparison to
   M1.8 instead of asserting it.
-
-### Added
-- **M1.8 — the benchmark is now a recorded, comparable suite.** A second, dependency-free
-  benchmark `crates/kaptein-core/benches/core_paths.rs` gates the Kubernetes-side hot paths
-  (informer-store watch-delta apply, watchring reduce+push, `redact_object`) over 10 000
-  synthetic events, with its own p99 budgets. Both benches now emit machine-readable JSON
-  (`schema: kaptein-benchmark/v1`) to `$KAPTEIN_BENCH_OUT`; a `benchmarks/` directory
-  (README + `schema.json`) documents the result contract; and `scripts/bench-record.sh`
-  runs both suites, stores the merged result under `benchmarks/results/<sha>-<ts>.json`
-  (git-ignored), and prints a line-by-line diff against the previous run — so performance
-  is **comparable across commits and releases**, not just gated. The CI `bench` job now
-  runs both suites.
-
-### Security
-- **M1.7 finding AC — lens redaction is now a type, not a convention.** `render_row`,
-  `evaluate_status`, and `evaluate_health` previously took a bare `&serde_json::Value` and
-  trusted the caller to have redacted it — the pattern behind two plaintext-Secret leaks
-  (#35 and commit 6692b10). They now take `&Redacted`, a newtype constructible only via
-  `Redacted::from_redacted` (the cluster-facing paths, after `redact_object`) or the
-  deliberately-greppable `Redacted::from_unredacted_for_lens_authoring` (used only by
-  `kaptein viewdef render`, which renders a user-supplied file with no cluster secret to
-  leak). A bare `Value` no longer compiles, so the guarantee lives in the signature — the
-  "derive, don't restate" lesson applied to types.
-
-### Fixed
-- **v0.32.0 re-audit — findings AD and AE.** `docs/USAGE.md` now documents the `h` key,
-  the `health:` block, and `viewdef-render` health output (AD); Strimzi Kafka, cert-manager
-  Certificate, and KubeVirt VirtualMachine now declare `health:` blocks, joining CNPG — four
-  of the nine shipped lenses (AE).
 
 ## [0.32.0] - 2026-09-01
 
