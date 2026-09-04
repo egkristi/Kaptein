@@ -6,6 +6,24 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+- **External strategy review (2026-09) — findings AF, AG, AH, AI.**
+  - **AF (High)** — the MCP tool list was hand-maintained and could drift from the semantic
+    layer. A canonical `semantic::MCP_TOOLS` registry now lives in the view-model, and
+    `tools_are_exactly_the_semantic_layer_registry` asserts `mcp.rs::tools()` exposes
+    exactly that set (same order, no extras).
+  - **AG (Medium)** — the informer lifecycle (the source of findings C/M/N/Z) had no
+    randomised testing. `randomized_sequences_preserve_the_lifecycle_invariants` drives
+    ≥10 000 deterministic register/touch/release/evict sequences and asserts the cap,
+    liveness agreement, exact slot-release, and leak-free draining.
+  - **AH (Low)** — the README install section offered two options both labelled
+    "Recommended". It now leads with **one** Recommended path (signed release) and
+    demotes `cargo install` to a labelled "Alternative". (The screenshot/asciinema demo
+    remains a follow-up.)
+  - **AI (Low)** — `docs/versioning.md` stated the MSRV "lags" as fact; the 1.97.1 pin is
+    effectively latest. The policy now states the lag as *intent* (aspirational) rather
+    than achieved.
+
 ### Added
 - **M1.8 — the benchmark is now a recorded, comparable suite.** A second, dependency-free
   benchmark `crates/kaptein-core/benches/core_paths.rs` gates the Kubernetes-side hot paths

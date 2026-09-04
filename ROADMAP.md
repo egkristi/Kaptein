@@ -346,6 +346,10 @@ GitOps write path, time machine, or fleet.
       actually cashing out, and a better demo of the architecture than any prose.
     - **DoD (falsifiable):** adding an action to the view-model's action graph makes it
       appear in `tools()` with no edit to `mcp.rs`, or a test fails.
+    - *Fixed (v0.32.0 →): `semantic::MCP_TOOLS` (the canonical registry, ADR-0013 order)
+      now lives in the view-model semantic layer, and `tools_are_exactly_the_semantic_layer_registry`
+      asserts `mcp.rs::tools()` exposes exactly that set — a tool added/renamed on either
+      side fails CI until the other follows.*
 - **M1b.4 Governance conformance — *blocking*** *(elevated per review)*
   - Every tool call actually runs **RBAC preflight + context classification + read-only
     guardrail** *before* reaching the API server — not merely documented
@@ -547,6 +551,11 @@ Milestones:
       choice. `cargo deny` already gates the licence check.
     - **DoD (falsifiable):** a randomised sequence test over ≥10 000 operation sequences
       asserts the invariants above and is wired into `cargo test`.
+    - *Fixed (v0.32.0 →): `randomized_sequences_preserve_the_lifecycle_invariants` — a
+      deterministic, dependency-free seeded LCG drives ≥10 000 register/touch/release/
+      evict sequences and asserts after every operation `live() <= max_watches`, touch and
+      release agree on liveness, a release of a live key drops `live()` by exactly one, and
+      eviction past the TTL drains to empty (no slot leak). Runs in `cargo test` (~0.5 s).*
 - **M2.0b Integration-test tier + platform CI matrix** *(elevated per review)*
   - A kind/envtest tier exercising the real kube client, the MCP protocol, the CLI, and
     every write path (scale/delete/restart/cordon/evict/apply/exec/portforward) — none

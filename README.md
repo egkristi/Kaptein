@@ -447,14 +447,6 @@ same view-model, invoked as subcommands (`kaptein tui`, `kaptein mcp`, …):
 |---------|---------|
 | `kaptein` | The CLI — scripting, one-shots, MCP server, extension lifecycle, **and** the TUI (`kaptein tui`). |
 
-**Recommended — `cargo install` (CLI):** if you have a Rust toolchain (≥ 1.97), the
-simplest way to get the CLI is the crate published on crates.io:
-
-```bash
-cargo install kaptein          # the CLI + TUI (one binary)
-kaptein tui                    # launch the TUI
-```
-
 **Recommended — signed release (one binary, no Rust):** the install script downloads
 the prebuilt, signed binary for your platform, verifies the SHA-256 checksum against
 the release's `SHA256SUMS`, and cosign-verifies that file's signature against the GitHub
@@ -466,11 +458,17 @@ curl -fsSL https://raw.githubusercontent.com/egkristi/Kaptein/main/install.sh | 
 KAPTEIN_VERSION=v0.32.0 KAPTEIN_INSTALL_DIR="$HOME/.local/bin" ./install.sh
 ```
 
-Which to use: `cargo install` is the default for CLI-only users who already have Rust
-(one standard command, version-pinned by crates.io, no signature verification to
-configure). `install.sh` is the default when you want the verified signature chain
-without a Rust toolchain — the path this project's security posture (`SECURITY.md`) is
-built around.
+This is the **one** path to lead with — it needs no Rust toolchain and gives the verified
+signature chain this project's security posture (`SECURITY.md`) is built around.
+
+**Alternative — `cargo install` (CLI):** if you already have a Rust toolchain (≥ 1.97)
+and prefer the crates.io path, the CLI is one standard command (no signature verification
+to configure, version-pinned by crates.io):
+
+```bash
+cargo install kaptein          # the CLI + TUI (one binary)
+kaptein tui                    # launch the TUI
+```
 
 Other install methods:
 

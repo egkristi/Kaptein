@@ -750,6 +750,28 @@ impl KapteinMcp {
 mod tests {
     use super::{KapteinMcp, check_declared_version, parse_gvk_parts, resource_from_kind};
 
+    /// **M1b.3 "derive, don't restate" (finding AF), made falsifiable.** The MCP tool
+    /// list must be exactly the semantic layer's `MCP_TOOLS` registry — no more, no less,
+    /// and in the same order. A tool added to (or renamed in) the view-model without a
+    /// matching `mcp.rs` entry fails this, and a tool hand-added only to `mcp.rs` fails
+    /// the reverse direction. This is the guard that would have caught the "hand-
+    /// maintained agent surface" drift the review flagged.
+    #[test]
+    fn tools_are_exactly_the_semantic_layer_registry() {
+        let advertised: Vec<String> = KapteinMcp::tools()
+            .into_iter()
+            .map(|t| t.name.into_owned())
+            .collect();
+        let expected: Vec<String> = kaptein_viewmodel::MCP_TOOLS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            advertised, expected,
+            "mcp.rs::tools() drifted from the semantic layer's MCP_TOOLS registry (finding AF)"
+        );
+    }
+
     /// **M2.0b "the MCP protocol" clause (finding AB), made live.** The MCP governance
     /// gate (`governance_check`: context classification + `SelfSubjectRulesReview`) has
     /// never been exercised against a real API server — only `preflight_target`'s

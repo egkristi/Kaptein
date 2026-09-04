@@ -45,7 +45,13 @@ commits and kept in sync with the tag.
 ## MSRV
 
 The Minimum Supported Rust Version is **the pinned toolchain in `rust-toolchain.toml`**,
-currently `1.97.1`. The MSRV is deliberately **not** "latest stable" — it lags to
-accommodate airgapped and distro toolchains. Policy: MSRV is the current pinned version;
-a bump happens only when a dependency raises its own MSRV above it, and CI runs on both
-the pinned version and `stable` to catch breakage before the bump.
+currently `1.97.1`. Policy: MSRV is the current pinned version; a bump happens only when
+a dependency raises its own MSRV above it, and CI runs on both the pinned version and
+`stable` to catch breakage before the bump.
+
+**Honest status:** the pin is **not currently lagging** — `1.97.1` is effectively latest,
+because the codebase uses edition-2024 and `LazyLock`, which no distro-stable channel
+carries yet. The *intent* is for the MSRV to lag once distro channels catch up, so
+airgapped and distro-toolchain users can build from source; today that intent is
+aspirational, not achieved by the chosen value. (Finding AI — the policy text previously
+stated the lag as fact rather than intent.)

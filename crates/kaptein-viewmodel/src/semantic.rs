@@ -73,6 +73,28 @@ pub fn action_verb(action_id: &str) -> &'static str {
     }
 }
 
+/// The governed agent tool surface — the **single source of truth** for which tools
+/// `kaptein mcp` advertises (ADR-0013). It lives here, in the semantic layer, not in
+/// `mcp.rs`, so the agent surface cannot silently drift from the human one (finding AF):
+/// the MCP server's `tools()` must expose exactly this set, and a test asserts the
+/// equivalence, so adding a tool here — or renaming one — fails CI until the MCP
+/// implementation follows.
+///
+/// The order is the ADR-0013 taxonomy: the four primitives first (commodity), then the
+/// diagnostic "moat" (`explain_pod_failure`, `what_changed_between`, `blast_radius`,
+/// `why_is_job_pending`), which are what make governed MCP more than a `kubectl` wrapper.
+pub const MCP_TOOLS: [&str; 9] = [
+    "list_resources",
+    "describe",
+    "logs",
+    "get_events",
+    "diagnose",
+    "explain_pod_failure",
+    "why_is_job_pending",
+    "blast_radius",
+    "what_changed_between",
+];
+
 /// Downgrade an action's state to `Forbidden` when the RBAC preflight denies the verb it
 /// needs. This is the renderer-agnostic grey-out: `Allowed`/`Gated` become `Forbidden`
 /// (with the structured verb/resource/namespace the frontend and MCP surface can act on);

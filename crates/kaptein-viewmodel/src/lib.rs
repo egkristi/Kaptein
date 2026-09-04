@@ -37,7 +37,7 @@ pub use mem_plane::{MemPlane, Schema};
 pub use render::{
     Cell, DataPlane, Filter, Page, Query, Revision, Row, RowId, RowPatch, SortSpec, StatusLevel,
 };
-pub use semantic::{Action, ActionState, Status, action_verb, downgrade_forbidden};
+pub use semantic::{Action, ActionState, MCP_TOOLS, Status, action_verb, downgrade_forbidden};
 pub use sink::{AuditConfig, AuditSink};
 pub use surface::{
     Column, ColumnKind, EditorMode, Field, FieldKind, Projection, SupportLevel, Surface,
