@@ -10,6 +10,7 @@
 //!   <Tab>  cycle resource kind  n  cycle namespace
 //!   d  describe                y  YAML
 //!   l  logs (pods)             i  diagnose
+//!   Shift-B  blast radius      Shift-W  what changed
 //!   h  health checks           ?  help overlay
 //!   :q / Ctrl-C  quit          Esc  back/dismiss (never quits)
 
@@ -822,6 +823,30 @@ async fn run_event_loop(
                         }
                     }
                 }
+                KeyCode::Char('B') if palette_query.is_none() => {
+                    // Blast radius (M1.9 Kaptein-unique `Shift-B`): the selected
+                    // resource's owners + dependents (cascade-delete chain), read-only.
+                    let selected: Option<&TableRow> = if jump_query.is_some() {
+                        jump_selected_row(&jump_master, &jump_order, selected)
+                    } else {
+                        selected_row(&rows, selected, scroll, false)
+                    };
+                    if let Some(r) = selected {
+                        detail = blast_radius(client, &kind, r).await.ok();
+                    }
+                }
+                KeyCode::Char('W') if palette_query.is_none() => {
+                    // What changed (M1.9 Kaptein-unique `Shift-W`): recent events in the
+                    // selected resource's namespace over the last 15 minutes, read-only.
+                    let selected: Option<&TableRow> = if jump_query.is_some() {
+                        jump_selected_row(&jump_master, &jump_order, selected)
+                    } else {
+                        selected_row(&rows, selected, scroll, false)
+                    };
+                    if let Some(r) = selected {
+                        detail = what_changed(client, r).await.ok();
+                    }
+                }
                 KeyCode::Char('/') if palette_query.is_none() => {
                     // Enter fuzzy-jump mode (empty query = show all). Snapshot the full
                     // set (one query) so backspace can re-rank against it — the fuzzy
@@ -925,6 +950,8 @@ fn help_text() -> String {
         "  l                logs (pods)",
         "  i                diagnose (pods)",
         "  h                lens health checks",
+        "  Shift-B          blast radius (owners + dependents)",
+        "  Shift-W          what changed (recent events)",
         "",
         "Sorting",
         "  s                cycle sort column",
@@ -1424,6 +1451,63 @@ async fn logs(client: &Client, row: &TableRow) -> io::Result<String> {
     }
 }
 
+/// Compute the selected resource's blast radius (M1.9 `Shift-B`) — owners +
+/// dependents over the ownership/cascade-delete chain, read-only.
+async fn blast_radius(client: &Client, kind: &Kind, row: &TableRow) -> io::Result<String> {
+    let ns = if kind.cluster_scoped || row.namespace.is_empty() {
+        None
+    } else {
+        Some(row.namespace.as_str())
+    };
+    let br = kaptein_core::moat::blast_radius(client, ns, &kind.gvk, &row.name)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(format_blast_radius(&br))
+}
+
+/// Format a `BlastRadius` for the detail pane: owners and dependents as two
+/// newline-joined lists. Pure (no I/O) so it is unit-testable.
+fn format_blast_radius(br: &kaptein_core::moat::BlastRadius) -> String {
+    let owners = if br.owners.is_empty() {
+        "(none — top-level resource)".to_string()
+    } else {
+        br.owners.join(", ")
+    };
+    let dependents = if br.dependents.is_empty() {
+        "(none — removing this affects nothing downstream)".to_string()
+    } else {
+        br.dependents.join(", ")
+    };
+    format!(
+        "blast radius for {}/{}/{}\nowners: {owners}\ndependents: {dependents}",
+        br.namespace, br.kind, br.name
+    )
+}
+
+/// Recent events in the selected resource's namespace (M1.9 `Shift-W`), read-only.
+async fn what_changed(client: &Client, row: &TableRow) -> io::Result<String> {
+    let wc = kaptein_core::moat::what_changed_between(client, &row.namespace, None, None, Some(15))
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(format_what_changed(&wc))
+}
+
+/// Format a `WhatChanged` for the detail pane. Pure (no I/O) so it is unit-testable.
+fn format_what_changed(wc: &kaptein_core::moat::WhatChanged) -> String {
+    let mut out = vec![format!(
+        "what changed in {} (last 15 min): {} events",
+        wc.namespace,
+        wc.events.len()
+    )];
+    for e in &wc.events {
+        out.push(format!(
+            "  {} {} {}/{}: {}",
+            e.type_, e.reason, e.kind, e.name, e.message
+        ));
+    }
+    out.join("\n")
+}
+
 /// Evaluate a lens-driven kind's declared health checks against the selected resource
 /// (M2.2 per-lens health). Fetches the **redacted** object once, runs the view-model's
 /// `evaluate_health` (the same engine `viewdef-render` uses), and formats a finding per
@@ -1626,6 +1710,43 @@ mod tests {
     }
 
     #[test]
+    fn format_blast_radius_lists_owners_and_dependents() {
+        let br = kaptein_core::moat::BlastRadius {
+            namespace: "ns".into(),
+            kind: "Deployment".into(),
+            name: "web".into(),
+            owners: vec!["ReplicaSet/abc".into()],
+            dependents: vec!["Pod/x".into(), "Pod/y".into()],
+        };
+        let out = format_blast_radius(&br);
+        assert!(out.contains("blast radius for ns/Deployment/web"));
+        assert!(out.contains("owners: ReplicaSet/abc"));
+        assert!(out.contains("dependents: Pod/x, Pod/y"));
+    }
+
+    #[test]
+    fn format_what_changed_lists_events() {
+        let wc = kaptein_core::moat::WhatChanged {
+            namespace: "ns".into(),
+            from_ms: 0,
+            to_ms: 1,
+            events: vec![kaptein_core::events::EventSummary {
+                namespace: "ns".into(),
+                kind: "Pod".into(),
+                name: "p".into(),
+                type_: "Warning".into(),
+                reason: "BackOff".into(),
+                message: "restarting".into(),
+                count: 3,
+                last_timestamp_ms: 1,
+            }],
+        };
+        let out = format_what_changed(&wc);
+        assert!(out.contains("what changed in ns (last 15 min): 1 events"));
+        assert!(out.contains("Warning BackOff Pod/p: restarting"));
+    }
+
+    #[test]
     fn help_text_documents_the_keymap_and_quit_is_explicit() {
         let h = help_text();
         // The discoverability backstop: every core binding is present.
@@ -1639,6 +1760,8 @@ mod tests {
             "logs",
             "diagnose",
             "health",
+            "blast radius",
+            "what changed",
             "sort",
         ] {
             assert!(h.contains(needle), "help text must mention {needle:?}");

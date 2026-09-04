@@ -378,8 +378,8 @@ Milestones:
   |-----|--------|-----------------|
   | `i` | **Diagnose** (M1.6 rule engine) | free in k9s ✔ |
   | `h` | **Lens health** (M2.2) | free in k9s ✔ (vim `h`=left is meaningless in a table) |
-  | `Shift-B` | **Blast radius** | plain `b` is k9s *benchmark* — take `Shift-B` |
-  | `Shift-W` | **What changed** (M1.4 ring) | plain `w` is k9s *warp/wrap* — take `Shift-W` |
+  | `Shift-B` | **Blast radius** | plain `b` is k9s *benchmark* — take `Shift-B`. *(Landed v0.33.0 →: `Shift-B` shows owners + dependents via `moat::blast_radius`.)* |
+  | `Shift-W` | **What changed** (M1.4 ring) | plain `w` is k9s *warp/wrap* — take `Shift-W`. *(Landed v0.33.0 →: `Shift-W` shows recent events via `moat::what_changed_between`.)* |
   | `g` / `G` | Top / bottom | vim-standard, free ✔ |
 
   ### The dynamic hint bar — generated, never written

@@ -19,6 +19,12 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `describe_dynamic`, the M1.7 choke point), and `l` tails the selected pod's logs (via
   `pod_logs`, redacted). Both render in the detail pane; `l` reports explicitly on non-pod
   kinds.
+- **TUI (M1.9) — `Shift-B` (blast radius) and `Shift-W` (what changed) keys.** Two
+  Kaptein-unique diagnostic actions that were CLI-only: `Shift-B` shows the selected
+  resource's owners + dependents (cascade-delete chain, via `moat::blast_radius`), and
+  `Shift-W` shows recent events in the selected resource's namespace (via
+  `moat::what_changed_between`). Both read-only, both rendered in the detail pane, with
+  pure `format_blast_radius`/`format_what_changed` helpers unit-tested.
 
 ## [0.33.0] - 2026-09-04
 
