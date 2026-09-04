@@ -408,7 +408,8 @@ async fn run_event_loop(
             let header_cells: Vec<Cell> = kind
                 .headers
                 .iter()
-                .map(|h| Cell::from(h.as_str()))
+                .enumerate()
+                .map(|(i, h)| header_cell(h, i, sort_key, sort_descending))
                 .collect();
             let table = Table::new(table_rows, widths)
                 .header(Row::new(header_cells))
@@ -1015,6 +1016,20 @@ fn sort_label(column_ids: &[String], key: SortColumn, descending: bool) -> Strin
     let dir = if descending { "↓" } else { "↑" };
     let col = column_ids.get(key.0).map(|s| s.as_str()).unwrap_or("?");
     format!("{col}{dir}")
+}
+
+/// A table header cell (M1.9): the header text, with the active sort column annotated
+/// with a direction arrow (`NAME ↓`). This makes the sort state visible *in the table*
+/// rather than only in the status line — the "which column is active, and which way" answer
+/// an operator needs the moment they press `s`/`S`. Pure geometry (no I/O), unit-testable.
+fn header_cell(header: &str, index: usize, key: SortColumn, descending: bool) -> Cell<'static> {
+    let dir = if descending { "↓" } else { "↑" };
+    let text = if index == key.0 {
+        format!("{header} {dir}")
+    } else {
+        header.to_string()
+    };
+    Cell::from(text)
 }
 
 /// Re-rank rows by fuzzy-jump score against `query`, dropping non-matches. Uses the
@@ -1817,6 +1832,18 @@ mod tests {
         ];
         assert_eq!(action_hint_line(&actions), "describe restart\u{d7} delete!");
         assert_eq!(action_hint_line(&[]), "describe, diagnose");
+    }
+
+    #[test]
+    fn header_cell_annotates_the_active_sort_column() {
+        // Non-active columns render their text verbatim.
+        let inactive = header_cell("NAME", 1, SortColumn(0), false);
+        assert_eq!(inactive, Cell::from("NAME"));
+        // The active column gets the direction arrow.
+        let asc = header_cell("NAME", 0, SortColumn(0), false);
+        assert_eq!(asc, Cell::from("NAME ↑"));
+        let desc = header_cell("STATUS", 2, SortColumn(2), true);
+        assert_eq!(desc, Cell::from("STATUS ↓"));
     }
 
     #[test]

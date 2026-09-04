@@ -7,6 +7,11 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Changed
+- **TUI (M1.9) — the active sort column is now annotated in the table header.** The header
+  cell for the active sort column shows a direction arrow (`NAME ↑` / `STATUS ↓`), so the
+  "which column is active, and which way" answer is visible *in the table* rather than only
+  in the status line — the moment an operator presses `s`/`S`. Pure geometry (`header_cell`,
+  unit-tested).
 - **TUI (M1.9) — `Ctrl-R` force refresh.** Tears down and reseeds the live plane (re-list +
   re-preflight), the explicit "re-list now" the milestone names for use after an out-of-band
   change; the informer already keeps the view live on its own. Documented in the `?` help
