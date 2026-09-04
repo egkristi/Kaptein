@@ -7,6 +7,17 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Changed
+- **TUI (M1.9) — `kaptein tui` never fails to start: a context picker, not a stack
+  trace.** Startup now lists kubeconfig contexts **offline** (no cluster contact) and
+  probes the default context's reachability with a 300 ms timeout; if the default is
+  absent or unreachable — or no contexts exist at all — it opens the **Contexts rung**
+  (the root of the navigation ladder) instead of propagating an error. The picker probes
+  every context concurrently in the background and shows reachable/unreachable plus the
+  guardrail classification (prod/staging/unknown) per row *before* the operator connects.
+  `Enter` connects, `:q`/`Ctrl-C` quit, and `Esc` is a no-op at the root (never a quit).
+  The decision (`startup_mode`) and the quit keymap (`is_quit_command`, shared with the
+  table view) are pure and unit-tested; the reachability probe (`client_reachable` /
+  `probe_contexts`, bounded and concurrent) lives in `kaptein-core` with a timeout test.
 - **TUI (M1.9) — the active sort column is now annotated in the table header.** The header
   cell for the active sort column shows a direction arrow (`NAME ↑` / `STATUS ↓`), so the
   "which column is active, and which way" answer is visible *in the table* rather than only

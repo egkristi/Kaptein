@@ -66,6 +66,41 @@ pub async fn client_for_context(context: Option<&str>) -> Result<Client, Error> 
     Ok(Client::try_from(config)?)
 }
 
+/// Probe whether a built client's API server answers within `timeout` (M1.9 context
+/// picker): a bounded `/version` request. A dead or blackholed endpoint — a firewall
+/// that drops rather than refuses — degrades to `false` instead of hanging the UI
+/// (finding R). Building the client is **offline** (kubeconfig read, no cluster contact);
+/// only this probe touches the network, so the context picker can render
+/// reachable/unreachable per row without blocking on a dead endpoint.
+pub async fn client_reachable(client: &Client, timeout: std::time::Duration) -> bool {
+    tokio::time::timeout(timeout, client.apiserver_version())
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false)
+}
+
+/// Probe reachability for every context **concurrently** (M1.9 context picker): each
+/// context's client is built offline (kubeconfig read, no cluster contact) and its
+/// `/version` is bounded by `timeout`. Returns a `Vec<bool>` aligned to `contexts` (input
+/// order), so the picker can render reachable/unreachable per row. Because the probes run
+/// concurrently, total latency is bounded by `timeout` regardless of context count — a
+/// dead endpoint never serialises into a multi-second stall (finding R).
+pub async fn probe_contexts(
+    contexts: &[ContextSummary],
+    timeout: std::time::Duration,
+) -> Vec<bool> {
+    let probes = contexts.iter().map(|c| {
+        let name = c.name.clone();
+        async move {
+            match client_for_context(Some(&name)).await {
+                Ok(client) => client_reachable(&client, timeout).await,
+                Err(_) => false,
+            }
+        }
+    });
+    futures_util::future::join_all(probes).await
+}
+
 /// Build a Kubernetes client for a **dedicated agent identity** (ADR-0007 mode 3):
 /// prefer an in-cluster ServiceAccount (the pod's mounted token, the agent's own narrow
 /// RBAC), then fall back to a `KAPTEIN_SA_TOKEN` bearer token, then the default
@@ -440,4 +475,21 @@ pub async fn list_metadata_bounded_with_selector(
         })
         .collect();
     Ok((summaries, next))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unreachable_client_probes_false_without_hanging() {
+        // 127.0.0.1:1 is a closed port, so the connection is refused fast — but the
+        // probe is bounded regardless (finding R), so a blackholed endpoint can never
+        // hang the context picker. The client builds **offline** (kubeconfig-free); only
+        // the `/version` request touches the network, and it fails.
+        let config = kube::Config::new("https://127.0.0.1:1".parse().expect("valid uri"));
+        let client = kube::Client::try_from(config).expect("client builds offline");
+        let reachable = client_reachable(&client, std::time::Duration::from_millis(300)).await;
+        assert!(!reachable, "an unreachable endpoint must probe false");
+    }
 }

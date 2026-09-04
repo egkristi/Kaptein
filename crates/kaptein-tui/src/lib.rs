@@ -196,31 +196,267 @@ struct TableRow {
     cells: Vec<String>,
 }
 
-/// Run the TUI against the default kubeconfig context.
-///
-/// This is the library entry point: `kaptein tui` calls it from the single `kaptein`
-/// binary. It resolves the client, enters raw/alternate mode, runs the event loop, and
-/// restores the terminal on every exit path.
-pub async fn run() -> io::Result<()> {
-    let client = kaptein_core::discovery::client()
-        .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    run_ui(&client).await
+/// Bound for per-context reachability probes (M1.9 context picker). Reuses the 300 ms
+/// `tokio::time::timeout` pattern from `completion.rs` (finding R) so a blackholed
+/// endpoint never stalls startup.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// How startup proceeds (M1.9 "never fail to start").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupMode {
+    /// The default context is reachable — go straight to the table view.
+    Direct,
+    /// No contexts, or the default is unreachable — open the Contexts rung (the picker)
+    /// rather than propagating an error.
+    Picker,
 }
 
-async fn run_ui(client: &Client) -> io::Result<()> {
+/// Decide the startup mode from observable inputs (pure, unit-testable without a
+/// cluster): `context_count == 0` or an unreachable default both force the picker.
+fn startup_mode(context_count: usize, default_reachable: bool) -> StartupMode {
+    if context_count == 0 || !default_reachable {
+        StartupMode::Picker
+    } else {
+        StartupMode::Direct
+    }
+}
+
+/// Whether a palette command string is a vim-style quit (shared by the table view and the
+/// context picker so the quit keymap cannot drift between the two surfaces).
+fn is_quit_command(s: &str) -> bool {
+    matches!(s.trim(), "q" | "q!" | "x" | "wq")
+}
+
+/// Run the TUI (M1.9 "never fail to start").
+///
+/// This is the library entry point: `kaptein tui` calls it from the single `kaptein`
+/// binary. It lists contexts **offline** (no cluster contact), probes the default
+/// context's reachability with a short timeout, and — if the default is absent or
+/// unreachable — opens the **Contexts rung** (the root of the navigation ladder) instead
+/// of a stack-trace exit. The terminal is set up once and restored on every exit path.
+pub async fn run() -> io::Result<()> {
+    let contexts = kaptein_core::discovery::list_contexts().unwrap_or_default();
+    let current = kaptein_core::discovery::current_context_name().ok();
+
+    // Probe the default context (bounded; a dead endpoint degrades to the picker rather
+    // than hanging startup).
+    let default_reachable = match kaptein_core::discovery::client().await {
+        Ok(c) => kaptein_core::discovery::client_reachable(&c, PROBE_TIMEOUT).await,
+        Err(_) => false,
+    };
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Run the event loop; restore the terminal on *every* exit path (including `?`
+    // Run the chosen surface; restore the terminal on *every* exit path (including `?`
     // errors), so a broken terminal is never left behind.
-    let result = run_event_loop(client, &mut terminal).await;
+    let result = match startup_mode(contexts.len(), default_reachable) {
+        StartupMode::Direct => {
+            let client = kaptein_core::discovery::client()
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+            run_event_loop(&client, &mut terminal).await
+        }
+        StartupMode::Picker => {
+            match run_context_picker(&contexts, current.as_deref(), &mut terminal).await? {
+                Some(ctx) => {
+                    let client = kaptein_core::discovery::client_for_context(Some(&ctx))
+                        .await
+                        .map_err(|e| io::Error::other(e.to_string()))?;
+                    run_event_loop(&client, &mut terminal).await
+                }
+                None => Ok(()),
+            }
+        }
+    };
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     result
+}
+
+/// The Contexts rung — the root of the navigation ladder (M1.9). Lists every kubeconfig
+/// context (read offline, no cluster contact), probes reachability **asynchronously in
+/// the background** so a dead endpoint never blocks the UI, and shows the guardrail
+/// classification (prod/staging/unknown) per row *before* the operator connects. Returns
+/// the selected context name, or `None` if the operator quits (vim `:q` / `Ctrl-C`;
+/// `Esc` is a no-op at the root — never a quit).
+async fn run_context_picker(
+    contexts: &[kaptein_core::discovery::ContextSummary],
+    current: Option<&str>,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> io::Result<Option<String>> {
+    let guardrails = kaptein_core::config::load().guardrails;
+
+    // Reachability is probed concurrently in the background; rows render "…" until the
+    // probe lands (bounded by PROBE_TIMEOUT regardless of context count).
+    let (tx, rx) = tokio::sync::watch::channel(None::<Vec<bool>>);
+    let ctxs: Vec<kaptein_core::discovery::ContextSummary> = contexts.to_vec();
+    tokio::spawn(async move {
+        let reachable = kaptein_core::discovery::probe_contexts(&ctxs, PROBE_TIMEOUT).await;
+        let _ = tx.send(Some(reachable));
+    });
+
+    let mut selected: usize = 0;
+    let mut quit_prompt: Option<String> = None;
+    loop {
+        let reach = rx.borrow().clone();
+        let status_line = if let Some(q) = quit_prompt.as_deref() {
+            format!(" :{q} — Enter:quit  Esc:cancel ")
+        } else if contexts.is_empty() {
+            " Contexts — none defined (no kubeconfig) — :q quit ".to_string()
+        } else {
+            format!(
+                " Contexts — j/k select, Enter connect, :q quit ({}) ",
+                if reach.is_some() {
+                    "probed"
+                } else {
+                    "probing…"
+                }
+            )
+        };
+
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let chunks = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(area);
+            let header = Block::default().title(status_line).borders(Borders::ALL);
+            frame.render_widget(header, chunks[0]);
+
+            if contexts.is_empty() {
+                let para = Paragraph::new(
+                    "No contexts are defined in the kubeconfig.\n\n\
+                     Kaptein never fails to start — but there is nothing to connect to.\n\
+                     Set up a kubeconfig (~/.kube/config or $KUBECONFIG) and run `kaptein tui` again.",
+                )
+                .block(Block::default().borders(Borders::ALL));
+                frame.render_widget(para, chunks[1]);
+            } else {
+                let rows: Vec<Row> = contexts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        let base = if i == selected {
+                            Style::default().add_modifier(Modifier::REVERSED)
+                        } else {
+                            Style::default()
+                        };
+                        let name = if c.current || Some(c.name.as_str()) == current {
+                            format!("* {}", c.name)
+                        } else {
+                            c.name.clone()
+                        };
+                        let reach_txt = match &reach {
+                            Some(r) => {
+                                if r.get(i).copied().unwrap_or(false) {
+                                    "reachable"
+                                } else {
+                                    "unreachable"
+                                }
+                            }
+                            None => "…",
+                        };
+                        let class_txt = class_label(guardrails.classify(&c.name));
+                        Row::new(vec![
+                            Cell::from(name),
+                            Cell::from(c.cluster.clone()),
+                            Cell::from(c.user.clone()),
+                            Cell::from(reach_txt),
+                            Cell::from(class_txt),
+                        ])
+                        .style(base)
+                    })
+                    .collect();
+                let table = Table::new(
+                    rows,
+                    [
+                        Constraint::Percentage(30),
+                        Constraint::Percentage(30),
+                        Constraint::Percentage(20),
+                        Constraint::Percentage(10),
+                        Constraint::Percentage(10),
+                    ],
+                )
+                .header(Row::new(
+                    ["CONTEXT", "CLUSTER", "USER", "REACHABLE", "CLASS"]
+                        .into_iter()
+                        .map(Cell::from)
+                        .collect::<Vec<_>>(),
+                ))
+                .block(Block::default().borders(Borders::ALL));
+                frame.render_stateful_widget(
+                    table,
+                    chunks[1],
+                    &mut ratatui::widgets::TableState::default(),
+                );
+            }
+        })?;
+
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down if quit_prompt.is_none() => {
+                    selected = (selected + 1).min(contexts.len().saturating_sub(1));
+                }
+                KeyCode::Char('k') | KeyCode::Up if quit_prompt.is_none() => {
+                    selected = selected.saturating_sub(1);
+                }
+                KeyCode::Enter if quit_prompt.is_none() => {
+                    if let Some(c) = contexts.get(selected) {
+                        return Ok(Some(c.name.clone()));
+                    }
+                }
+                // Esc is a no-op at the root rung (M1.9) — never a quit. It only cancels
+                // an in-progress `:` quit prompt.
+                KeyCode::Esc => {
+                    quit_prompt = None;
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Ok(None);
+                }
+                KeyCode::Char(':') if quit_prompt.is_none() => {
+                    quit_prompt = Some(String::new());
+                }
+                KeyCode::Char(c) if quit_prompt.is_some() && c != ':' => {
+                    if let Some(q) = quit_prompt.as_mut() {
+                        q.push(c);
+                    }
+                }
+                KeyCode::Backspace if quit_prompt.is_some() => {
+                    if let Some(q) = quit_prompt.as_mut() {
+                        q.pop();
+                    }
+                }
+                KeyCode::Enter if quit_prompt.is_some() => {
+                    let q = quit_prompt.as_deref().unwrap_or_default();
+                    if is_quit_command(q) {
+                        return Ok(None);
+                    }
+                    quit_prompt = None;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The guardrail classification's render label (geometry; the view-model/core own the
+/// *meaning*).
+fn class_label(class: kaptein_core::guardrails::ContextClass) -> &'static str {
+    match class {
+        kaptein_core::guardrails::ContextClass::Prod => "prod",
+        kaptein_core::guardrails::ContextClass::Staging => "staging",
+        kaptein_core::guardrails::ContextClass::Unknown => "unknown",
+    }
 }
 
 async fn run_event_loop(
@@ -558,8 +794,7 @@ async fn run_event_loop(
                     // so `:q`, `:q!`, `:x`, and `:wq` all quit deterministically — no
                     // fuzzy ambiguity. Then fall back to the fuzzy palette.
                     let q = palette_query.as_deref().unwrap_or_default();
-                    let is_quit = matches!(q.trim(), "q" | "q!" | "x" | "wq");
-                    if is_quit {
+                    if is_quit_command(q) {
                         break;
                     }
                     // Execute the best-matching command (or no-op if none match).
@@ -1844,6 +2079,35 @@ mod tests {
         assert_eq!(asc, Cell::from("NAME ↑"));
         let desc = header_cell("STATUS", 2, SortColumn(2), true);
         assert_eq!(desc, Cell::from("STATUS ↓"));
+    }
+
+    #[test]
+    fn startup_mode_never_fails_to_start() {
+        // No contexts → picker (never an error exit).
+        assert_eq!(startup_mode(0, false), StartupMode::Picker);
+        assert_eq!(startup_mode(0, true), StartupMode::Picker);
+        // Unreachable default → picker, even with contexts present.
+        assert_eq!(startup_mode(3, false), StartupMode::Picker);
+        // Reachable default with contexts → straight to the table.
+        assert_eq!(startup_mode(3, true), StartupMode::Direct);
+    }
+
+    #[test]
+    fn is_quit_command_matches_vim_quit_forms_only() {
+        for q in ["q", "q!", "x", "wq", " q ", "q! "] {
+            assert!(is_quit_command(q), "{q:?} must quit");
+        }
+        for not_q in ["", "quit", "describe", "qj", "qq", "xq"] {
+            assert!(!is_quit_command(not_q), "{not_q:?} must not quit");
+        }
+    }
+
+    #[test]
+    fn class_label_maps_each_guardrail_class() {
+        use kaptein_core::guardrails::ContextClass;
+        assert_eq!(class_label(ContextClass::Prod), "prod");
+        assert_eq!(class_label(ContextClass::Staging), "staging");
+        assert_eq!(class_label(ContextClass::Unknown), "unknown");
     }
 
     #[test]

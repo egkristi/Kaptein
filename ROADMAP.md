@@ -423,6 +423,11 @@ Milestones:
   - Note this is a place where Kaptein can be **better than k9s**, not merely equal: k9s
     exits with "Boom!! K9s can't connect to cluster" and starting in the context view is a
     long-standing open request (derailed/k9s#693).
+    *(Landed v0.35.0 →: `kaptein tui` lists contexts offline, probes the default with a
+    300 ms timeout, and opens the Contexts rung — never a stack trace — when the default is
+    absent/unreachable or none exist. The picker probes all contexts concurrently and shows
+    reachable/unreachable + guardrail class per row. `--contexts`/`:ctx`/context switching
+    from the rung remain open.)*
 
   ### Staging (the event loop is 1 500 lines and works — do not rewrite it in one pass)
 
@@ -449,6 +454,146 @@ Milestones:
   - Every mutating key routes through `gate_write` + emits an `AuditEvent` — reuse the
     *derived* coverage test from finding U rather than restating the set by hand.
   - The Phase 1 k9s-parity checklist below is satisfied **by the TUI**, not by the CLI.
+
+- **M1.10 CLI: kubectl-superset syntax — *TOP PRIORITY (with M1.9)***
+  *(added 2026-09 on operator feedback: "not intuitive coming from kubectl or oc")*
+
+  M1.9 and M1.10 are the two halves of one problem — *the surfaces are not shaped like the
+  tools they replace*. M1.10 has the wider blast radius: the CLI is what scripts, CI, krew
+  users, and muscle memory touch, and it is the surface a kubectl user meets first.
+
+  **The problem, verified against the shipped binary.** Nothing here is stylistic; each is
+  a concrete migration cost:
+
+  | # | Divergence | kubectl | Kaptein today |
+  |---|-----------|---------|---------------|
+  | 1 | **No positional arguments** | `kubectl get pods` | `kaptein get --gvk v1/Pod` |
+  | 2 | **Full GVK required, no aliases** | `po`, `deploy`, `svc`, `cm` | `v1/Pod`, `apps/v1/Deployment` — the user must know each resource's *API version* |
+  | 3 | **No `-o/--output`** | `-o json\|yaml\|wide\|name\|jsonpath` | **none at all** — `get` has no machine-readable output, so nothing pipes to `jq` |
+  | 4 | **`-p` means `--name`** | `-p` = `--previous` (logs) / `--patch` | `-p, --name` — actively dangerous muscle memory |
+  | 5 | **`-f` means three different things** | `-f` = `--filename`, always (except `logs -f`) | `--filter` in `get`, `--follow` in `logs`, `--file` in `apply` — inconsistent *within Kaptein*, and `kaptein get -f prod` reads as a filename to a kubectl user |
+  | 6 | **No `-A/--all-namespaces`** | `-A` | omit `-n` (works, but not the reflex) |
+  | 7 | **`describe` is `get -o yaml`** | human summary + Events | raw YAML — the kubectl user gets the wrong artefact |
+  | 8 | **No `res/name` form** | `kubectl get pod/nginx` | unsupported |
+  | 9 | **No default-context switch** | `kubectl config use-context` | `--context` per invocation only — you cannot change the default |
+  | 10 | **44 flat top-level commands** | ~40, grouped in help | flat, with inconsistent grouping: `extension <sub>` is a group, but `config-validate`, `viewdef-render`, `port-forward-list`, `debug-containers` are hyphenated top-levels |
+  | 11 | **`can` vs `auth can-i`** | `kubectl auth can-i get pods` | `kaptein can --verb get --resource pods` |
+
+  Missing kubectl verbs entirely: `create`, `patch`, `replace`, `label`, `annotate`, `set`,
+  `rollout status/history/undo/pause/resume` (only `restart`), `top`, `api-resources`,
+  `api-versions`, `explain`, `wait`, `cp`, `diff`, `config use-context`.
+
+  ### The design principle: **kubectl is the substrate; Kaptein is the superset**
+
+  This is the `oc` model, and it is the right one because it is already proven for exactly
+  this migration: every `kubectl` command works verbatim in `oc`, and `oc` adds its own on
+  top. Restated as a rule with teeth:
+
+  > **If `kubectl X` is a thing, `kaptein X` does the same thing with the same syntax.**
+  > Kaptein then adds verbs kubectl lacks, and *safety* kubectl lacks — it never removes or
+  > respells what a kubectl user already knows.
+
+  The corollary is that **`alias kubectl=kaptein` should be a reasonable thing to do** for
+  the day-to-day subset. That is the migration story; nothing weaker will move anyone.
+
+  ### Syntax changes
+
+  - **Positional resource + name**, with the slash form: `kaptein get pods`,
+    `kaptein get pod nginx`, `kaptein get pod/nginx`, `kaptein describe deploy/api -n prod`.
+  - **Resource aliases resolved through the discovery API** — `po`, `deploy`, `svc`, `ns`,
+    `cm`, `sts`, `ds`, `pvc`, `ing`. Resolving via discovery rather than a hardcoded table
+    means **CRD short names work for free**, and it removes the "know the apiVersion"
+    tax entirely. *(Note: this is the same discovery-derived pluralization that fixed
+    finding F in the MCP preflight — one resolver, both surfaces, no second table to drift.)*
+  - **`-o/--output`**: `json`, `yaml`, `wide`, `name`, `jsonpath=`, `custom-columns=`,
+    `go-template=`. This is the single highest-value addition for scriptability — today
+    `kaptein get` cannot feed a pipeline at all. Secret redaction (M1.7) applies to every
+    output format, so `-o yaml` on a Secret masks exactly as `describe` does.
+  - **`-A/--all-namespaces`**, `-l/--selector` (already present), `--field-selector`.
+  - **Fix the collisions**: `-f` becomes `--filename` everywhere (kubectl semantics,
+    including `kaptein get -f manifest.yaml`); `get`'s substring filter becomes long-only
+    `--filter`; `-p` becomes `--previous` in `logs` and is retired as `--name`.
+  - **`describe` becomes kubectl's describe** — the human summary with Events. The current
+    YAML behaviour is what `-o yaml` is for; keep it reachable as `kaptein get X -o yaml`.
+  - **Subcommand groups**: `kaptein config validate|explain-context|use-context`,
+    `kaptein viewdef validate|schema|render`, `kaptein port-forward list|remove`,
+    `kaptein debug list|attach`. Grouped `--help` output in kubectl's categories
+    (Basic / Deploy / Cluster Management / Troubleshooting / Advanced / Settings / Other)
+    so 44 commands stop reading as a wall.
+
+  ### The verbs to add — and the ones to decline
+
+  **Add** (all backed by code that already exists or by `kube-rs` directly): `create`,
+  `patch`, `replace`, `label`, `annotate`, `set image`, `rollout status|history|undo`,
+  `api-resources`, `api-versions`, `explain`, `wait`, `cp`, `top` (metrics-server),
+  `diff`, `config use-context`, and `auth can-i` as the canonical spelling of `can`.
+
+  **Decline, with the non-goal cited** so the boundary is legible rather than an omission:
+  `run`/`expose` (imperative object creation is what the GitOps write path replaces —
+  ADR-0008/M2.3), `proxy`, `plugin` (Kaptein *is* a krew plugin), `kustomize` (shelled out,
+  per the "no reimplemented scanners/tools" non-goal).
+
+  ### Where Kaptein must be **better**, not merely equal
+
+  "More efficient than kubectl" is the other half of the ask, and it is where the existing
+  differentiators finally reach the command line:
+
+  - **Refuse before the 403.** `kubectl` returns a server error *after* the round trip;
+    RBAC preflight already knows the answer *before* it, and can name the missing verb.
+  - **Dry-run by default + break-glass + audit** on every mutating verb — kubectl's default
+    is "do it". Align the *spelling* with kubectl (`--dry-run=server|client|none`) while
+    keeping Kaptein's safer default and its `--break-glass` gate.
+  - **Redaction by default.** `kubectl get secret -o yaml` prints the secret; Kaptein masks
+    it, including the `last-applied-configuration` annotation (M1.7).
+  - **Collapse multi-command loops into one.** `kubectl get po && describe && logs && get
+    events` is a diagnosis ritual; `kaptein diagnose <pod>` is the same answer in one call,
+    with an evidence chain (M1.6).
+  - **Live-value shell completion** — already shipped (`completion.rs`), and a genuine
+    kubectl-beating feature the moment the syntax is positional enough to complete usefully.
+  - **`kaptein why <resource>`** as a first-class umbrella for the moat verbs
+    (`diagnose`/`blast-radius`/`why-job-pending`), so the Kaptein-unique capability has one
+    memorable entry point instead of three commands a kubectl user will never guess.
+
+  ### Compatibility must be *tested*, not asserted
+
+  The recurring lesson of this project (findings U, AC, AF) is that a contract nothing
+  enforces will drift. Applied here: **a kubectl-corpus conformance test.** Keep a fixture
+  file of real kubectl invocations — the common daily set — and assert each parses under
+  `kaptein` to the same resolved `(verb, GVK, name, namespace, flags)`. A new command or a
+  respelled flag that breaks compatibility then fails CI instead of surprising a user.
+  Pair it with `kaptein explain-kubectl "<kubectl command>"`, which prints the Kaptein
+  equivalent — a migration aid *and* an executable spec of the mapping.
+
+  ### Staging (the CLI is 2 261 lines; changing every signature at once is not sane)
+
+  1. **Stop the bleeding (breaking, small, highest value):** positional resource + name +
+     `res/name`, discovery-backed aliases, `-A`, and fix the `-f`/`-p` collisions. Keep the
+     old flag forms as **hidden deprecated aliases** for two minor releases so scripts
+     don't break silently; emit a one-line deprecation notice on stderr.
+  2. **`-o/--output` across every read verb** (the scriptability unlock), with redaction
+     applied per format.
+  3. **Regroup**: `config`/`viewdef`/`port-forward`/`debug` subcommand groups + grouped help.
+  4. **`describe` split**, `auth can-i`, `config use-context`.
+  5. **The missing verbs**, in usage order: `create`/`patch`/`label`/`annotate`,
+     `rollout *`, `api-resources`/`explain`, `wait`, `top`, `cp`, `diff`.
+  6. **The kubectl-corpus conformance test** + `explain-kubectl`, landed *with* stage 1 and
+     extended each stage.
+
+  ### DoD (falsifiable)
+  - A kubectl user's daily commands work unmodified: `kaptein get pods -A`,
+    `kaptein get pod/nginx -o yaml`, `kaptein describe deploy api -n prod`,
+    `kaptein logs -f nginx`, `kaptein delete pod nginx` — pinned by the **kubectl-corpus
+    conformance test**, so compatibility cannot regress unnoticed.
+  - `kaptein get pods -o json | jq '.items | length'` works — i.e. the CLI is pipeable.
+  - `kaptein get secret x -o yaml` masks the value **in every output format**, asserted per
+    format (M1.7's choke point must not be format-specific).
+  - No flag means two different things across commands — asserted by a test that walks the
+    clap tree and fails on a short-flag collision (derive, don't restate).
+  - Every mutating verb still routes through `gate_write` + emits an `AuditEvent` — reuse
+    the existing derived coverage test from finding U; the syntax change must not open a
+    hole in the guardrail set.
+  - `kaptein explain-kubectl "kubectl scale deploy/api --replicas=3"` prints the Kaptein
+    equivalent, including the `--confirm`/`--break-glass` gate it adds.
 
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
@@ -1203,14 +1348,20 @@ a non-toy cluster, whose objection list is a better Phase 2 backlog than this do
   the CLI binary end to end, and cordon/uncordon — are all live-tested in CI (AB). The
   v0.32.0 batch — AC (redaction as a type), AD (health in the manual), AE (health on more
   lenses) — is also closed. The live next steps, in order:
-  **1. M1.9 — TUI navigation, keymap & context picker.** Promoted to the top on direct
-  operator feedback ("not very efficient or intuitive to work in"). It outranks everything
-  below because the TUI is the daily-driver surface and the Phase 1 DoD is *not currently
-  met by it*: `Esc` quits instead of going back, `s`/`n` are bound against k9s muscle
-  memory, the hint bar is a hardcoded string, an unreachable cluster is a crash rather than
-  a context picker, and the TUI cannot view YAML, tail logs, exec, port-forward, edit, or
-  delete — all of which `kaptein-core` already does. Stage 1 alone (Esc = back, context
-  picker, free `s`/`n`) removes the three reflexes that make a k9s migrant bounce, and
+  **1. M1.9 (TUI) and M1.10 (CLI) — the two interface milestones, jointly top.** Both were
+  promoted on direct operator feedback, and they are one problem in two places: *the
+  surfaces are not shaped like the tools they replace.* The TUI: `Esc` quits instead of
+  going back, `s`/`n` are bound against k9s muscle memory, the hint bar is a hardcoded
+  string, an unreachable cluster is a crash rather than a context picker, and it cannot
+  view YAML, tail logs, exec, port-forward, edit, or delete — all of which `kaptein-core`
+  already does. The CLI: no positional arguments, full `group/version/kind` required with
+  no aliases, **no `-o/--output` at all** (so nothing pipes to `jq`), `-p` bound to
+  `--name`, and `-f` meaning three different things across three commands.
+  *Sequence stage 1 of each first* — for the TUI, `Esc` = back + context picker + freeing
+  `s`/`n`; for the CLI, positional args + discovery-backed aliases + fixing the `-f`/`-p`
+  collisions. Between them those two small stages remove nearly every reflex that makes a
+  k9s or kubectl migrant bounce, and neither computes anything new. **M1.10 has the wider
+  reach** (scripts, CI, krew, and the muscle memory a user brings on day one), while M1.9's
   stage 3 pays a second dividend by sharing the action graph with finding AF.
   **2.** the **M1.8 kwok synthetic-cluster harness** (the last aspirational number, now
   also carrying the head-to-head k9s comparison); **3. M2.1 browser UI**; **4. M2.2**
