@@ -456,144 +456,178 @@ Milestones:
   - The Phase 1 k9s-parity checklist below is satisfied **by the TUI**, not by the CLI.
 
 - **M1.10 CLI: kubectl-superset syntax — *TOP PRIORITY (with M1.9)***
-  *(added 2026-09 on operator feedback: "not intuitive coming from kubectl or oc")*
+  *(added 2026-09 on operator feedback; expanded after a full flag-surface audit.
+  **Breaking changes are in scope** — adoption is low, so this is a clean break, not a
+  migration with deprecation shims.)*
 
-  M1.9 and M1.10 are the two halves of one problem — *the surfaces are not shaped like the
-  tools they replace*. M1.10 has the wider blast radius: the CLI is what scripts, CI, krew
-  users, and muscle memory touch, and it is the surface a kubectl user meets first.
+  M1.9 and M1.10 are two halves of one problem — *the surfaces are not shaped like the
+  tools they replace*. M1.10 has the wider blast radius: the CLI is what scripts, CI, krew,
+  and day-one muscle memory touch.
 
-  **The problem, verified against the shipped binary.** Nothing here is stylistic; each is
-  a concrete migration cost:
+  ### Audit findings (measured against the shipped v0.32.0 binary, not the source)
 
-  | # | Divergence | kubectl | Kaptein today |
-  |---|-----------|---------|---------------|
-  | 1 | **No positional arguments** | `kubectl get pods` | `kaptein get --gvk v1/Pod` |
-  | 2 | **Full GVK required, no aliases** | `po`, `deploy`, `svc`, `cm` | `v1/Pod`, `apps/v1/Deployment` — the user must know each resource's *API version* |
-  | 3 | **No `-o/--output`** | `-o json\|yaml\|wide\|name\|jsonpath` | **none at all** — `get` has no machine-readable output, so nothing pipes to `jq` |
-  | 4 | **`-p` means `--name`** | `-p` = `--previous` (logs) / `--patch` | `-p, --name` — actively dangerous muscle memory |
-  | 5 | **`-f` means three different things** | `-f` = `--filename`, always (except `logs -f`) | `--filter` in `get`, `--follow` in `logs`, `--file` in `apply` — inconsistent *within Kaptein*, and `kaptein get -f prod` reads as a filename to a kubectl user |
-  | 6 | **No `-A/--all-namespaces`** | `-A` | omit `-n` (works, but not the reflex) |
-  | 7 | **`describe` is `get -o yaml`** | human summary + Events | raw YAML — the kubectl user gets the wrong artefact |
-  | 8 | **No `res/name` form** | `kubectl get pod/nginx` | unsupported |
-  | 9 | **No default-context switch** | `kubectl config use-context` | `--context` per invocation only — you cannot change the default |
-  | 10 | **44 flat top-level commands** | ~40, grouped in help | flat, with inconsistent grouping: `extension <sub>` is a group, but `config-validate`, `viewdef-render`, `port-forward-list`, `debug-containers` are hyphenated top-levels |
-  | 11 | **`can` vs `auth can-i`** | `kubectl auth can-i get pods` | `kaptein can --verb get --resource pods` |
+  **1. Five short flags mean more than one thing, and one concept has two short flags.**
+  Muscle memory cannot form at all:
 
-  Missing kubectl verbs entirely: `create`, `patch`, `replace`, `label`, `annotate`, `set`,
-  `rollout status/history/undo/pause/resume` (only `restart`), `top`, `api-resources`,
-  `api-versions`, `explain`, `wait`, `cp`, `diff`, `config use-context`.
+  | Flag | Meanings in Kaptein | kubectl |
+  |------|--------------------|---------|
+  | `-f` | `--file`, `--filter`, `--follow` | `--filename` (and `--follow` in `logs`) |
+  | `-t` | `--port`, `--tool`, `--tty` | `--tty` |
+  | `-p` | `--name`, `--pod` | `--previous` / `--patch` |
+  | `-r` | `--regex`, `--resource` | — |
+  | `-g` | `--gvk`, `--group` | — |
+  | `--name` | reachable as **both** `-p` and `-N` | positional |
 
-  ### The design principle: **kubectl is the substrate; Kaptein is the superset**
+  **2. Destructive verbs carry a default kind.** `delete` and `edit` default to
+  `v1/ConfigMap`; `scale`/`restart`/`blast-radius` to `apps/v1/Deployment`. So
+  `kaptein delete --name foo --confirm` deletes *a ConfigMap named foo* without the kind
+  ever being stated. A defaulted GVK on a destructive verb is a footgun regardless of
+  syntax; it must be **required** wherever the verb mutates.
 
-  This is the `oc` model, and it is the right one because it is already proven for exactly
-  this migration: every `kubectl` command works verbatim in `oc`, and `oc` adds its own on
-  top. Restated as a rule with teeth:
+  **3. `--namespace` semantics are split, including between sibling write verbs.** Eleven
+  commands default to the literal namespace `default`; nine treat omission as
+  all-namespaces/cluster-scoped. `delete` is in the second group while `scale`, `restart`,
+  and `evict` are in the first — two write commands, opposite defaults.
 
-  > **If `kubectl X` is a thing, `kaptein X` does the same thing with the same syntax.**
-  > Kaptein then adds verbs kubectl lacks, and *safety* kubectl lacks — it never removes or
-  > respells what a kubectl user already knows.
+  **4. `--context` is missing from 29 of 41 commands — including every write verb** except
+  `apply`/`edit`: `delete`, `scale`, `restart`, `cordon`, `uncordon`, `evict`, `exec`,
+  `debug`. Writes can therefore only ever hit the *current* context, and there is no
+  `use-context` to change it. This undercuts the guardrail story: the safety model assumes
+  the operator can choose which cluster a write lands on.
 
-  The corollary is that **`alias kubectl=kaptein` should be a reasonable thing to do** for
-  the day-to-day subset. That is the migration story; nothing weaker will move anyone.
+  **5. No `-o/--output` anywhere.** `get`, `diagnose`, `blast-radius`, `overview`, `events`
+  emit human text only — nothing is pipeable. This is the sharpest own-goal in the CLI,
+  because `kaptein-viewmodel`'s `Row`/`Cell`/`Page` are **already `Serialize`** (they were
+  built to cross gRPC-Web per ADR-0002). The serialisable render contract exists and the
+  CLI simply never emits it.
 
-  ### Syntax changes
+  **6. No persistent/global flags.** `--context` and `--namespace` are re-declared per
+  command, inconsistently. kubectl has one persistent flag set.
 
-  - **Positional resource + name**, with the slash form: `kaptein get pods`,
+  Plus the syntax gap: no positional args (`kaptein get --gvk v1/Pod` vs `kubectl get
+  pods`), no aliases (the user must know each resource's *apiVersion*), no `res/name`, no
+  `-A`, `describe` returns raw YAML rather than kubectl's summary+events, 44 flat
+  top-levels with inconsistent grouping (`extension <sub>` is a group; `config-validate`,
+  `viewdef-render`, `port-forward-list`, `debug-containers` are hyphenated top-levels).
+
+  ### Design principle: **kubectl is the substrate; Kaptein is the superset**
+
+  The `oc` model, proven for exactly this migration.
+
+  > **If `kubectl X` exists, `kaptein X` does the same thing with the same syntax.**
+  > Kaptein then adds verbs kubectl lacks and *safety* kubectl lacks — it never respells
+  > what a kubectl user already knows.
+
+  The acceptance test for the principle: **`alias kubectl=kaptein` is a reasonable thing to
+  do** for the daily subset.
+
+  ### The clean break
+
+  - **Positional resource + name, with the slash form**: `kaptein get pods`,
     `kaptein get pod nginx`, `kaptein get pod/nginx`, `kaptein describe deploy/api -n prod`.
-  - **Resource aliases resolved through the discovery API** — `po`, `deploy`, `svc`, `ns`,
-    `cm`, `sts`, `ds`, `pvc`, `ing`. Resolving via discovery rather than a hardcoded table
-    means **CRD short names work for free**, and it removes the "know the apiVersion"
-    tax entirely. *(Note: this is the same discovery-derived pluralization that fixed
-    finding F in the MCP preflight — one resolver, both surfaces, no second table to drift.)*
-  - **`-o/--output`**: `json`, `yaml`, `wide`, `name`, `jsonpath=`, `custom-columns=`,
-    `go-template=`. This is the single highest-value addition for scriptability — today
-    `kaptein get` cannot feed a pipeline at all. Secret redaction (M1.7) applies to every
-    output format, so `-o yaml` on a Secret masks exactly as `describe` does.
-  - **`-A/--all-namespaces`**, `-l/--selector` (already present), `--field-selector`.
-  - **Fix the collisions**: `-f` becomes `--filename` everywhere (kubectl semantics,
-    including `kaptein get -f manifest.yaml`); `get`'s substring filter becomes long-only
-    `--filter`; `-p` becomes `--previous` in `logs` and is retired as `--name`.
-  - **`describe` becomes kubectl's describe** — the human summary with Events. The current
-    YAML behaviour is what `-o yaml` is for; keep it reachable as `kaptein get X -o yaml`.
+    Multi-resource too: `kaptein get pods,svc,deploy`.
+  - **Aliases resolved through the discovery API** — `po`, `deploy`, `svc`, `cm`, `sts` —
+    which also yields **CRD short names for free** and deletes the apiVersion tax. This is
+    the same discovery-derived resolution that fixed finding F in the MCP preflight: *one
+    resolver, both surfaces, no second table to drift.*
+  - **`-o/--output`** on every read verb: `json`, `yaml`, `wide`, `name`, `jsonpath=`,
+    `custom-columns=`, `go-template=`, plus `--no-headers`. Emit the view-model's own
+    serialised `Row`/`Page` for `-o json` — the same shape the browser UI will consume, so
+    the architecture pays for the feature.
+  - **One persistent flag set**: `--context`, `--namespace`/`-A`, `--kubeconfig`,
+    `-o`, `--as` — declared once, available everywhere, so the 29-command `--context` gap
+    closes structurally rather than command-by-command.
+  - **Kill the dangerous defaults**: GVK is *required* on every mutating verb; `--namespace`
+    has one meaning everywhere (omitted = current context's namespace, `-A` = all).
+  - **Fix every collision**: `-f` = `--filename` (kubectl) everywhere, `logs -f` =
+    `--follow`; `get`'s substring filter becomes long-only `--filter`; `-p` = `--previous`;
+    `--name` is positional and loses both short flags.
+  - **`describe` becomes kubectl's describe** (summary + Events); the YAML is `-o yaml`.
   - **Subcommand groups**: `kaptein config validate|explain-context|use-context`,
-    `kaptein viewdef validate|schema|render`, `kaptein port-forward list|remove`,
-    `kaptein debug list|attach`. Grouped `--help` output in kubectl's categories
-    (Basic / Deploy / Cluster Management / Troubleshooting / Advanced / Settings / Other)
-    so 44 commands stop reading as a wall.
+    `viewdef validate|schema|render`, `port-forward list|remove`, `debug list|attach`, with
+    kubectl-style grouped `--help`.
+  - **`--dry-run=server|client|none`** as the spelling, keeping Kaptein's safer *default*
+    (dry-run on) and the `--break-glass` gate.
 
-  ### The verbs to add — and the ones to decline
+  **Add** (backed by existing code or `kube-rs` directly): `create`, `patch`, `replace`,
+  `label`, `annotate`, `set image`, `rollout status|history|undo`, `api-resources`,
+  `api-versions`, `explain`, `wait`, `cp`, `top`, `diff`, `config use-context`, and
+  `auth can-i` as the canonical spelling of `can`.
+  **Decline, citing the non-goal**: `run`/`expose` (imperative creation is what the GitOps
+  write path replaces — M2.3), `proxy`, `plugin` (Kaptein *is* a krew plugin), `kustomize`
+  (shelled out).
 
-  **Add** (all backed by code that already exists or by `kube-rs` directly): `create`,
-  `patch`, `replace`, `label`, `annotate`, `set image`, `rollout status|history|undo`,
-  `api-resources`, `api-versions`, `explain`, `wait`, `cp`, `top` (metrics-server),
-  `diff`, `config use-context`, and `auth can-i` as the canonical spelling of `can`.
+  ### Beyond parity — where Kaptein should be *better* than kubectl
 
-  **Decline, with the non-goal cited** so the boundary is legible rather than an omission:
-  `run`/`expose` (imperative object creation is what the GitOps write path replaces —
-  ADR-0008/M2.3), `proxy`, `plugin` (Kaptein *is* a krew plugin), `kustomize` (shelled out,
-  per the "no reimplemented scanners/tools" non-goal).
+  Parity is the floor. These are the reasons to switch, and most are **already built and
+  merely unreachable**:
 
-  ### Where Kaptein must be **better**, not merely equal
+  | Capability | Today | The kubectl user's alternative |
+  |------------|-------|-------------------------------|
+  | **Refuse before the 403** | RBAC preflight knows the answer pre-flight and can name the missing verb | a server error after the round trip |
+  | **Dry-run by default + break-glass + audit** | shipped | `--dry-run` opt-in, no audit |
+  | **Redaction by default** | shipped (M1.7) | `kubectl get secret -o yaml` prints the secret |
+  | **One-call diagnosis** | `kaptein diagnose` with an evidence chain | `get && describe && logs && get events` |
+  | **Ownership tree** | `blast_radius` walks the chain | `kubectl-tree` plugin |
+  | **Multi-pod log tailing + regex + JSON→columns** | shipped | `stern` plugin |
+  | **Requests/limits gaps** | `no_requests`/`no_limits` rules | `kube-capacity` plugin |
+  | **Live-value shell completion** | shipped | none |
 
-  "More efficient than kubectl" is the other half of the ask, and it is where the existing
-  differentiators finally reach the command line:
+  Four of those replace plugins people install *because kubectl is insufficient* — they are
+  behind non-obvious command names and no `-o`. Surfacing them **is** the power story.
 
-  - **Refuse before the 403.** `kubectl` returns a server error *after* the round trip;
-    RBAC preflight already knows the answer *before* it, and can name the missing verb.
-  - **Dry-run by default + break-glass + audit** on every mutating verb — kubectl's default
-    is "do it". Align the *spelling* with kubectl (`--dry-run=server|client|none`) while
-    keeping Kaptein's safer default and its `--break-glass` gate.
-  - **Redaction by default.** `kubectl get secret -o yaml` prints the secret; Kaptein masks
-    it, including the `last-applied-configuration` annotation (M1.7).
-  - **Collapse multi-command loops into one.** `kubectl get po && describe && logs && get
-    events` is a diagnosis ritual; `kaptein diagnose <pod>` is the same answer in one call,
-    with an evidence chain (M1.6).
-  - **Live-value shell completion** — already shipped (`completion.rs`), and a genuine
-    kubectl-beating feature the moment the syntax is positional enough to complete usefully.
-  - **`kaptein why <resource>`** as a first-class umbrella for the moat verbs
-    (`diagnose`/`blast-radius`/`why-job-pending`), so the Kaptein-unique capability has one
-    memorable entry point instead of three commands a kubectl user will never guess.
+  Genuinely new, and cheap because the primitives exist:
+  - **Interactive selection when a name is omitted.** `kaptein logs` with no name opens a
+    fuzzy picker — `fuzzy_rank_indices` already exists and is benchmarked. This is the
+    `kubectx`/`fzf` ergonomic that makes people faster, and it costs almost nothing.
+  - **Composability**: `kaptein get pods -o name | xargs -n1 kaptein diagnose`, and
+    `-o json` into `jq`. Nothing pipes today.
+  - **Meaningful exit codes** — `kaptein diagnose --quiet` exits non-zero when findings
+    exist, making it a CI gate. This is *query-as-policy* (M3a.2) reachable in Phase 1.
+  - **`kaptein why <resource>`** — one memorable entry point over `diagnose`/`blast-radius`/
+    `why-job-pending`, which a kubectl user would otherwise never guess exist.
+  - **Multi-context fan-out**: `kaptein get pods --context a,b,c` — the fleet primitive
+    (M3a.2) available early, and something kubectl cannot do at all.
+  - **`-o wide` carrying a diagnostics column** — status *and why*, in one table.
+
+  *Deferred, with the trade-off named:* a background informer session would make repeated
+  CLI calls instant (the store already exists), but it breaks the "one static binary, no
+  daemon" commitment. Not proposed now; recorded so the idea is not re-litigated.
 
   ### Compatibility must be *tested*, not asserted
 
-  The recurring lesson of this project (findings U, AC, AF) is that a contract nothing
-  enforces will drift. Applied here: **a kubectl-corpus conformance test.** Keep a fixture
-  file of real kubectl invocations — the common daily set — and assert each parses under
-  `kaptein` to the same resolved `(verb, GVK, name, namespace, flags)`. A new command or a
-  respelled flag that breaks compatibility then fails CI instead of surprising a user.
-  Pair it with `kaptein explain-kubectl "<kubectl command>"`, which prints the Kaptein
-  equivalent — a migration aid *and* an executable spec of the mapping.
+  The recurring lesson (findings U, AC, AF): a contract nothing enforces will drift. So:
+  a **kubectl-corpus conformance test** — a fixture of real kubectl invocations, each
+  asserted to parse to the same resolved `(verb, GVK, name, namespace, flags)` — plus a
+  test that walks the clap tree and **fails on any short-flag collision**, so `-f` can never
+  again mean three things. Both land in stage 1 and grow with each stage.
 
-  ### Staging (the CLI is 2 261 lines; changing every signature at once is not sane)
+  ### Staging (clean break — no deprecation shims)
 
-  1. **Stop the bleeding (breaking, small, highest value):** positional resource + name +
-     `res/name`, discovery-backed aliases, `-A`, and fix the `-f`/`-p` collisions. Keep the
-     old flag forms as **hidden deprecated aliases** for two minor releases so scripts
-     don't break silently; emit a one-line deprecation notice on stderr.
-  2. **`-o/--output` across every read verb** (the scriptability unlock), with redaction
-     applied per format.
-  3. **Regroup**: `config`/`viewdef`/`port-forward`/`debug` subcommand groups + grouped help.
-  4. **`describe` split**, `auth can-i`, `config use-context`.
-  5. **The missing verbs**, in usage order: `create`/`patch`/`label`/`annotate`,
-     `rollout *`, `api-resources`/`explain`, `wait`, `top`, `cp`, `diff`.
-  6. **The kubectl-corpus conformance test** + `explain-kubectl`, landed *with* stage 1 and
-     extended each stage.
+  1. **Syntax + safety**: positional args, discovery aliases, `res/name`, persistent flag
+     set (closing the `--context` gap in one move), required GVK on mutating verbs, one
+     namespace semantic, all flag collisions fixed. Ship the two conformance tests here.
+  2. **`-o/--output`** across every read verb, redaction applied per format.
+  3. **Regroup + grouped help**; `describe` split; `auth can-i`; `config use-context`.
+  4. **Missing verbs** in usage order: `create`/`patch`/`label`/`annotate`, `rollout *`,
+     `api-resources`/`explain`, `wait`, `top`, `cp`, `diff`.
+  5. **The power layer**: interactive pickers, `why`, exit codes, multi-context fan-out,
+     `-o wide` diagnostics column.
 
   ### DoD (falsifiable)
-  - A kubectl user's daily commands work unmodified: `kaptein get pods -A`,
+  - Daily kubectl commands work unmodified — `kaptein get pods -A`,
     `kaptein get pod/nginx -o yaml`, `kaptein describe deploy api -n prod`,
-    `kaptein logs -f nginx`, `kaptein delete pod nginx` — pinned by the **kubectl-corpus
-    conformance test**, so compatibility cannot regress unnoticed.
-  - `kaptein get pods -o json | jq '.items | length'` works — i.e. the CLI is pipeable.
-  - `kaptein get secret x -o yaml` masks the value **in every output format**, asserted per
-    format (M1.7's choke point must not be format-specific).
-  - No flag means two different things across commands — asserted by a test that walks the
-    clap tree and fails on a short-flag collision (derive, don't restate).
+    `kaptein logs -f nginx`, `kaptein delete pod nginx` — pinned by the kubectl-corpus test.
+  - `kaptein get pods -o json | jq '.items|length'` works.
+  - **No short flag means two things** — asserted by the clap-tree walk, not by review.
+  - **No mutating verb has a default GVK** — asserted by walking the command tree.
+  - `--context` is accepted by *every* command that talks to a cluster — asserted, not
+    enumerated by hand.
+  - `kaptein get secret x -o yaml` masks in **every** output format (M1.7's choke point
+    must not become format-specific).
   - Every mutating verb still routes through `gate_write` + emits an `AuditEvent` — reuse
-    the existing derived coverage test from finding U; the syntax change must not open a
-    hole in the guardrail set.
-  - `kaptein explain-kubectl "kubectl scale deploy/api --replicas=3"` prints the Kaptein
-    equivalent, including the `--confirm`/`--break-glass` gate it adds.
+    the derived coverage test from finding U; the syntax change must not open a guardrail
+    hole.
 
 - Definition of Done: a daily-driver TUI over SSH with k9s parity, RBAC preflight,
   guardrails, and **masked secrets**. Read-only default for unknown contexts.
