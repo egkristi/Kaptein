@@ -7,6 +7,14 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Changed
+- **TUI (M1.9) — k9s `[`/`]` back/forward history.** Navigation was stateless: `Tab`
+  (kind) and `n` (namespace) changed the view with no way to return to where you were.
+  The k9s history keys now push the previous view onto a back stack (and clear the forward
+  stack) on every fresh navigation, and `[`/`]` walk the two stacks — "history is where
+  you have *been*; the ladder is where you *are*". A history point records the kind by its
+  GVK identity (so a removed lens degrades to the first kind rather than panicking) plus
+  the namespace. Pure helpers (`NavPoint`, `nav_point`, `find_kind`, `record_nav`)
+  unit-tested; help overlay and module docs updated.
 - **TUI (M1.9) — k9s `Shift-*` sort keys replace `s`/`S`.** The sort-column cycle and
   the sort-direction toggle were bound to `s`/`S`, which k9s uses for *shell-into-container*
   and *sort-by-status* respectively. The k9s-verbatim keys now sort: `Shift-O` cycles the

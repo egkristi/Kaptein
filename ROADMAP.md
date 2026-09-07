@@ -338,7 +338,7 @@ Milestones:
   | `Esc` | **Ascend** one rung | at the root (Contexts) it is a no-op, *never* a quit |
   | `Tab` / `Shift-Tab` | Cycle **siblings at the current rung** | next/prev kind in a kind list, next/prev namespace at namespace level — the behaviour requested, and it does not collide with k9s because k9s only uses `Tab` for completion *inside* `:` mode, which this preserves |
   | `:` | **Jump anywhere directly** (`:po`, `:ns`, `:ctx`, `:svc`) with aliases + `Tab` completion | the k9s escape hatch, so no power user is forced to walk the ladder |
-  | `[` / `]` | Back / forward through **history** | k9s semantics; history is *where you have been*, the ladder is *where you are* — they are different axes and both are useful |
+  | `[` / `]` | Back / forward through **history** | k9s semantics; history is *where you have been*, the ladder is *where you are* — they are different axes and both are useful. *(Landed v0.35.0 →: `[`/`]` walk a back/forward stack of `(kind GVK, namespace)` views; `Tab`/`n` push the previous view and clear redo.)* |
   | `?` | Contextual help for the current rung + selection | k9s; also the discoverability backstop. *(Landed v0.33.0 →: a full-screen `?` keymap overlay, `help_text()`, dismissable by any key — the static reference; the *contextual* (per-rung/action-graph) form is the dynamic hint bar, still open.)* |
   | `Ctrl-A` | All resource aliases | k9s |
 

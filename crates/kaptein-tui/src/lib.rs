@@ -8,6 +8,7 @@
 //! Keys:
 //!   j/k  move selection        g/G  top/bottom
 //!   <Tab>  cycle resource kind  n  cycle namespace
+//!   [ / ]  back/forward history
 //!   d  describe                y  YAML
 //!   l  logs (pods)             i  diagnose
 //!   Shift-B  blast radius      Shift-W  what changed
@@ -528,6 +529,11 @@ async fn run_event_loop(
     let mut jump_order: Vec<usize> = Vec::new();
     // Command-palette mode: Some(query) means the palette is open (vim-style ':').
     let mut palette_query: Option<String> = None;
+    // k9s `[`/`]` back/forward history (M1.9): where the operator has *been*. `back` is
+    // the undo stack and `forward` the redo stack; a fresh navigation (Tab / n) pushes
+    // the previous view onto `back` and clears `forward`.
+    let mut back: Vec<NavPoint> = Vec::new();
+    let mut forward: Vec<NavPoint> = Vec::new();
     // The last-observed MemPlane revision: the table is only re-queried (a full
     // clone+sort of the row set) when a watch delta actually landed, not every ~10 Hz
     // frame — the fix for issue #28's "query_plane still asks for 50k rows at 10 Hz".
@@ -923,6 +929,7 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Tab if palette_query.is_none() => {
+                    record_nav(&mut back, &mut forward, nav_point(&kind, &namespace));
                     kind = next_kind(&kinds, &kind);
                     // Cluster-scoped kinds have no namespace: clear it to avoid a 404 on
                     // the namespaced list/watch.
@@ -950,6 +957,7 @@ async fn run_event_loop(
                     actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
                 }
                 KeyCode::Char('n') if palette_query.is_none() => {
+                    record_nav(&mut back, &mut forward, nav_point(&kind, &namespace));
                     namespace = cycle_namespace(client, namespace.clone()).await?;
                     rebuild_plane(
                         client,
@@ -970,6 +978,61 @@ async fn run_event_loop(
                     last_revision = plane.mem().revision();
                     detail = None;
                     actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
+                }
+                KeyCode::Char('[') if palette_query.is_none() && jump_query.is_none() => {
+                    // k9s back: pop the previous view, swap the current onto the forward
+                    // stack, and rebuild the plane for the restored (kind, namespace).
+                    if let Some(prev) = back.pop() {
+                        forward.push(nav_point(&kind, &namespace));
+                        kind = find_kind(&kinds, &prev.gvk);
+                        namespace = prev.namespace;
+                        rebuild_plane(
+                            client,
+                            &mut plane,
+                            &mut watch,
+                            &kind,
+                            namespace.clone(),
+                            &informers,
+                        )
+                        .await?;
+                        selected = 0;
+                        scroll = 0;
+                        let (new_rows, new_total) =
+                            query_plane(&plane, &kind, sort_key, sort_descending, 0, page_height)
+                                .await?;
+                        rows = new_rows;
+                        total = new_total;
+                        last_revision = plane.mem().revision();
+                        detail = None;
+                        actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
+                    }
+                }
+                KeyCode::Char(']') if palette_query.is_none() && jump_query.is_none() => {
+                    // k9s forward: symmetric to back.
+                    if let Some(next) = forward.pop() {
+                        back.push(nav_point(&kind, &namespace));
+                        kind = find_kind(&kinds, &next.gvk);
+                        namespace = next.namespace;
+                        rebuild_plane(
+                            client,
+                            &mut plane,
+                            &mut watch,
+                            &kind,
+                            namespace.clone(),
+                            &informers,
+                        )
+                        .await?;
+                        selected = 0;
+                        scroll = 0;
+                        let (new_rows, new_total) =
+                            query_plane(&plane, &kind, sort_key, sort_descending, 0, page_height)
+                                .await?;
+                        rows = new_rows;
+                        total = new_total;
+                        last_revision = plane.mem().revision();
+                        detail = None;
+                        actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
+                    }
                 }
                 KeyCode::Char('O') if palette_query.is_none() => {
                     sort_key = next_sort_key(sort_key, kind.headers.len());
@@ -1263,6 +1326,7 @@ fn help_text() -> String {
         "  g / G            jump to top / bottom",
         "  Tab              cycle resource kind",
         "  n                cycle namespace",
+        "  [ / ]            back / forward through history",
         "  /                fuzzy-jump filter (Enter accept, Esc cancel)",
         "  :                command palette (e.g. :q to quit)",
         "",
@@ -1404,6 +1468,49 @@ fn named_sort(
     } else {
         (SortColumn(col), matches!(target, SortTarget::Created))
     }
+}
+
+/// A point in the k9s `[`/`]` navigation history (M1.9): the (kind, namespace) view the
+/// operator was at. "History is where you have *been*; the ladder is where you *are*."
+/// The kind is identified by its GVK (identity, not its tabular label); namespace is
+/// `None` for all-namespaces / cluster-scoped kinds.
+#[derive(Clone, PartialEq)]
+struct NavPoint {
+    gvk: GroupVersionKind,
+    namespace: Option<String>,
+}
+
+/// The current view as a history point.
+fn nav_point(kind: &Kind, namespace: &Option<String>) -> NavPoint {
+    NavPoint {
+        gvk: kind.gvk.clone(),
+        namespace: namespace.clone(),
+    }
+}
+
+/// Find a kind by GVK identity (used to restore a history point). Falls back to the first
+/// kind rather than panicking on an unknown GVK (a lens may have been removed since the
+/// point was recorded).
+fn find_kind(kinds: &[Kind], gvk: &GroupVersionKind) -> Kind {
+    kinds
+        .iter()
+        .find(|k| k.gvk == *gvk)
+        .cloned()
+        .unwrap_or_else(|| {
+            kinds
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Kind::builtin("Pods", "", "v1", "Pod", false))
+        })
+}
+
+/// Record a fresh navigation into the history stacks (k9s `[`/`]`): the previous view is
+/// pushed onto `back`, and `forward` is cleared — a new navigation forgets the redo
+/// history, exactly like a browser. The `[`/`]` handlers manage the stacks directly and
+/// do not call this, so back/forward never chase their own tails.
+fn record_nav(back: &mut Vec<NavPoint>, forward: &mut Vec<NavPoint>, from: NavPoint) {
+    back.push(from);
+    forward.clear();
 }
 
 /// A command-palette action. The palette lists these and fuzzy-matches the typed query;
@@ -2251,6 +2358,37 @@ mod tests {
         // Status sorts ascending by default.
         let (k, d) = named_sort(&kind, SortTarget::Status, SortColumn(0), false);
         assert_eq!((k.0, d), (2, false));
+    }
+
+    #[test]
+    fn record_nav_pushes_back_and_clears_forward() {
+        let mut back = Vec::new();
+        let mut forward = vec![nav_point(
+            &Kind::builtin("Services", "", "v1", "Service", false),
+            &Some("ns".into()),
+        )];
+        let from = nav_point(&Kind::builtin("Pods", "", "v1", "Pod", false), &None);
+        record_nav(&mut back, &mut forward, from);
+        // A fresh navigation pushes the old view onto `back` and forgets redo history.
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].gvk.kind, "Pod");
+        assert_eq!(back[0].namespace, None);
+        assert!(forward.is_empty());
+    }
+
+    #[test]
+    fn find_kind_matches_by_gvk_and_falls_back_to_first() {
+        let kinds = vec![
+            Kind::builtin("Pods", "", "v1", "Pod", false),
+            Kind::builtin("Services", "", "v1", "Service", false),
+        ];
+        // Identity match by GVK, regardless of the label.
+        let found = find_kind(&kinds, &GroupVersionKind::gvk("", "v1", "Service"));
+        assert_eq!(found.gvk.kind, "Service");
+        assert_eq!(found.label, "Services");
+        // Unknown GVK falls back to the first kind (never panics).
+        let fallback = find_kind(&kinds, &GroupVersionKind::gvk("apps", "v1", "Deployment"));
+        assert_eq!(fallback.gvk.kind, "Pod");
     }
 
     #[test]
