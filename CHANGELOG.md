@@ -7,6 +7,16 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Changed
+- **TUI (M1.9) — k9s `Shift-*` sort keys replace `s`/`S`.** The sort-column cycle and
+  the sort-direction toggle were bound to `s`/`S`, which k9s uses for *shell-into-container*
+  and *sort-by-status* respectively. The k9s-verbatim keys now sort: `Shift-O` cycles the
+  sort column, `Shift-N` sorts by name, `Shift-A` by age, `Shift-P` by namespace, and
+  `Shift-S` by status — and repeating a sort key reverses its direction (the k9s idiom).
+  Age sorts newest-first by default; name/namespace/status sort ascending. The mapping is a
+  named `SortTarget` resolved per-kind (a cluster-scoped kind has no namespace column, so
+  `Shift-P` is a no-op there), so the keymap pins *meaning*, not a numeric index. Freeing
+  `s` unblocks the shell-into-container verb; `S` becomes k9s's status sort. Pure
+  (`named_sort`, unit-tested); help overlay and module docs updated.
 - **TUI (M1.9) — `kaptein tui` never fails to start: a context picker, not a stack
   trace.** Startup now lists kubeconfig contexts **offline** (no cluster contact) and
   probes the default context's reachability with a 300 ms timeout; if the default is

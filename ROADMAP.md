@@ -365,7 +365,7 @@ Milestones:
   | `r` | Restart (workload) / drain (node) | **add** — `workloads.rs`, `nodes.rs` |
   | `u` | Cordon/uncordon (node) | **add** — `nodes.rs` |
   | `Shift-J` | Jump to owner | **add** — `moat::blast_radius` already walks the ownership chain |
-  | `Shift-O` `Shift-N` `Shift-A` `Shift-P` `Shift-S` | Sort by column / name / age / namespace / status | **replaces** today's `s`/`S` |
+  | `Shift-O` `Shift-N` `Shift-A` `Shift-P` `Shift-S` | Sort by column / name / age / namespace / status | **replaces** today's `s`/`S`. *(Landed v0.35.0 →: `Shift-O` cycles the sort column, `Shift-N/A/P/S` sort by name/age/namespace/status, repeat reverses; `s`/`S` are freed for shell/status-sort.)* |
   | `n` / `c` | Copy namespace / copy name | **add**; frees `n` from namespace-cycling (the ladder does that now) |
   | `space` `Ctrl-Space` `Ctrl-\` | Mark / range-mark / clear marks | **add** — the prerequisite for bulk actions |
   | `Ctrl-W` `Ctrl-E` `Ctrl-G` `Ctrl-Z` | Toggle wide / header / breadcrumbs / faults-only | **add** |

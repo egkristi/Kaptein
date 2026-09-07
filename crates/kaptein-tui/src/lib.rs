@@ -12,6 +12,7 @@
 //!   l  logs (pods)             i  diagnose
 //!   Shift-B  blast radius      Shift-W  what changed
 //!   h  health checks           ?  help overlay
+//!   Shift-O/N/A/P/S  sort by column/name/age/namespace/status
 //!   Ctrl-R  refresh            Esc  back/dismiss (never quits)
 //!   :q / Ctrl-C  quit
 
@@ -56,6 +57,8 @@ struct Kind {
     namespace_col: Option<usize>,
     /// Index of the status column (drives cell color), if any.
     status_col: Option<usize>,
+    /// Index of the creation-timestamp column (drives the k9s `Shift-A` age sort), if any.
+    created_col: Option<usize>,
     /// The lens driving this kind (its columns become the plane's schema); `None` for
     /// built-in kinds.
     lens: Option<kaptein_viewmodel::ViewDefinition>,
@@ -76,6 +79,7 @@ impl Kind {
             name_col: 0,
             namespace_col: if cluster_scoped { None } else { Some(1) },
             status_col: Some(2),
+            created_col: Some(3),
             lens: None,
         }
     }
@@ -101,6 +105,10 @@ impl Kind {
             .columns
             .iter()
             .position(|c| c.kind == kaptein_viewmodel::ColumnKind::Status);
+        let created_col = vd
+            .columns
+            .iter()
+            .position(|c| c.kind == kaptein_viewmodel::ColumnKind::Timestamp);
         let cluster_scoped = namespace_col.is_none();
         let label = vd.target.kind.clone();
         Self {
@@ -111,6 +119,7 @@ impl Kind {
             name_col,
             namespace_col,
             status_col,
+            created_col,
             lens: Some(vd),
         }
     }
@@ -962,8 +971,69 @@ async fn run_event_loop(
                     detail = None;
                     actions = preflight_actions_for(client, &kind, namespace.as_deref()).await;
                 }
-                KeyCode::Char('s') if palette_query.is_none() => {
+                KeyCode::Char('O') if palette_query.is_none() => {
                     sort_key = next_sort_key(sort_key, kind.headers.len());
+                    sort_descending = false;
+                    selected = 0;
+                    scroll = 0;
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
+                }
+                KeyCode::Char('N') if palette_query.is_none() => {
+                    (sort_key, sort_descending) =
+                        named_sort(&kind, SortTarget::Name, sort_key, sort_descending);
+                    selected = 0;
+                    scroll = 0;
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
+                }
+                KeyCode::Char('A') if palette_query.is_none() => {
+                    (sort_key, sort_descending) =
+                        named_sort(&kind, SortTarget::Created, sort_key, sort_descending);
+                    selected = 0;
+                    scroll = 0;
+                    if jump_query.is_none() {
+                        requery_and_assign(
+                            &plane,
+                            &kind,
+                            sort_key,
+                            sort_descending,
+                            &mut rows,
+                            &mut total,
+                            &mut selected,
+                            &mut scroll,
+                            page_height,
+                        )
+                        .await?;
+                    }
+                }
+                KeyCode::Char('P') if palette_query.is_none() => {
+                    (sort_key, sort_descending) =
+                        named_sort(&kind, SortTarget::Namespace, sort_key, sort_descending);
                     selected = 0;
                     scroll = 0;
                     if jump_query.is_none() {
@@ -982,7 +1052,8 @@ async fn run_event_loop(
                     }
                 }
                 KeyCode::Char('S') if palette_query.is_none() => {
-                    sort_descending = !sort_descending;
+                    (sort_key, sort_descending) =
+                        named_sort(&kind, SortTarget::Status, sort_key, sort_descending);
                     selected = 0;
                     scroll = 0;
                     if jump_query.is_none() {
@@ -1205,8 +1276,12 @@ fn help_text() -> String {
         "  Shift-W          what changed (recent events)",
         "",
         "Sorting",
-        "  s                cycle sort column",
-        "  S                toggle sort direction",
+        "  Shift-O          cycle sort column",
+        "  Shift-N          sort by name",
+        "  Shift-A          sort by age",
+        "  Shift-P          sort by namespace",
+        "  Shift-S          sort by status",
+        "  (repeat a sort key to reverse direction)",
         "",
         "Other",
         "  Ctrl-R           force refresh (re-list)",
@@ -1285,6 +1360,50 @@ fn fuzzy_rerank(rows: &[TableRow], query: &str) -> Vec<usize> {
 /// Advance the sort column through the plane's schema (wrapping).
 fn next_sort_key(key: SortColumn, column_count: usize) -> SortColumn {
     key.next(column_count)
+}
+
+/// A named sort target for the k9s `Shift-*` sort keys (M1.9): the operator sorts by
+/// *what a column means* (name, namespace, age, status), not by a numeric index. This is
+/// the view-model's column meaning surfaced in the keymap; the frontend still owns which
+/// index that meaning lives at for the current kind.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SortTarget {
+    Name,
+    Namespace,
+    Created,
+    Status,
+}
+
+impl SortTarget {
+    /// Resolve to the column index for the current kind, if that column exists.
+    fn column(self, kind: &Kind) -> Option<usize> {
+        match self {
+            SortTarget::Name => Some(kind.name_col),
+            SortTarget::Namespace => kind.namespace_col,
+            SortTarget::Created => kind.created_col,
+            SortTarget::Status => kind.status_col,
+        }
+    }
+}
+
+/// Apply a named sort (k9s `Shift-*`): jump to the target column, or toggle direction if
+/// already on it (the k9s idiom — repeat a sort key to reverse it). Returns the new
+/// `(sort_key, descending)`. Columns the kind lacks are a no-op. Age/created sorts
+/// newest-first by default; name/namespace/status sort ascending.
+fn named_sort(
+    kind: &Kind,
+    target: SortTarget,
+    current: SortColumn,
+    descending: bool,
+) -> (SortColumn, bool) {
+    let Some(col) = target.column(kind) else {
+        return (current, descending);
+    };
+    if current.0 == col {
+        (current, !descending)
+    } else {
+        (SortColumn(col), matches!(target, SortTarget::Created))
+    }
 }
 
 /// A command-palette action. The palette lists these and fuzzy-matches the typed query;
@@ -2111,6 +2230,43 @@ mod tests {
     }
 
     #[test]
+    fn named_sort_jumps_to_target_and_reverses_on_repeat() {
+        // Built-in kind: name=0, namespace=1, status=2, created=3.
+        let kind = Kind::builtin("Pods", "", "v1", "Pod", false);
+        // Jump to name (ascending) from status.
+        let (k, d) = named_sort(&kind, SortTarget::Name, SortColumn(2), false);
+        assert_eq!((k.0, d), (0, false));
+        // Repeating name toggles to descending.
+        let (k, d) = named_sort(&kind, SortTarget::Name, SortColumn(0), false);
+        assert_eq!((k.0, d), (0, true));
+        // Created/age sorts newest-first by default.
+        let (k, d) = named_sort(&kind, SortTarget::Created, SortColumn(0), false);
+        assert_eq!((k.0, d), (3, true));
+        // Repeating created toggles to ascending (oldest-first).
+        let (k, d) = named_sort(&kind, SortTarget::Created, SortColumn(3), true);
+        assert_eq!((k.0, d), (3, false));
+        // Namespace sorts ascending by default.
+        let (k, d) = named_sort(&kind, SortTarget::Namespace, SortColumn(0), false);
+        assert_eq!((k.0, d), (1, false));
+        // Status sorts ascending by default.
+        let (k, d) = named_sort(&kind, SortTarget::Status, SortColumn(0), false);
+        assert_eq!((k.0, d), (2, false));
+    }
+
+    #[test]
+    fn named_sort_is_a_noop_for_missing_columns() {
+        // Cluster-scoped built-in (Nodes) has no namespace column.
+        let kind = Kind::builtin("Nodes", "", "v1", "Node", true);
+        assert_eq!(kind.namespace_col, None);
+        let (k, d) = named_sort(&kind, SortTarget::Namespace, SortColumn(0), false);
+        assert_eq!(
+            (k.0, d),
+            (0, false),
+            "namespace sort on a cluster-scoped kind must no-op"
+        );
+    }
+
+    #[test]
     fn help_text_documents_the_keymap_and_quit_is_explicit() {
         let h = help_text();
         // The discoverability backstop: every core binding is present.
@@ -2127,6 +2283,10 @@ mod tests {
             "blast radius",
             "what changed",
             "sort",
+            "Shift-N",
+            "Shift-A",
+            "Shift-P",
+            "Shift-S",
             "Ctrl-R",
         ] {
             assert!(h.contains(needle), "help text must mention {needle:?}");
