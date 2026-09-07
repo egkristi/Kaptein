@@ -14,8 +14,8 @@
 //!   Shift-B  blast radius      Shift-W  what changed
 //!   h  health checks           ?  help overlay
 //!   Shift-O/N/A/P/S  sort by column/name/age/namespace/status
-//!   Ctrl-R  refresh            Esc  back/dismiss (never quits)
-//!   :q / Ctrl-C  quit
+//!   Ctrl-R  refresh            Ctrl-G  toggle breadcrumb
+//!   Esc  back/dismiss (never quits)   :q / Ctrl-C  quit
 
 #![forbid(unsafe_code)]
 
@@ -268,7 +268,7 @@ pub async fn run() -> io::Result<()> {
             let client = kaptein_core::discovery::client()
                 .await
                 .map_err(|e| io::Error::other(e.to_string()))?;
-            run_event_loop(&client, &mut terminal).await
+            run_event_loop(&client, &mut terminal, current.clone()).await
         }
         StartupMode::Picker => {
             match run_context_picker(&contexts, current.as_deref(), &mut terminal).await? {
@@ -276,7 +276,7 @@ pub async fn run() -> io::Result<()> {
                     let client = kaptein_core::discovery::client_for_context(Some(&ctx))
                         .await
                         .map_err(|e| io::Error::other(e.to_string()))?;
-                    run_event_loop(&client, &mut terminal).await
+                    run_event_loop(&client, &mut terminal, Some(ctx)).await
                 }
                 None => Ok(()),
             }
@@ -472,6 +472,7 @@ fn class_label(class: kaptein_core::guardrails::ContextClass) -> &'static str {
 async fn run_event_loop(
     client: &Client,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    context_name: Option<String>,
 ) -> io::Result<()> {
     // Discover kinds once at startup: built-ins first, then enabled lens kinds (M2.2) —
     // a discovered CRD with a lens becomes navigable with no recompile.
@@ -511,6 +512,10 @@ async fn run_event_loop(
     // backstop from M1.9). When `true`, the table is dimmed under the overlay and any
     // key dismisses it.
     let mut help: bool = false;
+    // Breadcrumb (M1.9): renders the navigation ladder in the header
+    // (`ctx:prod-eu › ns:payments › Pods`). On by default (position is always visible);
+    // `Ctrl-G` toggles it (k9s).
+    let mut breadcrumbs: bool = true;
     // Number of table rows visible in the current terminal (set each frame; drives the
     // scroll window instead of a hardcoded constant).
     let mut page_height: usize = 10;
@@ -565,6 +570,12 @@ async fn run_event_loop(
             }
         }
 
+        let breadcrumb = if breadcrumbs {
+            breadcrumb_line(context_name.as_deref(), namespace.as_deref(), &kind.label)
+        } else {
+            String::new()
+        };
+
         let status_line = if let Some(q) = palette_query.as_deref() {
             let matches = palette_matches(q);
             format!(
@@ -587,6 +598,14 @@ async fn run_event_loop(
             )
         };
 
+        // The header shows the status line, with the breadcrumb (ladder position) on its
+        // own line above when enabled — position is always visible (M1.9, on by default).
+        let header_title = if breadcrumbs && !breadcrumb.is_empty() {
+            format!("{breadcrumb}\n{status_line}")
+        } else {
+            status_line
+        };
+
         terminal.draw(|frame| {
             let area = frame.area();
             let chunks = Layout::vertical([
@@ -601,7 +620,7 @@ async fn run_event_loop(
             let body_height = chunks[1].height.saturating_sub(3);
             page_height = (body_height as usize).max(1);
 
-            let header = Block::default().title(status_line).borders(Borders::ALL);
+            let header = Block::default().title(header_title).borders(Borders::ALL);
             frame.render_widget(header, chunks[0]);
 
             // In **normal** mode `rows` is the visible window (`query_plane` materializes
@@ -758,6 +777,15 @@ async fn run_event_loop(
                         && jump_query.is_none() =>
                 {
                     break;
+                }
+                KeyCode::Char('g')
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && palette_query.is_none()
+                        && jump_query.is_none() =>
+                {
+                    // Breadcrumb toggle (M1.9, k9s Ctrl-G). The ladder position is visible
+                    // by default; this hides it for a denser table.
+                    breadcrumbs = !breadcrumbs;
                 }
                 KeyCode::Char('r')
                     if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1305,6 +1333,28 @@ async fn run_event_loop(
     Ok(())
 }
 
+/// The breadcrumb line for the header (M1.9): the navigation ladder rendered as
+/// `ctx:prod-eu › ns:payments › Pods`. Pure geometry — the frontend owns *how* to render
+/// position; the context/namespace/kind values are the view-model's. A missing context or
+/// namespace segment is simply omitted (cluster-scoped kinds have no namespace).
+fn breadcrumb_line(context: Option<&str>, namespace: Option<&str>, kind_label: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(ctx) = context
+        && !ctx.is_empty()
+    {
+        parts.push(format!("ctx:{ctx}"));
+    }
+    if let Some(ns) = namespace {
+        parts.push(format!("ns:{ns}"));
+    }
+    parts.push(kind_label.to_string());
+    if !parts.is_empty() {
+        parts.join(" › ")
+    } else {
+        String::new()
+    }
+}
+
 /// Map a status display text to a color (frontend geometry; the view-model owns the
 /// status *meaning*).
 fn status_style(status: &str) -> Style {
@@ -1349,6 +1399,7 @@ fn help_text() -> String {
         "",
         "Other",
         "  Ctrl-R           force refresh (re-list)",
+        "  Ctrl-G           toggle breadcrumb",
         "",
         "Quit",
         "  :q / :q! / :x / :wq   quit (vim-style)",
@@ -2326,6 +2377,27 @@ mod tests {
         for not_q in ["", "quit", "describe", "qj", "qq", "xq"] {
             assert!(!is_quit_command(not_q), "{not_q:?} must not quit");
         }
+    }
+
+    #[test]
+    fn breadcrumb_line_renders_the_ladder_and_omits_absent_segments() {
+        // Full ladder: context + namespace + kind.
+        assert_eq!(
+            breadcrumb_line(Some("prod-eu"), Some("payments"), "Pods"),
+            "ctx:prod-eu › ns:payments › Pods"
+        );
+        // Cluster-scoped kind: no namespace segment.
+        assert_eq!(
+            breadcrumb_line(Some("prod-eu"), None, "Nodes"),
+            "ctx:prod-eu › Nodes"
+        );
+        // No context (all-namespaces, no kubeconfig context): kind only.
+        assert_eq!(breadcrumb_line(None, None, "Pods"), "Pods");
+        // An empty context string is treated as absent.
+        assert_eq!(
+            breadcrumb_line(Some(""), Some("ns"), "Pods"),
+            "ns:ns › Pods"
+        );
     }
 
     #[test]

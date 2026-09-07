@@ -344,7 +344,8 @@ Milestones:
 
   A **breadcrumb** in the header renders the ladder — `ctx:prod-eu › ns:payments › Pods ›
   checkout-7f9` — so position is always visible (k9s `Ctrl-G` toggles it; make it on by
-  default). The **Fleet rung is designed in now and inert until M3a.2** so that adding it
+  default). *(Landed v0.35.0 →: `ctx:prod-eu › ns:payments › Pods` in the header, on by
+  default, `Ctrl-G` toggles; the object-name segment lands with the `Enter`-descend rung.)* The **Fleet rung is designed in now and inert until M3a.2** so that adding it
   later is a data change, not a re-architecture; until then `Esc` from Cluster goes
   straight to Contexts.
 

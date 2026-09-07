@@ -7,6 +7,14 @@ and versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Changed
+- **TUI (M1.9) — breadcrumb header (on by default, `Ctrl-G` toggles).** The TUI never
+  showed *which context* you were in — the context name was invisible after startup. The
+  header now renders the navigation ladder as a breadcrumb (`ctx:prod-eu › ns:payments ›
+  Pods`), on by default so position is always visible, and `Ctrl-G` toggles it (k9s). The
+  context name is threaded from `run()` (it already knew the name for the guardrail
+  classification) into the event loop; a missing context or namespace segment is simply
+  omitted (cluster-scoped kinds). The rendering is a pure helper (`breadcrumb_line`,
+  unit-tested); help overlay and module docs updated.
 - **TUI (M1.9) — k9s `[`/`]` back/forward history.** Navigation was stateless: `Tab`
   (kind) and `n` (namespace) changed the view with no way to return to where you were.
   The k9s history keys now push the previous view onto a back stack (and clear the forward
